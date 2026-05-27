@@ -1,0 +1,41 @@
+{
+  "contracts/lib/forge-std": {
+    "rev": "c90c02ffa470b46d92ffaab093baeb296300870b"
+  },
+  "contracts/lib/swap-router-contracts": {
+    "rev": "70bc2e40dfca294c1cea9bf67a4036732ee54303"
+  },
+  "contracts/lib/v3-core": {
+    "rev": "d0831dc6b8a318df3872b6d68f6de135c9f3ec29"
+  },
+  "contracts/lib/v3-periphery": {
+    "rev": "0682387198a24c7cd63566a2c58398533860a5d1"
+  },
+  "lib/forge-std": {
+    "rev": "c90c02ffa470b46d92ffaab093baeb296300870b"
+  },
+  "lib/openzeppelin-contracts": {
+    "rev": "cd05883078060e0cd8a7bd36636944570dbe1722"
+  },
+  "lib/openzeppelin-contracts-upgradeable": {
+    "tag": {
+      "name": "v5.6.1",
+      "rev": "7bf4727aacdbfaa0f36cbd664654d0c9e1dc52bf"
+    }
+  },
+  "lib/openzeppelin-foundry-upgrades": {
+    "tag": {
+      "name": "v0.4.0",
+      "rev": "cbce1e00305e943aa1661d43f41e5ac72c662b07"
+    }
+  },
+  "lib/swap-router-contracts": {
+    "rev": "70bc2e40dfca294c1cea9bf67a4036732ee54303"
+  },
+  "lib/v3-core": {
+    "rev": "d0831dc6b8a318df3872b6d68f6de135c9f3ec29"
+  },
+  "lib/v3-periphery": {
+    "rev": "0682387198a24c7cd63566a2c58398533860a5d1"
+  }
+}
