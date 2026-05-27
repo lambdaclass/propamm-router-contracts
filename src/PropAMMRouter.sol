@@ -10,6 +10,7 @@ import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Ini
 import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {IPropAMMRouter} from "./interfaces/IPropAMMRouter.sol";
+import {IWETH, WETH} from "./interfaces/IWETH.sol";
 import {FERMI_ROUTER, IFermiSwapper} from "./interfaces/IFermiSwapper.sol";
 import {BEBOP_ROUTER, IBebopRouter} from "./interfaces/IBebopRouter.sol";
 import {KIPSELI_PAMM, IKipseliPAMM} from "./interfaces/IKipseliPAMM.sol";
@@ -47,6 +48,10 @@ contract PropAMMRouter is
     /// different pool should use the explicit-fee overloads.
     uint24 public constant DEFAULT_FALLBACK_FEE = 3000;
 
+    /// @notice Sentinel passed as `tokenIn` or `tokenOut` to signal native ETH.
+    address public constant ETH_SENTINEL =
+        0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+
     /// @notice Thrown when `swapViaVenue` is called by anyone other than this
     /// contract itself, i.e. outside of the `try`-wrapped self-call made by `swap`.
     error OnlySelf();
@@ -66,6 +71,15 @@ contract PropAMMRouter is
     error NoQuotesAvailable();
     /// @notice Thrown when `tokenOut` balance decreases after a swap.
     error TokenOutBalanceDecreased();
+    /// @notice Thrown when the attached `msg.value` does not match what the
+    /// swap requires.
+    /// @param expected The required `msg.value`.
+    /// @param received The actual `msg.value` sent with the call.
+    error InvalidMsgValue(uint256 expected, uint256 received);
+    /// @notice Thrown when forwarding native ETH to the swap `recipient` fails.
+    error ETHTransferFailed();
+    /// @notice Thrown when a non-WETH address sends ETH directly to the router.
+    error UnexpectedETHSender();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -120,21 +134,43 @@ contract PropAMMRouter is
         address recipient,
         uint24 uniswapFee,
         uint256 deadline
-    ) public whenNotPaused nonReentrant returns (uint256) {
+    ) public payable whenNotPaused nonReentrant returns (uint256) {
         require(block.timestamp <= deadline, Expired());
-        IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
 
-        uint256 prevTokenOutBalance = IERC20(tokenOut).balanceOf(recipient);
+        address tokenIn_ = tokenIn;
+        if (tokenIn == ETH_SENTINEL) {
+            require(
+                msg.value == amountIn,
+                InvalidMsgValue(amountIn, msg.value)
+            );
+            IWETH(WETH).deposit{value: msg.value}();
+            tokenIn_ = WETH;
+        } else {
+            IERC20(tokenIn).safeTransferFrom(
+                msg.sender,
+                address(this),
+                amountIn
+            );
+        }
+
+        address tokenOut_ = tokenOut;
+        address recipient_ = recipient;
+        if (tokenOut == ETH_SENTINEL) {
+            tokenOut_ = WETH;
+            recipient_ = address(this);
+        }
+
+        uint256 prevTokenOutBalance = IERC20(tokenOut_).balanceOf(recipient_);
 
         uint256 amountOut;
         try
             this.swapViaVenue(
                 venue,
-                tokenIn,
-                tokenOut,
+                tokenIn_,
+                tokenOut_,
                 amountIn,
                 amountOutMin,
-                recipient,
+                recipient_,
                 deadline,
                 prevTokenOutBalance
             )
@@ -142,22 +178,33 @@ contract PropAMMRouter is
             amountOut = amountOut_;
         } catch {
             swapViaUniswapV3(
-                tokenIn,
-                tokenOut,
+                tokenIn_,
+                tokenOut_,
                 amountIn,
                 amountOutMin,
                 uniswapFee,
-                recipient
+                recipient_
             );
             amountOut =
-                IERC20(tokenOut).balanceOf(recipient) -
+                IERC20(tokenOut_).balanceOf(recipient_) -
                 prevTokenOutBalance;
             require(
                 amountOut >= amountOutMin,
                 InsufficientOutput(amountOutMin, amountOut)
             );
         }
+
+        if (tokenOut == ETH_SENTINEL) {
+            IWETH(WETH).withdraw(amountOut);
+            (bool ok, ) = recipient.call{value: amountOut}("");
+            require(ok, ETHTransferFailed());
+        }
+
         return amountOut;
+    }
+
+    receive() external payable {
+        require(msg.sender == WETH, UnexpectedETHSender());
     }
 
     /// @notice Executes a swap on the selected venue with funds already held
@@ -268,7 +315,10 @@ contract PropAMMRouter is
             // router, so it is required to transfer the received tokens
             // to the actual recipient
             uint256 balanceTokenOut = IERC20(tokenOut).balanceOf(address(this));
-            require(balanceTokenOut >= balanceTokenOutBefore, TokenOutBalanceDecreased());
+            require(
+                balanceTokenOut >= balanceTokenOutBefore,
+                TokenOutBalanceDecreased()
+            );
             uint256 received = balanceTokenOut - balanceTokenOutBefore;
             if (received > 0 && recipient != address(this)) {
                 IERC20(tokenOut).safeTransfer(recipient, received);
@@ -360,7 +410,7 @@ contract PropAMMRouter is
 
     /// @inheritdoc IPropAMMRouter
     /// @dev Queries the given venue's quote.
-    /// `Venue.Fallback` is priced via Uniswap V3's QuoterV2 at `uniswapFee`, 
+    /// `Venue.Fallback` is priced via Uniswap V3's QuoterV2 at `uniswapFee`,
     /// which simulates via revert and makes this function non-`view`. Should be called via
     /// `eth_call` (staticcall) from off-chain. Reverts `UnknownVenue` if the
     /// given venue is unrecognized.
@@ -371,6 +421,13 @@ contract PropAMMRouter is
         uint256 amount,
         uint24 uniswapFee
     ) public returns (uint256 amountOut) {
+        if (tokenIn == ETH_SENTINEL) {
+            tokenIn = WETH;
+        }
+        if (tokenOut == ETH_SENTINEL) {
+            tokenOut = WETH;
+        }
+
         if (venue == Venue.Fallback) {
             amountOut = UniV3Router.quoteExactIn(
                 tokenIn,
@@ -393,7 +450,7 @@ contract PropAMMRouter is
                 amount
             );
         } else if (venue == Venue.Kipseli) {
-            // Call the Kipseli quoter directly instead of 
+            // Call the Kipseli quoter directly instead of
             // going through the Kipseli swap wrapper to save gas
             amountOut = IKipseliQuoter(KIPSELI_QUOTER).preSwapQuote(
                 tokenIn,

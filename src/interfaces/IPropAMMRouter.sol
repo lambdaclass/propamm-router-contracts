@@ -45,7 +45,7 @@ interface IPropAMMRouter {
         address recipient,
         uint24 uniswapFee,
         uint256 deadline
-    ) external returns (uint256 amountOut);
+    ) external payable returns (uint256 amountOut);
 
     /// @notice Quotes `amount` of `tokenIn` against every supported venue
     /// (the proprietary AMMs and the Uniswap V3 fallback) and returns the
