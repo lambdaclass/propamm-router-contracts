@@ -111,7 +111,7 @@ contract PropAMMRouter is
     /// returning (a failure there reverts and is caught here, triggering
     /// the fallback), and the catch arm re-measures after Uniswap to defend
     /// against an under-delivering fallback router.
-    function swap(
+    function swapDirect(
         Venue venue,
         address tokenIn,
         address tokenOut,
