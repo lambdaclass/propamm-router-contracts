@@ -126,13 +126,9 @@ contract PropAMMRouterForkTests is Test {
 
     function test_swapViaBebop() public {
         _applyAll(bebopStorage, bebopBalances, bebopNonces);
-        // Bebop's freshness check (`block.number != mapping_3[idx]`) is
-        // strict-equality. Titan's `result.blockNumber` can lead the
-        // block stored in Bebop's mapping_3 by hundreds of blocks when
-        // the maker hasn't pushed a fresh price recently. Roll to the
-        // block at which Titan's Bebop override is internally
-        // consistent — extracted in the bash wrapper from
-        // mapping_3[0]'s value.
+        // Bebop only accepts a swap at the exact block its latest price
+        // was published for, which may trail Titan's reported block. Roll
+        // to that block so the override is accepted.
         uint256 bebopFresh = vm.envUint("BEBOP_FRESH_BLOCK");
         vm.roll(bebopFresh);
         _runSwap("bebop", IPropAMMRouter.Venue.Bebop);
