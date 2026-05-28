@@ -37,7 +37,7 @@ interface IPropAMMRouter {
     /// @param deadline Unix timestamp after which the swap is no longer valid.
     /// @return amountOut The amount of `tokenOut` actually received by `recipient`.
     /// @return executedVenue The venue that actually filled the swap.
-    function swap(
+    function swapV1(
         address tokenIn,
         address tokenOut,
         uint256 amountIn,

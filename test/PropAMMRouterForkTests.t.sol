@@ -10,7 +10,7 @@ import {PropAMMRouter} from "../src/PropAMMRouter.sol";
 import {IPropAMMRouter} from "../src/interfaces/IPropAMMRouter.sol";
 
 /// @title PropAMMRouterForkTests
-/// @notice Fork-test rig for `PropAMMRouter.swap(...)` gas measurement.
+/// @notice Fork-test rig for `PropAMMRouter.swapV1(...)` gas measurement.
 ///
 /// `setUp()` forks mainnet at the Titan-published block, deploys a fresh
 /// PropAMMRouter (impl + UUPS proxy), funds the taker with USDC, and parses
@@ -108,34 +108,34 @@ contract PropAMMRouterForkTests is Test {
         vm.deal(taker, 10 ether);
     }
 
-    function test_swapViaFermi() public {
+    function test_swapV1ViaFermi() public {
         // Defensive: pin block.number back to the Titan-published block
-        // in case a sibling test (e.g. test_swapViaBebop) `vm.roll`ed
+        // in case a sibling test (e.g. test_swapV1ViaBebop) `vm.roll`ed
         // earlier and Foundry didn't fully revert it across the shared
         // fork.
         vm.roll(titanBlock);
         _applyAll(fermiStorage, fermiBalances, fermiNonces);
-        _runSwap("fermi", IPropAMMRouter.Venue.FermiSwap);
+        _runSwapV1("fermi", IPropAMMRouter.Venue.FermiSwap);
     }
 
-    function test_swapViaKipseli() public {
+    function test_swapV1ViaKipseli() public {
         vm.roll(titanBlock);
         _applyAll(kipseliStorage, kipseliBalances, kipseliNonces);
-        _runSwap("kipseli", IPropAMMRouter.Venue.Kipseli);
+        _runSwapV1("kipseli", IPropAMMRouter.Venue.Kipseli);
     }
 
-    function test_swapViaBebop() public {
+    function test_swapV1ViaBebop() public {
         _applyAll(bebopStorage, bebopBalances, bebopNonces);
         // Bebop only accepts a swap at the exact block its latest price
         // was published for, which may trail Titan's reported block. Roll
         // to that block so the override is accepted.
         uint256 bebopFresh = vm.envUint("BEBOP_FRESH_BLOCK");
         vm.roll(bebopFresh);
-        _runSwap("bebop", IPropAMMRouter.Venue.Bebop);
+        _runSwapV1("bebop", IPropAMMRouter.Venue.Bebop);
     }
 
-    function test_swapViaFallback() public {
-        _runSwap("fallback", IPropAMMRouter.Venue.Fallback);
+    function test_swapV1ViaFallback() public {
+        _runSwapV1("fallback", IPropAMMRouter.Venue.Fallback);
     }
 
     function test_swapViaVenueV1Fermi() public {
@@ -247,7 +247,7 @@ contract PropAMMRouterForkTests is Test {
         );
     }
 
-    function _runSwap(
+    function _runSwapV1(
         string memory label,
         IPropAMMRouter.Venue expectedVenue
     ) internal {
@@ -268,7 +268,7 @@ contract PropAMMRouterForkTests is Test {
         emit log_named_uint("titanBlock", titanBlock);
         vm.prank(taker);
         uint256 g0 = gasleft();
-        (uint256 amountOut, IPropAMMRouter.Venue executedVenue) = router.swap(
+        (uint256 amountOut, IPropAMMRouter.Venue executedVenue) = router.swapV1(
             USDC,
             WETH,
             amountIn,
@@ -308,7 +308,7 @@ contract PropAMMRouterForkTests is Test {
         );
     }
 
-    /// @dev `swapViaVenueV1` counterpart of `_runSwap`. The caller pins the
+    /// @dev `swapViaVenueV1` counterpart of `_runSwapV1`. The caller pins the
     /// venue, so there's no `executedVenue` return value to assert on —
     /// just check the recipient actually received WETH and that the
     /// returned `amountOut` matches the balance delta.

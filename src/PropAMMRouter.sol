@@ -48,18 +48,18 @@ contract PropAMMRouter is
     uint24 public constant DEFAULT_FALLBACK_FEE = 3000;
 
     /// @notice Thrown when `swapViaVenue` is called by anyone other than this
-    /// contract itself, i.e. outside of the `try`-wrapped self-call made by `swap`.
+    /// contract itself, i.e. outside of the `try`-wrapped self-call made by `swapV1`.
     error OnlySelf();
     /// @notice Thrown when `venue` does not match any supported `Venue` value.
     error UnknownVenue();
-    /// @notice Thrown when `swap` cannot deliver at least `amountOutMin` of
+    /// @notice Thrown when `swapV1` cannot deliver at least `amountOutMin` of
     /// `tokenOut` to `recipient`.
     /// @param expectedAmount The minimum acceptable amount of `tokenOut` (i.e.
     /// the caller's `amountOutMin`).
     /// @param receivedAmount The actual amount of `tokenOut` delivered to
     /// `recipient`, measured as a balance delta against the pre-swap snapshot.
     error InsufficientOutput(uint256 expectedAmount, uint256 receivedAmount);
-    /// @notice Thrown when `swap` is invoked after its `deadline`.
+    /// @notice Thrown when `swapV1` is invoked after its `deadline`.
     error Expired();
     /// @notice Thrown when no proprietary venue can produce a quote for the
     /// requested pair and amount.
@@ -110,7 +110,7 @@ contract PropAMMRouter is
     /// `prevTokenOutBalance` and revert `InsufficientOutput` if short.
     /// Reverts `NoQuotesAvailable` (bubbled from `quote`) when no venue
     /// can price the pair.
-    function swap(
+    function swapV1(
         address tokenIn,
         address tokenOut,
         uint256 amountIn,
@@ -253,23 +253,23 @@ contract PropAMMRouter is
 
     /// @notice Executes a swap on the selected venue with funds already held
     /// by this contract.
-    /// @dev External (not internal) because `swap` invokes it as
+    /// @dev External (not internal) because `swapV1` invokes it as
     /// `this.swapViaVenue(...)` to wrap the venue call in a try/catch — only
     /// external calls produce a catchable frame, and a revert there also
     /// rolls back the per-venue `forceApprove` issued below. The router must
     /// already hold `amountIn` of `tokenIn`; this function approves the
     /// selected venue for `amountIn` and the venue pulls during its own swap.
     /// Gated on `msg.sender == address(this)` so only the self-call from
-    /// `swap` can enter (reverts `OnlySelf` otherwise). For `Venue.Fallback`
-    /// this function reverts immediately with no work done so that `swap`'s
+    /// `swapV1` can enter (reverts `OnlySelf` otherwise). For `Venue.Fallback`
+    /// this function reverts immediately with no work done so that `swapV1`'s
     /// existing catch arm runs the Uniswap V3 swap — this deliberately
     /// reuses the catch arm as the single Uniswap V3 execution path (one
     /// place that handles approval reset, balance delta, and slippage
     /// recheck), at the cost of one wasted self-call frame versus branching
-    /// in `swap` directly. After the proprietary venue call, measures the
+    /// in `swapV1` directly. After the proprietary venue call, measures the
     /// delivered delta on `recipient` and reverts if it is below
     /// `amountOutMin` — by reverting (rather than returning a thin amount)
-    /// the under-fill is caught by the outer try/catch in `swap` and
+    /// the under-fill is caught by the outer try/catch in `swapV1` and
     /// triggers the Uniswap V3 fallback. Also reverts `UnknownVenue` for
     /// unrecognized enum values, or bubbles up the underlying proprietary
     /// router's revert.
@@ -283,7 +283,7 @@ contract PropAMMRouter is
     /// @param deadline Unix timestamp after which the swap is no longer valid;
     /// only honored by venues that enforce it (e.g. Bebop).
     /// @param prevTokenOutBalance `recipient`'s `tokenOut` balance snapshotted
-    /// by `swap` before this call, passed through so the delivered delta can
+    /// by `swapV1` before this call, passed through so the delivered delta can
     /// be computed without re-reading the pre-balance.
     /// @return amountOut The amount of `tokenOut` delivered to `recipient`,
     /// measured as the balance delta against `prevTokenOutBalance`.
@@ -301,13 +301,13 @@ contract PropAMMRouter is
 
         if (venue == Venue.Fallback) {
             // Caller explicitly chose Uniswap V3. Rather than running the
-            // fallback inline here, we revert so `swap`'s existing
+            // fallback inline here, we revert so `swapV1`'s existing
             // try/catch arm executes the Uniswap V3 path. This funnels both
             // "proprietary venue failed" and "caller asked for Fallback"
             // through one code path — same forceApprove reset, same
             // post-swap balance delta, same `InsufficientOutput` check —
             // at the cost of one wasted self-call frame on the explicit
-            // Fallback path. The bare `revert()` carries no data; `swap`'s
+            // Fallback path. The bare `revert()` carries no data; `swapV1`'s
             // catch arm is data-agnostic, so the empty payload is fine and
             // saves the gas of encoding a custom error.
             revert();
@@ -380,7 +380,7 @@ contract PropAMMRouter is
     /// @notice Executes the fallback swap on Uniswap V3 with funds already held
     /// by this contract.
     /// @dev Assumes the router already holds `amountIn` of `tokenIn` — pulled
-    /// once by `swap` before the try/catch. `UniV3Router.swapExactIn` only
+    /// once by `swapV1` before the try/catch. `UniV3Router.swapExactIn` only
     /// approves `fallbackSwapRouter` and executes the swap; it does not pull
     /// from `msg.sender`.
     /// @param tokenIn The address of the token being sold.
@@ -514,13 +514,13 @@ contract PropAMMRouter is
     /// @dev Restricts UUPS upgrades to the contract owner set in `initialize`.
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
-    /// @notice Pauses `swap`, blocking new swaps until `unpause` is called.
+    /// @notice Pauses `swapV1`, blocking new swaps until `unpause` is called.
     /// @dev Owner-gated. Quote functions remain callable while paused.
     function pause() external onlyOwner {
         _pause();
     }
 
-    /// @notice Unpauses `swap`.
+    /// @notice Unpauses `swapV1`.
     function unpause() external onlyOwner {
         _unpause();
     }
