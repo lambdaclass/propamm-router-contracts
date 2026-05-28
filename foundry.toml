@@ -2,6 +2,7 @@
 src = "src"
 out = "out"
 libs = ["lib"]
+solc = "0.8.35"
 
 # Required by openzeppelin-foundry-upgrades to run upgrade-safety validations.
 ffi = true
