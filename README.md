@@ -117,6 +117,30 @@ This prints `amountOut`, e.g. `2115659878` (≈ 2115.66 USDC for 1 WETH, with US
 | Kipseli | `0x5cdbe59400cc2efdcc2b54acca4a99fe00dd588c` | `2` |
 | Bebop | `0x160141a205f5ddcf096ba3f48b7ed21eb52c62ea` | `3` |
 
+### Running the fork tests
+
+`test/PropAMMRouterForkTests.t.sol` exercises `swap` and `swapDirect` against a Foundry fork of mainnet, pinned to the block Titan publishes per request. Each test applies the per-venue Titan stateOverride via `vm.store` / `vm.deal` / `vm.setNonceUnsafe`, then runs a USDC → WETH swap and asserts the delivered `amountOut` is at least the venue's quoted `amountOut`.
+
+Driven by `scripts/run_fork_tests.sh`, which:
+
+1. Queries Titan for the latest per-PMM overrides, flattens them into JSON arrays Foundry's `parseJson` can decode, and exports them as env vars.
+2. Forks mainnet at `min(titanBlock, rpcHead)` (the local RPC may lag Titan by 1-2 blocks; `vm.createSelectFork` rejects future blocks).
+3. Runs `forge test --match-contract PropAMMRouterForkTests --gas-report -vvvv`.
+
+**Required env vars:**
+
+- `ETH_RPC_URL`: mainnet RPC endpoint
+- `TITAN_URL` (optional): defaults to `https://us.rpc.titanbuilder.xyz`.
+
+Run with:
+
+```bash
+export ETH_RPC_URL=<your mainnet RPC>
+./scripts/run_fork_tests.sh
+```
+
+You can append any `forge test` flags (e.g. `--match-test test_swapDirectViaKipseli`) — they're forwarded verbatim to the underlying `forge test` invocation.
+
 ### Pausing the contract
 
 The router is `PausableUpgradeable`. The owner can stop all new swaps with:
