@@ -19,6 +19,42 @@ interface IPropAMMRouter {
         Bebop
     }
 
+    /// @notice Swaps an exact amount of `tokenIn` for as much `tokenOut` as
+    /// possible by quoting every supported venue on-chain and routing through
+    /// the one with the best quote, falling back to Uniswap V3 if the chosen
+    /// proprietary venue reverts at execution time.
+    /// @dev Calls `quote` first to pick the winning venue, then executes the
+    /// swap on it. If the winner is `Venue.Fallback`, the swap goes directly
+    /// to Uniswap V3. If the winning proprietary venue reverts during
+    /// execution, the swap falls back to Uniswap V3 at `uniswapFee`.
+    /// Ties on `bestQuote` resolve to the lowest enum value (i.e.
+    /// `Venue.Fallback` wins a tie against any proprietary AMM).
+    /// Reverts `NoQuotesAvailable` if no venue can produce a quote.
+    /// The caller must have approved this contract to spend at least
+    /// `amountIn` of `tokenIn`. Reverts if the final output is below
+    /// `amountOutMin`.
+    /// @param tokenIn The address of the token being sold.
+    /// @param tokenOut The address of the token being bought.
+    /// @param amountIn The exact amount of `tokenIn` to sell.
+    /// @param amountOutMin The minimum acceptable amount of `tokenOut`; the swap
+    /// reverts if the actual output is lower.
+    /// @param recipient The address that will receive `tokenOut`.
+    /// @param uniswapFee The Uniswap V3 pool fee tier (in hundredths of a bip)
+    /// used by both the fallback quote and the execution path when Uniswap V3
+    /// wins or recovers; ignored by the proprietary AMM execution path.
+    /// @param deadline Unix timestamp after which the swap is no longer valid.
+    /// @return amountOut The amount of `tokenOut` actually received by `recipient`.
+    /// @return executedVenue The venue that actually filled the swap.
+    function swap(
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        address recipient,
+        uint24 uniswapFee,
+        uint256 deadline
+    ) external returns (uint256 amountOut, Venue executedVenue);
+
     /// @notice Swaps an exact amount of `tokenIn` for as much `tokenOut` as possible,
     /// routing first through the selected venue and falling back to the public
     /// venue if that route fails.
@@ -36,7 +72,7 @@ interface IPropAMMRouter {
     /// the fallback route; ignored by the proprietary AMM path.
     /// @param deadline Unix timestamp after which the swap is no longer valid.
     /// @return amountOut The amount of `tokenOut` actually received by `recipient`.
-    function swap(
+    function swapDirect(
         Venue venue,
         address tokenIn,
         address tokenOut,
