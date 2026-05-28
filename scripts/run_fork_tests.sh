@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fork-test runner for `SwapForkTest`.
+# Fork-test runner for `PropAMMRouterForkTests`.
 #
 # Queries Titan for the latest per-PMM stateOverride blob, flattens it
 # into three [{account, slot, value}, …] arrays (one per venue), and runs
@@ -131,7 +131,7 @@ export TITAN_BEBOP_STORAGE TITAN_BEBOP_BALANCES TITAN_BEBOP_NONCES
 cd "$(dirname "$0")/.."
 
 forge test \
-  --match-contract SwapForkTest \
+  --match-contract PropAMMRouterForkTests \
   --gas-report \
   -vvvv \
   "$@"

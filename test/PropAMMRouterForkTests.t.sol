@@ -9,7 +9,7 @@ import {
 import {PropAMMRouter} from "../src/PropAMMRouter.sol";
 import {IPropAMMRouter} from "../src/interfaces/IPropAMMRouter.sol";
 
-/// @title SwapForkTest
+/// @title PropAMMRouterForkTests
 /// @notice Fork-test rig for `PropAMMRouter.swap(...)` gas measurement.
 ///
 /// `setUp()` forks mainnet at the Titan-published block, deploys a fresh
@@ -24,7 +24,7 @@ import {IPropAMMRouter} from "../src/interfaces/IPropAMMRouter.sol";
 /// Driven by `contracts/scripts/run_fork_tests.sh`, which queries Titan,
 /// flattens its nested override blob into `[{account, slot, value}, …]`
 /// per venue, and exports the env vars before invoking `forge test`.
-contract SwapForkTest is Test {
+contract PropAMMRouterForkTests is Test {
     /// @dev Mainnet USDC (FiatTokenV2_2). Balance slot is 9 (packed with
     /// the high-bit blacklist flag); allowance slot is 10.
     address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
