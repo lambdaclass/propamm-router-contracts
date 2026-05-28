@@ -96,6 +96,96 @@ contract PropAMMRouter is
     }
 
     /// @inheritdoc IPropAMMRouter
+    /// @dev Picks the winning venue by calling `quote` on-chain, then
+    /// executes the swap on it. Funds are pulled from `msg.sender` only
+    /// after the quote is known — no quote path requires the router to
+    /// hold the input tokens. If the winner is `Venue.Fallback`, the swap
+    /// goes directly to `swapViaUniswapV3` (no wasted self-call frame).
+    /// Otherwise the winning proprietary venue is invoked through
+    /// `this.swapViaVenue` so an execution-time revert can be caught and
+    /// recovered with a Uniswap V3 fallback — same recovery flow as
+    /// `swapDirect`. The slippage guarantee is enforced in both branches:
+    /// `swapViaVenue` reverts on under-fill (triggering the fallback), and
+    /// the direct/fallback paths re-measure the balance delta against
+    /// `prevTokenOutBalance` and revert `InsufficientOutput` if short.
+    /// Reverts `NoQuotesAvailable` (bubbled from `quote`) when no venue
+    /// can price the pair.
+    function swap(
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        address recipient,
+        uint24 uniswapFee,
+        uint256 deadline
+    )
+        public
+        whenNotPaused
+        nonReentrant
+        returns (uint256 amountOut, Venue executedVenue)
+    {
+        require(block.timestamp <= deadline, Expired());
+
+        (, Venue bestVenue) = quote(tokenIn, tokenOut, amountIn, uniswapFee);
+
+        IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
+
+        uint256 prevTokenOutBalance = IERC20(tokenOut).balanceOf(recipient);
+
+        if (bestVenue == Venue.Fallback) {
+            swapViaUniswapV3(
+                tokenIn,
+                tokenOut,
+                amountIn,
+                amountOutMin,
+                uniswapFee,
+                recipient
+            );
+            amountOut =
+                IERC20(tokenOut).balanceOf(recipient) -
+                prevTokenOutBalance;
+            require(
+                amountOut >= amountOutMin,
+                InsufficientOutput(amountOutMin, amountOut)
+            );
+            executedVenue = Venue.Fallback;
+        } else {
+            try
+                this.swapViaVenue(
+                    bestVenue,
+                    tokenIn,
+                    tokenOut,
+                    amountIn,
+                    amountOutMin,
+                    recipient,
+                    deadline,
+                    prevTokenOutBalance
+                )
+            returns (uint256 amountOut_) {
+                amountOut = amountOut_;
+                executedVenue = bestVenue;
+            } catch {
+                swapViaUniswapV3(
+                    tokenIn,
+                    tokenOut,
+                    amountIn,
+                    amountOutMin,
+                    uniswapFee,
+                    recipient
+                );
+                amountOut =
+                    IERC20(tokenOut).balanceOf(recipient) -
+                    prevTokenOutBalance;
+                require(
+                    amountOut >= amountOutMin,
+                    InsufficientOutput(amountOutMin, amountOut)
+                );
+                executedVenue = Venue.Fallback;
+            }
+        }
+    }
+
+    /// @inheritdoc IPropAMMRouter
     /// @dev Pulls `amountIn` of `tokenIn` from `msg.sender` once, then attempts
     /// the chosen venue's swap via an external `this.swapViaVenue` call so a
     /// failure can be caught and recovered with a Uniswap V3 fallback. The
