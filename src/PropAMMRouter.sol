@@ -183,6 +183,7 @@ contract PropAMMRouter is
                 executedVenue = Venue.Fallback;
             }
         }
+        return (amountOut, executedVenue);
     }
 
     /// @inheritdoc IPropAMMRouter
