@@ -142,19 +142,27 @@ contract SwapForkTest is Test {
         _runSwap("fallback", IPropAMMRouter.Venue.Fallback);
     }
 
-    /// @dev All three propAMMs have a fresh Titan update applied. The
-    /// router's quote loop should pick *some* proprietary venue (the one
-    /// with the largest `amountOut`) — exactly which one varies with
-    /// market state, so this test only asserts "not Fallback" rather
-    /// than pinning a single venue. Block.number stays at `titanBlock`,
-    /// so Bebop's mapping_3 freshness check may still fail; Fermi or
-    /// Kipseli will win in that case.
-    function test_swapViaAllPMMs() public {
+    function test_swapDirectViaFermi() public {
         vm.roll(titanBlock);
         _applyAll(fermiStorage, fermiBalances, fermiNonces);
+        _runSwapDirect("fermi", IPropAMMRouter.Venue.FermiSwap);
+    }
+
+    function test_swapDirectViaKipseli() public {
+        vm.roll(titanBlock);
         _applyAll(kipseliStorage, kipseliBalances, kipseliNonces);
+        _runSwapDirect("kipseli", IPropAMMRouter.Venue.Kipseli);
+    }
+
+    function test_swapDirectViaBebop() public {
         _applyAll(bebopStorage, bebopBalances, bebopNonces);
-        _runSwapExpectProprietary("all");
+        uint256 bebopFresh = vm.envUint("BEBOP_FRESH_BLOCK");
+        vm.roll(bebopFresh);
+        _runSwapDirect("bebop", IPropAMMRouter.Venue.Bebop);
+    }
+
+    function test_swapDirectViaFallback() public {
+        _runSwapDirect("fallback", IPropAMMRouter.Venue.Fallback);
     }
 
     // -------------------------------------------------------------
@@ -248,7 +256,14 @@ contract SwapForkTest is Test {
         IPropAMMRouter.Venue expectedVenue
     ) internal {
         uint256 amountIn = 100e6; // 100 USDC
-        uint256 amountOutMin = 0;
+        uint256 amountOutMin = router.quoteVenue(
+            expectedVenue,
+            USDC,
+            WETH,
+            amountIn,
+            3000
+        );
+        emit log_named_uint(string.concat("quote:", label), amountOutMin);
         uint256 deadline = block.timestamp + 120;
 
         uint256 preWeth = IERC20(WETH).balanceOf(taker);
@@ -289,11 +304,55 @@ contract SwapForkTest is Test {
 
         // Confirm the recipient actually received WETH (i.e. we exercised
         // a real swap path, not just a failed-and-bubbled call).
-        assertGt(
+        assertGe(amountOut, amountOutMin, "amountOut < amountOutMin");
+        assertEq(
+            amountOut,
             IERC20(WETH).balanceOf(taker) - preWeth,
-            0,
-            "no WETH delivered"
+            "amountOut != delta"
         );
+    }
+
+    /// @dev `swapDirect` counterpart of `_runSwap`. The caller pins the
+    /// venue, so there's no `executedVenue` return value to assert on —
+    /// just check the recipient actually received WETH and that the
+    /// returned `amountOut` matches the balance delta.
+    function _runSwapDirect(
+        string memory label,
+        IPropAMMRouter.Venue venue
+    ) internal {
+        uint256 amountIn = 100e6; // 100 USDC
+        uint256 amountOutMin = router.quoteVenue(
+            venue,
+            USDC,
+            WETH,
+            amountIn,
+            3000
+        );
+        emit log_named_uint(string.concat("quote:", label), amountOutMin);
+        uint256 deadline = block.timestamp + 120;
+
+        uint256 preWeth = IERC20(WETH).balanceOf(taker);
+
+        emit log_named_uint("block.number", block.number);
+        emit log_named_uint("titanBlock", titanBlock);
+        vm.prank(taker);
+        uint256 g0 = gasleft();
+        uint256 amountOut = router.swapDirect(
+            venue,
+            USDC,
+            WETH,
+            amountIn,
+            amountOutMin,
+            taker,
+            3000,
+            deadline
+        );
+        uint256 gasUsed = g0 - gasleft();
+
+        emit log_named_uint(string.concat("gas:", label), gasUsed);
+        emit log_named_uint(string.concat("amountOut:", label), amountOut);
+
+        assertGe(amountOut, amountOutMin, "amountOut < amountOutMin");
         assertEq(
             amountOut,
             IERC20(WETH).balanceOf(taker) - preWeth,
@@ -342,11 +401,7 @@ contract SwapForkTest is Test {
             )
         );
 
-        assertGt(
-            IERC20(WETH).balanceOf(taker) - preWeth,
-            0,
-            "no WETH delivered"
-        );
+        assertGe(amountOut, amountOutMin, "amountOut < amountOutMin");
         assertEq(
             amountOut,
             IERC20(WETH).balanceOf(taker) - preWeth,
