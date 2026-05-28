@@ -64,7 +64,7 @@ interface IPropAMMRouter {
     /// the fallback route; ignored by the proprietary AMM path.
     /// @param deadline Unix timestamp after which the swap is no longer valid.
     /// @return amountOut The amount of `tokenOut` actually received by `recipient`.
-    function swapDirect(
+    function swapViaVenueV1(
         Venue venue,
         address tokenIn,
         address tokenOut,

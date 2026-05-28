@@ -138,27 +138,27 @@ contract PropAMMRouterForkTests is Test {
         _runSwap("fallback", IPropAMMRouter.Venue.Fallback);
     }
 
-    function test_swapDirectViaFermi() public {
+    function test_swapViaVenueV1Fermi() public {
         vm.roll(titanBlock);
         _applyAll(fermiStorage, fermiBalances, fermiNonces);
-        _runSwapDirect("fermi", IPropAMMRouter.Venue.FermiSwap);
+        _runSwapViaVenueV1("fermi", IPropAMMRouter.Venue.FermiSwap);
     }
 
-    function test_swapDirectViaKipseli() public {
+    function test_swapViaVenueV1Kipseli() public {
         vm.roll(titanBlock);
         _applyAll(kipseliStorage, kipseliBalances, kipseliNonces);
-        _runSwapDirect("kipseli", IPropAMMRouter.Venue.Kipseli);
+        _runSwapViaVenueV1("kipseli", IPropAMMRouter.Venue.Kipseli);
     }
 
-    function test_swapDirectViaBebop() public {
+    function test_swapViaVenueV1Bebop() public {
         _applyAll(bebopStorage, bebopBalances, bebopNonces);
         uint256 bebopFresh = vm.envUint("BEBOP_FRESH_BLOCK");
         vm.roll(bebopFresh);
-        _runSwapDirect("bebop", IPropAMMRouter.Venue.Bebop);
+        _runSwapViaVenueV1("bebop", IPropAMMRouter.Venue.Bebop);
     }
 
-    function test_swapDirectViaFallback() public {
-        _runSwapDirect("fallback", IPropAMMRouter.Venue.Fallback);
+    function test_swapViaVenueV1Fallback() public {
+        _runSwapViaVenueV1("fallback", IPropAMMRouter.Venue.Fallback);
     }
 
     // -------------------------------------------------------------
@@ -308,11 +308,11 @@ contract PropAMMRouterForkTests is Test {
         );
     }
 
-    /// @dev `swapDirect` counterpart of `_runSwap`. The caller pins the
+    /// @dev `swapViaVenueV1` counterpart of `_runSwap`. The caller pins the
     /// venue, so there's no `executedVenue` return value to assert on —
     /// just check the recipient actually received WETH and that the
     /// returned `amountOut` matches the balance delta.
-    function _runSwapDirect(
+    function _runSwapViaVenueV1(
         string memory label,
         IPropAMMRouter.Venue venue
     ) internal {
@@ -333,7 +333,7 @@ contract PropAMMRouterForkTests is Test {
         emit log_named_uint("titanBlock", titanBlock);
         vm.prank(taker);
         uint256 g0 = gasleft();
-        uint256 amountOut = router.swapDirect(
+        uint256 amountOut = router.swapViaVenueV1(
             venue,
             USDC,
             WETH,

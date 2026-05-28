@@ -104,7 +104,7 @@ contract PropAMMRouter is
     /// Otherwise the winning proprietary venue is invoked through
     /// `this.swapViaVenue` so an execution-time revert can be caught and
     /// recovered with a Uniswap V3 fallback — same recovery flow as
-    /// `swapDirect`. The slippage guarantee is enforced in both branches:
+    /// `swapViaVenueV1`. The slippage guarantee is enforced in both branches:
     /// `swapViaVenue` reverts on under-fill (triggering the fallback), and
     /// the direct/fallback paths re-measure the balance delta against
     /// `prevTokenOutBalance` and revert `InsufficientOutput` if short.
@@ -202,7 +202,7 @@ contract PropAMMRouter is
     /// returning (a failure there reverts and is caught here, triggering
     /// the fallback), and the catch arm re-measures after Uniswap to defend
     /// against an under-delivering fallback router.
-    function swapDirect(
+    function swapViaVenueV1(
         Venue venue,
         address tokenIn,
         address tokenOut,
