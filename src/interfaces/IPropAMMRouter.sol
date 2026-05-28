@@ -23,16 +23,8 @@ interface IPropAMMRouter {
     /// possible by quoting every supported venue on-chain and routing through
     /// the one with the best quote, falling back to Uniswap V3 if the chosen
     /// proprietary venue reverts at execution time.
-    /// @dev Calls `quote` first to pick the winning venue, then executes the
-    /// swap on it. If the winner is `Venue.Fallback`, the swap goes directly
-    /// to Uniswap V3. If the winning proprietary venue reverts during
-    /// execution, the swap falls back to Uniswap V3 at `uniswapFee`.
-    /// Ties on `bestQuote` resolve to the lowest enum value (i.e.
-    /// `Venue.Fallback` wins a tie against any proprietary AMM).
-    /// Reverts `NoQuotesAvailable` if no venue can produce a quote.
-    /// The caller must have approved this contract to spend at least
-    /// `amountIn` of `tokenIn`. Reverts if the final output is below
-    /// `amountOutMin`.
+    /// @dev The caller must have approved this contract to spend at least `amountIn`
+    /// of `tokenIn`. Reverts if the final output is below `amountOutMin`
     /// @param tokenIn The address of the token being sold.
     /// @param tokenOut The address of the token being bought.
     /// @param amountIn The exact amount of `tokenIn` to sell.
