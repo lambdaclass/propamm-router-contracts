@@ -119,7 +119,7 @@ This prints `amountOut`, e.g. `2115659878` (≈ 2115.66 USDC for 1 WETH, with US
 
 ### Running the fork tests
 
-`test/PropAMMRouterForkTests.t.sol` exercises `swap` and `swapDirect` against a Foundry fork of mainnet, pinned to the block Titan publishes per request. Each test applies the per-venue Titan stateOverride via `vm.store` / `vm.deal` / `vm.setNonceUnsafe`, then runs a USDC → WETH swap and asserts the delivered `amountOut` is at least the venue's quoted `amountOut`.
+`test/PropAMMRouterForkTests.t.sol` tests `swap` and `swapViaVenueV1` against a Foundry fork of mainnet, pinned to the block Titan publishes per request. Each test applies the per-venue Titan stateOverride via `vm.store` / `vm.deal` / `vm.setNonceUnsafe`, then runs a USDC → WETH swap and asserts the delivered `amountOut` is at least the venue's quoted `amountOut`.
 
 Driven by `scripts/run_fork_tests.sh`, which:
 
@@ -139,7 +139,7 @@ export ETH_RPC_URL=<your mainnet RPC>
 ./scripts/run_fork_tests.sh
 ```
 
-You can append any `forge test` flags (e.g. `--match-test test_swapDirectViaKipseli`) — they're forwarded verbatim to the underlying `forge test` invocation.
+You can append any `forge test` flags (e.g. `--match-test test_swapViaVenueV1Kipseli`) — they're forwarded verbatim to the underlying `forge test` invocation.
 
 ### Pausing the contract
 
