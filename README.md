@@ -119,7 +119,7 @@ This prints `amountOut`, e.g. `2115659878` (≈ 2115.66 USDC for 1 WETH, with US
 
 ### Running the fork tests
 
-`test/PropAMMRouterForkTests.t.sol` tests `swap` and `swapViaVenueV1` against a Foundry fork of mainnet, pinned to the block Titan publishes per request. Each test applies the per-venue Titan stateOverride via `vm.store` / `vm.deal` / `vm.setNonceUnsafe`, then runs a USDC → WETH swap and asserts the delivered `amountOut` is at least the venue's quoted `amountOut`.
+`test/PropAMMRouterForkTests.t.sol` tests `swapV1` and `swapViaVenueV1` against a Foundry fork of mainnet, pinned to the block Titan publishes per request. Each test applies the per-venue Titan stateOverride via `vm.store` / `vm.deal` / `vm.setNonceUnsafe`, then runs a USDC → WETH swap and asserts the delivered `amountOut` is at least the venue's quoted `amountOut`.
 
 Driven by `scripts/run_fork_tests.sh`, which:
 
@@ -145,8 +145,8 @@ You can append any `forge test` flags (e.g. `--match-test test_swapViaVenueV1Kip
 
 The router is `PausableUpgradeable`. The owner can stop all new swaps with:
 
-- `pause()` — owner-gated; flips the contract into the paused state. While paused, `swap` reverts with OpenZeppelin's `EnforcedPause` error. `quote` and `quoteVenue` are unaffected and remain callable.
-- `unpause()` — owner-gated; clears the paused state and re-enables `swap`.
+- `pause()` — owner-gated; flips the contract into the paused state. While paused, `swapV1` and `swapViaVenueV1` revert with OpenZeppelin's `EnforcedPause` error. `quote` and `quoteVenue` are unaffected and remain callable.
+- `unpause()` — owner-gated; clears the paused state and re-enables `swapV1`.
 
 Both functions are restricted to the proxy owner (the address passed as `ROUTER_OWNER` at deployment, or the current owner after an `Ownable2Step` handoff). The state initializes to unpaused on `initialize`.
 
