@@ -411,14 +411,16 @@ contract PropAMMRouter is
         uint256 amountIn
     ) public returns (address venue, uint256 amountOut) {
         for (uint256 i = 0; i < venues.length; i++) {
-            try
-                this.quoteVenueV1(venues[i], tokenIn, tokenOut, amountIn)
-            returns (uint256 out) {
-                if (out > amountOut) {
-                    amountOut = out;
-                    venue = venues[i];
-                }
-            } catch {}
+            if (_isVenue(venues[i])) {
+                try
+                    this.quoteVenueV1(venues[i], tokenIn, tokenOut, amountIn)
+                returns (uint256 out) {
+                    if (out > amountOut) {
+                        amountOut = out;
+                        venue = venues[i];
+                    }
+                } catch {}
+            }
         }
 
         require(amountOut > 0, NoQuotesAvailable());
