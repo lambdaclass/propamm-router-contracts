@@ -105,8 +105,9 @@ contract PropAMMRouter is
 
     /// @inheritdoc IPropAMMRouter
     /// @dev Picks the best-quoting venue via `_pickBestVenue`, then executes
-    /// through `_coreSwap`; an `address(0)` selection (no venue could quote)
-    /// routes straight to the Uniswap fallback. Reverts `QuoteBelowMinimum`
+    /// through `_coreSwap`; a `fallbackSwapRouter` selection (the Uniswap
+    /// baseline won, or no venue could quote) routes straight to the Uniswap
+    /// fallback. Reverts `QuoteBelowMinimum`
     /// before pulling funds when the best quote is under `amountOutMin`. Quotes
     /// are advisory, so `_coreSwap` re-checks `amountOutMin` against the
     /// delivered balance delta.
@@ -148,14 +149,14 @@ contract PropAMMRouter is
     /// from `msg.sender`, snapshots `recipient`'s `tokenOut` balance, then:
     /// for a proprietary `venue`, wraps the venue call in `try this._dispatchVenue`
     /// so a revert (including an under-fill, which `_dispatchVenue` turns into a
-    /// revert) is caught and recovered on Uniswap V3; for `address(0)` (no
-    /// proprietary venue selected, or the Uniswap baseline was best) it runs
+    /// revert) is caught and recovered on Uniswap V3; for `fallbackSwapRouter`
+    /// (no proprietary venue selected, or the Uniswap baseline was best) it runs
     /// Uniswap V3 directly. The external self-call is intentional: only an
     /// external call produces a catchable frame and rolls back the venue's
     /// `forceApprove`. The Uniswap branch re-measures the delivered delta and
     /// enforces `amountOutMin` to defend against an under-delivering router.
-    /// @param venue The proprietary AMM to attempt first, or `address(0)` to go
-    /// straight to the Uniswap V3 fallback.
+    /// @param venue The proprietary AMM to attempt first, or `fallbackSwapRouter`
+    /// to go straight to the Uniswap V3 fallback.
     /// @param tokenIn The address of the token being sold.
     /// @param tokenOut The address of the token being bought.
     /// @param amountIn The exact amount of `tokenIn` to sell.
@@ -164,7 +165,7 @@ contract PropAMMRouter is
     /// @param deadline Unix timestamp after which the swap is no longer valid.
     /// @return amountOut The amount of `tokenOut` delivered to `recipient`.
     /// @return executedVenue The proprietary AMM that filled the swap, or
-    /// `address(0)` when the Uniswap V3 fallback ran.
+    /// `fallbackSwapRouter` when the Uniswap V3 fallback ran.
     function _coreSwap(
         address venue,
         address tokenIn,
@@ -179,7 +180,7 @@ contract PropAMMRouter is
 
         uint256 prevTokenOutBalance = IERC20(tokenOut).balanceOf(recipient);
 
-        if (venue != address(0)) {
+        if (venue != fallbackSwapRouter) {
             try this._dispatchVenue(
                 venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline, prevTokenOutBalance
             ) returns (
@@ -194,7 +195,7 @@ contract PropAMMRouter is
         swapViaUniswapV3(tokenIn, tokenOut, amountIn, amountOutMin, recipient);
         amountOut = IERC20(tokenOut).balanceOf(recipient) - prevTokenOutBalance;
         require(amountOut >= amountOutMin, InsufficientOutput(amountOutMin, amountOut));
-        return (amountOut, address(0));
+        return (amountOut, fallbackSwapRouter);
     }
 
     /// @notice Executes a swap on a proprietary venue with funds already held by
@@ -361,22 +362,30 @@ contract PropAMMRouter is
     /// @notice Finds the venue offering the best `tokenOut` for `amount` of
     /// `tokenIn` across the proprietary AMMs and the Uniswap V3 baseline.
     /// @dev Each venue is queried in its own `try/catch` so a reverting venue is
-    /// simply skipped. Returns `(0, address(0))` when nothing can be priced —
-    /// callers that need a hard failure (e.g. `quoteV1`) check for that;
-    /// `swapV1` instead lets `_coreSwap` route the `address(0)` case to Uniswap.
-    /// Every non-zero `venue` returned here is one of the whitelisted
-    /// proprietary AMMs, so it is always accepted by `swapViaVenueV1` /
-    /// `quoteVenueV1`.
+    /// simply skipped. Returns `(0, fallbackSwapRouter)` when nothing can be
+    /// priced — callers that need a hard failure (e.g. `quoteV1`) check the
+    /// zero quote; `swapV1` instead lets `_coreSwap` route the
+    /// `fallbackSwapRouter` case to Uniswap. The returned `venue` is one of the
+    /// whitelisted proprietary AMMs or `fallbackSwapRouter`; the latter is
+    /// rejected by `swapViaVenueV1` / `quoteVenueV1` but consumed only by
+    /// `_coreSwap` (via `swapV1`), which treats it as the Uniswap baseline.
     /// @param tokenIn The address of the token being sold.
     /// @param tokenOut The address of the token being bought.
     /// @param amount The exact amount of `tokenIn` to quote against.
     /// @return bestQuote The best `tokenOut` amount found across all venues.
     /// @return venue The proprietary AMM that produced `bestQuote`, or
-    /// `address(0)` if the Uniswap V3 baseline won (or nothing could be priced).
+    /// `fallbackSwapRouter` if the Uniswap V3 baseline won (or nothing could be
+    /// priced).
     function _pickBestVenue(address tokenIn, address tokenOut, uint256 amount)
         internal
         returns (uint256 bestQuote, address venue)
     {
+        // Uniswap V3 is the always-present baseline, so seed the winner with
+        // its SwapRouter02 address. A proprietary venue overtakes it only by
+        // quoting strictly more; if none do (or nothing can be priced at all),
+        // `venue` stays `fallbackSwapRouter` and `_coreSwap` routes to Uniswap.
+        venue = fallbackSwapRouter;
+
         address[3] memory venues = [FERMI_ROUTER, KIPSELI_PAMM, BEBOP_ROUTER];
         for (uint256 i = 0; i < venues.length; i++) {
             try this.quoteVenueV1(venues[i], tokenIn, tokenOut, amount) returns (uint256 amountOut) {
@@ -388,12 +397,13 @@ contract PropAMMRouter is
         }
 
         // Uniswap V3 is a baseline candidate but not a nameable venue: when it
-        // wins, `venue` stays `address(0)` so the result is never an address
-        // that `swapViaVenueV1` / `quoteVenueV1` would reject.
+        // wins, `venue` is `fallbackSwapRouter`, which `swapViaVenueV1` /
+        // `quoteVenueV1` reject — but that result is consumed only by
+        // `_coreSwap` (via `swapV1`), which treats it as the Uniswap baseline.
         try this.quoteUniswapV3(tokenIn, tokenOut, amount) returns (uint256 amountOut) {
             if (amountOut > bestQuote) {
                 bestQuote = amountOut;
-                venue = address(0);
+                venue = fallbackSwapRouter;
             }
         } catch {}
     }

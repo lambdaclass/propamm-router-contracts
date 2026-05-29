@@ -5,12 +5,12 @@ pragma solidity ^0.8.35;
 /// @notice Router for single-hop swaps across whitelisted proprietary venues,
 /// with a public-venue baseline that also serves as the fallback when the
 /// chosen proprietary venue cannot fill.
-/// @dev A venue is either a whitelisted proprietary AMM address or `address(0)`,
-/// which denotes the public-venue baseline/fallback. The quote/swap functions
-/// may return `address(0)` to signal the baseline; the per-venue functions
-/// accept only non-zero whitelisted addresses. Any non-zero venue returned by
-/// `quoteV1` is accepted by `swapViaVenueV1`; route an `address(0)` result
-/// through `swapV1` instead.
+/// @dev A venue is either a whitelisted proprietary AMM address or the
+/// public-venue baseline/fallback, denoted by the implementation's Uniswap V3
+/// SwapRouter02 address. The quote/swap functions may return that baseline
+/// address to signal the public venue; the per-venue functions accept only the
+/// whitelisted proprietary addresses and reject the baseline. Route a baseline
+/// result returned by `quoteV1` through `swapV1`, not `swapViaVenueV1`.
 interface IPropAMMRouter {
     /// @notice Swaps an exact `amountIn` of `tokenIn` for as much `tokenOut` as
     /// possible, routing through the best-quoting venue and falling back to the
@@ -24,8 +24,8 @@ interface IPropAMMRouter {
     /// @param recipient The address that receives `tokenOut`.
     /// @param deadline Unix timestamp after which the swap is no longer valid.
     /// @return amountOut The amount of `tokenOut` received by `recipient`.
-    /// @return executedVenue The proprietary venue that filled the swap, or
-    /// `address(0)` when the baseline fallback ran.
+    /// @return executedVenue The proprietary venue that filled the swap, or the
+    /// Uniswap V3 SwapRouter02 address when the baseline fallback ran.
     function swapV1(
         address tokenIn,
         address tokenOut,
@@ -39,8 +39,8 @@ interface IPropAMMRouter {
     /// proprietary venue, falling back to the public-venue baseline if it fails.
     /// @dev The caller must approve this contract for at least `amountIn` of
     /// `tokenIn`. Reverts `UnknownVenue` if `venue` is not whitelisted, or
-    /// reverts if the output is below `amountOutMin`. `venue` must be non-zero;
-    /// use `swapV1` to reach the baseline directly.
+    /// reverts if the output is below `amountOutMin`. `venue` must be a
+    /// whitelisted proprietary AMM; use `swapV1` to reach the baseline directly.
     /// @param venue The proprietary venue to attempt first.
     /// @param tokenIn The token being sold.
     /// @param tokenOut The token being bought.
@@ -68,8 +68,8 @@ interface IPropAMMRouter {
     /// @param tokenOut The token being bought.
     /// @param amount The amount of `tokenIn` to quote.
     /// @return bestQuote The best `tokenOut` amount across all venues.
-    /// @return venue The proprietary venue that produced `bestQuote`, or
-    /// `address(0)` if the baseline won.
+    /// @return venue The proprietary venue that produced `bestQuote`, or the
+    /// Uniswap V3 SwapRouter02 address if the baseline won.
     function quoteV1(address tokenIn, address tokenOut, uint256 amount)
         external
         returns (uint256 bestQuote, address venue);
