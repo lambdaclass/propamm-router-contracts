@@ -183,10 +183,7 @@ contract PropAMMRouter is
             tokenOut,
             amountIn
         );
-        require(
-            bestQuote >= amountOutMin,
-            InsufficientOutput(amountOutMin, bestQuote)
-        );
+        require(bestQuote >= amountOutMin, QuoteBelowMinimum(amountOutMin, bestQuote));
         return
             _coreSwap(
                 venue,
