@@ -22,11 +22,12 @@ import {UniV3Router} from "./libraries/UniV3Router.sol";
 /// @dev Designed to live behind a UUPS proxy. The fallback path is wired at
 /// initialization via `fallbackSwapRouter` (SwapRouter02) and `fallbackQuoter`
 /// (QuoterV2); proprietary venue addresses are hardcoded as constants. Venues
-/// are identified by address: the whitelist of venues a caller may name
-/// explicitly is exactly the three proprietary AMMs (see `_isVenue`). Uniswap V3
-/// is never named directly — it is folded into `quoteV1` as a baseline price and
-/// is reached automatically (best-quote selection in `swapV1`, or as the failure
-/// fallback). The Uniswap fee tier is the owner-settable `fallbackFee`, so
+/// are identified by address: the venues a caller may name explicitly are the
+/// three proprietary AMMs plus Uniswap V3 (see `_isVenue`), the latter named by
+/// the `fallbackSwapRouter` (SwapRouter02) address. Uniswap V3 is also folded
+/// into `quoteV1` as a baseline price and is reached automatically (best-quote
+/// selection in `swapV1`, or as the failure fallback when a proprietary venue
+/// reverts). The Uniswap fee tier is the owner-settable `fallbackFee`, so
 /// callers never pass one. The owner authorized in `initialize` controls
 /// upgrades via `_authorizeUpgrade`.
 contract PropAMMRouter is
@@ -125,9 +126,11 @@ contract PropAMMRouter is
     }
 
     /// @inheritdoc IPropAMMRouter
-    /// @dev `venue` must be a whitelisted proprietary AMM (`_isVenue`); Uniswap
-    /// V3 cannot be named here and is only reached as the failure fallback
-    /// inside `_coreSwap`.
+    /// @dev `venue` must be a callable venue (`_isVenue`): one of the three
+    /// proprietary AMMs or the Uniswap V3 baseline, named by the
+    /// `fallbackSwapRouter` address. Naming Uniswap runs it directly via
+    /// `_coreSwap`'s `fallbackSwapRouter` path (no proprietary attempt); a
+    /// proprietary `venue` still recovers on Uniswap if it fails to fill.
     function swapViaVenueV1(
         address venue,
         address tokenIn,
@@ -323,11 +326,11 @@ contract PropAMMRouter is
     }
 
     /// @inheritdoc IPropAMMRouter
-    /// @dev Dispatches by address across the whitelisted proprietary AMMs only.
-    /// Kipseli is quoted via the dedicated `IKipseliQuoter.preSwapQuote` contract
-    /// rather than the swap wrapper to save gas. Uniswap V3 is intentionally not
-    /// quotable here — it is only surfaced through `quoteV1`. Reverts
-    /// `UnknownVenue` for any non-whitelisted address.
+    /// @dev Dispatches by address across the three proprietary AMMs plus the
+    /// Uniswap V3 baseline (named by the `fallbackSwapRouter` address). Kipseli is
+    /// quoted via the dedicated `IKipseliQuoter.preSwapQuote` contract rather than
+    /// the swap wrapper to save gas; Uniswap V3 is priced via QuoterV2 at the
+    /// owner-set `fallbackFee` tier. Reverts `UnknownVenue` for any other address.
     function quoteVenueV1(address venue, address tokenIn, address tokenOut, uint256 amount)
         public
         returns (uint256 amountOut)
@@ -340,6 +343,8 @@ contract PropAMMRouter is
                 .preSwapQuote(tokenIn, amount, tokenOut, block.timestamp * 1000, address(0));
         } else if (venue == BEBOP_ROUTER) {
             amountOut = IBebopRouter(BEBOP_ROUTER).quote(tokenIn, tokenOut, amount);
+        } else if (venue == fallbackSwapRouter) {
+            amountOut = UniV3Router.quoteExactIn(tokenIn, tokenOut, fallbackFee, amount, fallbackQuoter);
         } else {
             revert UnknownVenue();
         }
@@ -366,14 +371,14 @@ contract PropAMMRouter is
     /// priced — callers that need a hard failure (e.g. `quoteV1`) check the
     /// zero quote; `swapV1` instead lets `_coreSwap` route the
     /// `fallbackSwapRouter` case to Uniswap. The returned `venue` is one of the
-    /// whitelisted proprietary AMMs or `fallbackSwapRouter`; the latter is
-    /// rejected by `swapViaVenueV1` / `quoteVenueV1` but consumed only by
-    /// `_coreSwap` (via `swapV1`), which treats it as the Uniswap baseline.
+    /// whitelisted proprietary AMMs or `fallbackSwapRouter`; the latter is a
+    /// callable venue too (`swapViaVenueV1` / `quoteVenueV1` accept it) and is
+    /// also consumed by `_coreSwap` (via `swapV1`) as the Uniswap baseline.
     /// @param tokenIn The address of the token being sold.
     /// @param tokenOut The address of the token being bought.
     /// @param amount The exact amount of `tokenIn` to quote against.
     /// @return bestQuote The best `tokenOut` amount found across all venues.
-    /// @return venue The proprietary AMM that produced `bestQuote`, or
+    /// @return venue The venue that produced `bestQuote` — a proprietary AMM, or
     /// `fallbackSwapRouter` if the Uniswap V3 baseline won (or nothing could be
     /// priced).
     function _pickBestVenue(address tokenIn, address tokenOut, uint256 amount)
@@ -396,10 +401,10 @@ contract PropAMMRouter is
             } catch {}
         }
 
-        // Uniswap V3 is a baseline candidate but not a nameable venue: when it
-        // wins, `venue` is `fallbackSwapRouter`, which `swapViaVenueV1` /
-        // `quoteVenueV1` reject — but that result is consumed only by
-        // `_coreSwap` (via `swapV1`), which treats it as the Uniswap baseline.
+        // Uniswap V3 is the always-present baseline candidate: when it wins,
+        // `venue` is `fallbackSwapRouter`, which `_coreSwap` (via `swapV1`)
+        // treats as the Uniswap baseline. Callers may also name that address
+        // directly through `swapViaVenueV1` / `quoteVenueV1`.
         try this.quoteUniswapV3(tokenIn, tokenOut, amount) returns (uint256 amountOut) {
             if (amountOut > bestQuote) {
                 bestQuote = amountOut;
@@ -408,13 +413,15 @@ contract PropAMMRouter is
         } catch {}
     }
 
-    /// @notice Returns whether `venue` is a whitelisted proprietary AMM that a
-    /// caller may name explicitly in `quoteVenueV1` / `swapViaVenueV1`.
-    /// @dev The whitelist is the three hardcoded proprietary routers. Uniswap V3
-    /// is deliberately excluded — it is reachable only via `swapV1`'s best-quote
-    /// selection or as the failure fallback.
-    function _isVenue(address venue) private pure returns (bool) {
-        return venue == FERMI_ROUTER || venue == KIPSELI_PAMM || venue == BEBOP_ROUTER;
+    /// @notice Returns whether `venue` is a venue a caller may name explicitly in
+    /// `quoteVenueV1` / `swapViaVenueV1`.
+    /// @dev The callable set is the three hardcoded proprietary routers plus the
+    /// Uniswap V3 baseline, identified by the live `fallbackSwapRouter`
+    /// (SwapRouter02) address. `view` rather than `pure` because it reads that
+    /// storage address. Internal "is this proprietary?" logic instead keys on
+    /// `venue != fallbackSwapRouter` (see `_coreSwap`).
+    function _isVenue(address venue) private view returns (bool) {
+        return venue == FERMI_ROUTER || venue == KIPSELI_PAMM || venue == BEBOP_ROUTER || venue == fallbackSwapRouter;
     }
 
     /// @dev Restricts UUPS upgrades to the contract owner set in `initialize`.

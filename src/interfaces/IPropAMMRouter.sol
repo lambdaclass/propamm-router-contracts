@@ -8,9 +8,10 @@ pragma solidity ^0.8.35;
 /// @dev A venue is either a whitelisted proprietary AMM address or the
 /// public-venue baseline/fallback, denoted by the implementation's Uniswap V3
 /// SwapRouter02 address. The quote/swap functions may return that baseline
-/// address to signal the public venue; the per-venue functions accept only the
-/// whitelisted proprietary addresses and reject the baseline. Route a baseline
-/// result returned by `quoteV1` through `swapV1`, not `swapViaVenueV1`.
+/// address to signal the public venue; the per-venue functions accept it too —
+/// naming the baseline address routes directly to the public venue. A baseline
+/// result returned by `quoteV1` may therefore be passed to either `swapV1` or
+/// `swapViaVenueV1`.
 interface IPropAMMRouter {
     /// @notice Swaps an exact `amountIn` of `tokenIn` for as much `tokenOut` as
     /// possible, routing through the best-quoting venue and falling back to the
@@ -36,12 +37,15 @@ interface IPropAMMRouter {
     ) external returns (uint256 amountOut, address executedVenue);
 
     /// @notice Swaps an exact `amountIn` of `tokenIn` through a caller-specified
-    /// proprietary venue, falling back to the public-venue baseline if it fails.
+    /// venue, falling back to the public-venue baseline if a proprietary venue
+    /// fails.
     /// @dev The caller must approve this contract for at least `amountIn` of
-    /// `tokenIn`. Reverts `UnknownVenue` if `venue` is not whitelisted, or
-    /// reverts if the output is below `amountOutMin`. `venue` must be a
-    /// whitelisted proprietary AMM; use `swapV1` to reach the baseline directly.
-    /// @param venue The proprietary venue to attempt first.
+    /// `tokenIn`. Reverts `UnknownVenue` if `venue` is neither a whitelisted
+    /// proprietary AMM nor the baseline address, or reverts if the output is
+    /// below `amountOutMin`. Naming the baseline address routes directly to the
+    /// public venue with no fallback (it is the fallback).
+    /// @param venue The venue to attempt first — a proprietary AMM, or the
+    /// baseline address to swap on the public venue directly.
     /// @param tokenIn The token being sold.
     /// @param tokenOut The token being bought.
     /// @param amountIn The exact amount of `tokenIn` to sell.
@@ -74,12 +78,13 @@ interface IPropAMMRouter {
         external
         returns (uint256 bestQuote, address venue);
 
-    /// @notice Quotes `amount` of `tokenIn` against a single whitelisted
-    /// proprietary venue.
+    /// @notice Quotes `amount` of `tokenIn` against a single venue — a whitelisted
+    /// proprietary AMM or the public-venue baseline.
     /// @dev Not `view`; call via `eth_call` (staticcall) off-chain. Reverts
-    /// `UnknownVenue` if `venue` is not whitelisted, and bubbles up any revert
-    /// from the underlying venue.
-    /// @param venue The proprietary venue to quote against.
+    /// `UnknownVenue` if `venue` is neither a whitelisted proprietary AMM nor the
+    /// baseline address, and bubbles up any revert from the underlying venue.
+    /// @param venue The venue to quote against — a proprietary AMM, or the
+    /// baseline address for the public venue.
     /// @param tokenIn The token being sold.
     /// @param tokenOut The token being bought.
     /// @param amount The amount of `tokenIn` to quote.
