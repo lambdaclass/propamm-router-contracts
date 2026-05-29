@@ -91,11 +91,9 @@ interface IPropAMMRouter {
     /// or `address(0)` if the Uniswap V3 baseline won. A non-zero result is
     /// always accepted by `swapViaVenueV1`; on `address(0)`, execute via
     /// `swapV1` to reach the Uniswap fallback.
-    function quoteV1(
-        address tokenIn,
-        address tokenOut,
-        uint256 amount
-    ) external returns (uint256 bestQuote, address venue);
+    function quoteV1(address tokenIn, address tokenOut, uint256 amount)
+        external
+        returns (uint256 bestQuote, address venue);
 
     /// @notice Quotes `amount` of `tokenIn` against a single whitelisted
     /// proprietary venue.
@@ -109,10 +107,7 @@ interface IPropAMMRouter {
     /// @param tokenOut The address of the token being bought.
     /// @param amount The exact amount of `tokenIn` to quote against.
     /// @return amountOut The amount of `tokenOut` quoted by `venue`.
-    function quoteVenueV1(
-        address venue,
-        address tokenIn,
-        address tokenOut,
-        uint256 amount
-    ) external returns (uint256 amountOut);
+    function quoteVenueV1(address venue, address tokenIn, address tokenOut, uint256 amount)
+        external
+        returns (uint256 amountOut);
 }

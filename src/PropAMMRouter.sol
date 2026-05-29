@@ -94,11 +94,7 @@ contract PropAMMRouter is
     /// *subsequent* transfers via `transferOwnership` / `acceptOwnership`.
     /// Controls `_authorizeUpgrade` and any owner-gated administrative paths.
     /// Reverts if zero (enforced by `__Ownable_init`).
-    function initialize(
-        address fallbackSwapRouter_,
-        address fallbackQuoter_,
-        address owner_
-    ) public initializer {
+    function initialize(address fallbackSwapRouter_, address fallbackQuoter_, address owner_) public initializer {
         fallbackSwapRouter = fallbackSwapRouter_;
         fallbackQuoter = fallbackQuoter_;
         fallbackFee = 3000;
@@ -124,31 +120,10 @@ contract PropAMMRouter is
         uint256 amountOutMin,
         address recipient,
         uint256 deadline
-    )
-        external
-        whenNotPaused
-        nonReentrant
-        returns (uint256 amountOut, address executedVenue)
-    {
-        (uint256 bestQuote, address venue) = _pickBestVenue(
-            tokenIn,
-            tokenOut,
-            amountIn
-        );
-        require(
-            bestQuote >= amountOutMin,
-            QuoteBelowMinimum(amountOutMin, bestQuote)
-        );
-        return
-            _coreSwap(
-                venue,
-                tokenIn,
-                tokenOut,
-                amountIn,
-                amountOutMin,
-                recipient,
-                deadline
-            );
+    ) external whenNotPaused nonReentrant returns (uint256 amountOut, address executedVenue) {
+        (uint256 bestQuote, address venue) = _pickBestVenue(tokenIn, tokenOut, amountIn);
+        require(bestQuote >= amountOutMin, QuoteBelowMinimum(amountOutMin, bestQuote));
+        return _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
     }
 
     /// @inheritdoc IPropAMMRouter
@@ -165,15 +140,7 @@ contract PropAMMRouter is
         uint256 deadline
     ) public whenNotPaused nonReentrant returns (uint256 amountOut) {
         require(_isVenue(venue), UnknownVenue());
-        (amountOut, ) = _coreSwap(
-            venue,
-            tokenIn,
-            tokenOut,
-            amountIn,
-            amountOutMin,
-            recipient,
-            deadline
-        );
+        (amountOut,) = _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
     }
 
     /// @notice Pulls funds once and executes a swap, attempting `venue` first
@@ -216,18 +183,11 @@ contract PropAMMRouter is
         uint256 prevTokenOutBalance = IERC20(tokenOut).balanceOf(recipient);
 
         if (venue != address(0)) {
-            try
-                this._dispatchVenue(
-                    venue,
-                    tokenIn,
-                    tokenOut,
-                    amountIn,
-                    amountOutMin,
-                    recipient,
-                    deadline,
-                    prevTokenOutBalance
-                )
-            returns (uint256 amountOut_) {
+            try this._dispatchVenue(
+                venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline, prevTokenOutBalance
+            ) returns (
+                uint256 amountOut_
+            ) {
                 return (amountOut_, venue);
             } catch {
                 // Fall through to the Uniswap V3 fallback below.
@@ -236,10 +196,7 @@ contract PropAMMRouter is
 
         swapViaUniswapV3(tokenIn, tokenOut, amountIn, amountOutMin, recipient);
         amountOut = IERC20(tokenOut).balanceOf(recipient) - prevTokenOutBalance;
-        require(
-            amountOut >= amountOutMin,
-            InsufficientOutput(amountOutMin, amountOut)
-        );
+        require(amountOut >= amountOutMin, InsufficientOutput(amountOutMin, amountOut));
         return (amountOut, address(0));
     }
 
@@ -287,24 +244,13 @@ contract PropAMMRouter is
         if (venue == FERMI_ROUTER) {
             IERC20(tokenIn).forceApprove(FERMI_ROUTER, amountIn);
             int256 _amountIn = amountIn.toInt256();
-            IFermiSwapper(FERMI_ROUTER).fermiSwapWithAllowances(
-                tokenIn,
-                tokenOut,
-                _amountIn,
-                amountOutMin,
-                recipient
-            );
+            IFermiSwapper(FERMI_ROUTER).fermiSwapWithAllowances(tokenIn, tokenOut, _amountIn, amountOutMin, recipient);
 
             // Prevent later transfers if token was partially pulled
             IERC20(tokenIn).forceApprove(FERMI_ROUTER, 0);
         } else if (venue == KIPSELI_PAMM) {
             IERC20(tokenIn).safeTransfer(KIPSELI_PAMM, amountIn);
-            uint256 amountOut_ = IKipseliPAMM(KIPSELI_PAMM).swap(
-                tokenIn,
-                amountIn,
-                tokenOut,
-                recipient
-            );
+            uint256 amountOut_ = IKipseliPAMM(KIPSELI_PAMM).swap(tokenIn, amountIn, tokenOut, recipient);
 
             // Kipseli signals failure by returning 0 and keeping `tokenIn`; revert
             // to roll back its transfer and let the catch arm engage the fallback.
@@ -312,17 +258,9 @@ contract PropAMMRouter is
                 revert();
             }
         } else if (venue == BEBOP_ROUTER) {
-            uint256 balanceTokenOutBefore = IERC20(tokenOut).balanceOf(
-                address(this)
-            );
+            uint256 balanceTokenOutBefore = IERC20(tokenOut).balanceOf(address(this));
             IERC20(tokenIn).forceApprove(BEBOP_ROUTER, amountIn);
-            IBebopRouter(BEBOP_ROUTER).swap(
-                tokenIn,
-                tokenOut,
-                amountIn,
-                amountOutMin,
-                deadline
-            );
+            IBebopRouter(BEBOP_ROUTER).swap(tokenIn, tokenOut, amountIn, amountOutMin, deadline);
 
             // Prevent later transfers if token was partially pulled
             IERC20(tokenIn).forceApprove(BEBOP_ROUTER, 0);
@@ -332,10 +270,7 @@ contract PropAMMRouter is
             // router, so it is required to transfer the received tokens
             // to the actual recipient
             uint256 balanceTokenOut = IERC20(tokenOut).balanceOf(address(this));
-            require(
-                balanceTokenOut >= balanceTokenOutBefore,
-                TokenOutBalanceDecreased()
-            );
+            require(balanceTokenOut >= balanceTokenOutBefore, TokenOutBalanceDecreased());
             uint256 received = balanceTokenOut - balanceTokenOutBefore;
             if (received > 0 && recipient != address(this)) {
                 IERC20(tokenOut).safeTransfer(recipient, received);
@@ -372,13 +307,7 @@ contract PropAMMRouter is
         address recipient
     ) private returns (uint256 amountOut) {
         amountOut = UniV3Router.swapExactIn(
-            tokenIn,
-            tokenOut,
-            fallbackFee,
-            amountIn,
-            amountOutMin,
-            recipient,
-            fallbackSwapRouter
+            tokenIn, tokenOut, fallbackFee, amountIn, amountOutMin, recipient, fallbackSwapRouter
         );
         return amountOut;
     }
@@ -387,11 +316,10 @@ contract PropAMMRouter is
     /// @dev Delegates to `_pickBestVenue` (which compares the proprietary AMMs
     /// and the Uniswap V3 baseline) and reverts `NoQuotesAvailable` if nothing
     /// could be priced.
-    function quoteV1(
-        address tokenIn,
-        address tokenOut,
-        uint256 amount
-    ) public returns (uint256 bestQuote, address venue) {
+    function quoteV1(address tokenIn, address tokenOut, uint256 amount)
+        public
+        returns (uint256 bestQuote, address venue)
+    {
         (bestQuote, venue) = _pickBestVenue(tokenIn, tokenOut, amount);
         require(bestQuote > 0, NoQuotesAvailable());
     }
@@ -402,33 +330,18 @@ contract PropAMMRouter is
     /// rather than the swap wrapper to save gas. Uniswap V3 is intentionally not
     /// quotable here — it is only surfaced through `quoteV1`. Reverts
     /// `UnknownVenue` for any non-whitelisted address.
-    function quoteVenueV1(
-        address venue,
-        address tokenIn,
-        address tokenOut,
-        uint256 amount
-    ) public returns (uint256 amountOut) {
+    function quoteVenueV1(address venue, address tokenIn, address tokenOut, uint256 amount)
+        public
+        returns (uint256 amountOut)
+    {
         if (venue == FERMI_ROUTER) {
             int256 amountInt256 = amount.toInt256();
-            (, amountOut) = IFermiSwapper(FERMI_ROUTER).quoteAmounts(
-                tokenIn,
-                tokenOut,
-                amountInt256
-            );
+            (, amountOut) = IFermiSwapper(FERMI_ROUTER).quoteAmounts(tokenIn, tokenOut, amountInt256);
         } else if (venue == KIPSELI_PAMM) {
-            amountOut = IKipseliQuoter(KIPSELI_QUOTER).preSwapQuote(
-                tokenIn,
-                amount,
-                tokenOut,
-                block.timestamp * 1000,
-                address(0)
-            );
+            amountOut = IKipseliQuoter(KIPSELI_QUOTER)
+                .preSwapQuote(tokenIn, amount, tokenOut, block.timestamp * 1000, address(0));
         } else if (venue == BEBOP_ROUTER) {
-            amountOut = IBebopRouter(BEBOP_ROUTER).quote(
-                tokenIn,
-                tokenOut,
-                amount
-            );
+            amountOut = IBebopRouter(BEBOP_ROUTER).quote(tokenIn, tokenOut, amount);
         } else {
             revert UnknownVenue();
         }
@@ -444,19 +357,8 @@ contract PropAMMRouter is
     /// @param tokenOut The address of the token being bought.
     /// @param amount The exact amount of `tokenIn` to quote against.
     /// @return amountOut The amount of `tokenOut` the Uniswap V3 swap would produce.
-    function quoteUniswapV3(
-        address tokenIn,
-        address tokenOut,
-        uint256 amount
-    ) external returns (uint256 amountOut) {
-        return
-            UniV3Router.quoteExactIn(
-                tokenIn,
-                tokenOut,
-                fallbackFee,
-                amount,
-                fallbackQuoter
-            );
+    function quoteUniswapV3(address tokenIn, address tokenOut, uint256 amount) external returns (uint256 amountOut) {
+        return UniV3Router.quoteExactIn(tokenIn, tokenOut, fallbackFee, amount, fallbackQuoter);
     }
 
     /// @notice Finds the venue offering the best `tokenOut` for `amount` of
@@ -474,16 +376,13 @@ contract PropAMMRouter is
     /// @return bestQuote The best `tokenOut` amount found across all venues.
     /// @return venue The proprietary AMM that produced `bestQuote`, or
     /// `address(0)` if the Uniswap V3 baseline won (or nothing could be priced).
-    function _pickBestVenue(
-        address tokenIn,
-        address tokenOut,
-        uint256 amount
-    ) internal returns (uint256 bestQuote, address venue) {
+    function _pickBestVenue(address tokenIn, address tokenOut, uint256 amount)
+        internal
+        returns (uint256 bestQuote, address venue)
+    {
         address[3] memory venues = [FERMI_ROUTER, KIPSELI_PAMM, BEBOP_ROUTER];
         for (uint256 i = 0; i < venues.length; i++) {
-            try this.quoteVenueV1(venues[i], tokenIn, tokenOut, amount) returns (
-                uint256 amountOut
-            ) {
+            try this.quoteVenueV1(venues[i], tokenIn, tokenOut, amount) returns (uint256 amountOut) {
                 if (amountOut > bestQuote) {
                     bestQuote = amountOut;
                     venue = venues[i];
@@ -494,9 +393,7 @@ contract PropAMMRouter is
         // Uniswap V3 is a baseline candidate but not a nameable venue: when it
         // wins, `venue` stays `address(0)` so the result is never an address
         // that `swapViaVenueV1` / `quoteVenueV1` would reject.
-        try this.quoteUniswapV3(tokenIn, tokenOut, amount) returns (
-            uint256 amountOut
-        ) {
+        try this.quoteUniswapV3(tokenIn, tokenOut, amount) returns (uint256 amountOut) {
             if (amountOut > bestQuote) {
                 bestQuote = amountOut;
                 venue = address(0);
@@ -510,10 +407,7 @@ contract PropAMMRouter is
     /// is deliberately excluded — it is reachable only via `swapV1`'s best-quote
     /// selection or as the failure fallback.
     function _isVenue(address venue) private pure returns (bool) {
-        return
-            venue == FERMI_ROUTER ||
-            venue == KIPSELI_PAMM ||
-            venue == BEBOP_ROUTER;
+        return venue == FERMI_ROUTER || venue == KIPSELI_PAMM || venue == BEBOP_ROUTER;
     }
 
     /// @dev Restricts UUPS upgrades to the contract owner set in `initialize`.
