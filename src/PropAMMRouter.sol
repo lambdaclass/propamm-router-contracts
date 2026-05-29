@@ -282,7 +282,7 @@ contract PropAMMRouter is
 
         amountOut = IERC20(tokenOut).balanceOf(recipient) - prevTokenOutBalance;
         if (amountOut < amountOutMin) {
-            revert();
+            revert InsufficientOutput(amountOutMin, amountOut);
         }
 
         return amountOut;
