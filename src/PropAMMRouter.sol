@@ -25,7 +25,7 @@ import {UniV3Router} from "./libraries/UniV3Router.sol";
 /// are identified by address: the venues a caller may name explicitly are the
 /// three proprietary AMMs plus Uniswap V3 (see `_isVenue`), the latter named by
 /// the `fallbackSwapRouter` (SwapRouter02) address. Uniswap V3 is also folded
-/// into `quoteV1` as a baseline price and is reached automatically (best-quote
+/// into `quoteV1` as a fallback candidate and is reached automatically (best-quote
 /// selection in `swapV1`, or as the failure fallback when a proprietary venue
 /// reverts). The Uniswap fee tier is the owner-settable `fallbackFee`, so
 /// callers never pass one. The owner authorized in `initialize` controls
@@ -47,8 +47,7 @@ contract PropAMMRouter is
     address fallbackQuoter;
     /// @notice Uniswap V3 pool fee tier (in hundredths of a bip) used for the
     /// Uniswap fallback quote and swap. `3000` = 0.30% by default; the owner can
-    /// retune it via `setFallbackFee` without a contract upgrade. Appended after
-    /// the existing storage variables to keep the UUPS layout upgrade-safe.
+    /// retune it via `setFallbackFee` without a contract upgrade.
     uint24 public fallbackFee;
 
     /// @notice Thrown when `_dispatchVenue` is called by anyone other than this
@@ -107,8 +106,8 @@ contract PropAMMRouter is
     /// @inheritdoc IPropAMMRouter
     /// @dev Picks the best-quoting venue via `_pickBestVenue`, then executes
     /// through `_coreSwap`; a `fallbackSwapRouter` selection (the Uniswap
-    /// baseline won, or no venue could quote) routes straight to the Uniswap
-    /// fallback. Reverts `QuoteBelowMinimum`
+    /// fallback won, or no venue could quote) routes straight to Uniswap V3.
+    /// Reverts `QuoteBelowMinimum`
     /// before pulling funds when the best quote is under `amountOutMin`. Quotes
     /// are advisory, so `_coreSwap` re-checks `amountOutMin` against the
     /// delivered balance delta.
@@ -127,7 +126,7 @@ contract PropAMMRouter is
 
     /// @inheritdoc IPropAMMRouter
     /// @dev `venue` must be a callable venue (`_isVenue`): one of the three
-    /// proprietary AMMs or the Uniswap V3 baseline, named by the
+    /// proprietary AMMs or the Uniswap V3 fallback, named by the
     /// `fallbackSwapRouter` address. Naming Uniswap runs it directly via
     /// `_coreSwap`'s `fallbackSwapRouter` path (no proprietary attempt); a
     /// proprietary `venue` still recovers on Uniswap if it fails to fill.
@@ -153,7 +152,7 @@ contract PropAMMRouter is
     /// for a proprietary `venue`, wraps the venue call in `try this._dispatchVenue`
     /// so a revert (including an under-fill, which `_dispatchVenue` turns into a
     /// revert) is caught and recovered on Uniswap V3; for `fallbackSwapRouter`
-    /// (no proprietary venue selected, or the Uniswap baseline was best) it runs
+    /// (no proprietary venue selected, or the Uniswap fallback was best) it runs
     /// Uniswap V3 directly. The external self-call is intentional: only an
     /// external call produces a catchable frame and rolls back the venue's
     /// `forceApprove`. The Uniswap branch re-measures the delivered delta and
@@ -282,7 +281,7 @@ contract PropAMMRouter is
 
         amountOut = IERC20(tokenOut).balanceOf(recipient) - prevTokenOutBalance;
         if (amountOut < amountOutMin) {
-            revert();
+            revert InsufficientOutput(amountOutMin, amountOut);
         }
 
         return amountOut;
@@ -315,7 +314,7 @@ contract PropAMMRouter is
 
     /// @inheritdoc IPropAMMRouter
     /// @dev Delegates to `_pickBestVenue` (which compares the proprietary AMMs
-    /// and the Uniswap V3 baseline) and reverts `NoQuotesAvailable` if nothing
+    /// and the Uniswap V3 fallback) and reverts `NoQuotesAvailable` if nothing
     /// could be priced.
     function quoteV1(address tokenIn, address tokenOut, uint256 amount)
         public
@@ -327,7 +326,7 @@ contract PropAMMRouter is
 
     /// @inheritdoc IPropAMMRouter
     /// @dev Dispatches by address across the three proprietary AMMs plus the
-    /// Uniswap V3 baseline (named by the `fallbackSwapRouter` address). Kipseli is
+    /// Uniswap V3 fallback (named by the `fallbackSwapRouter` address). Kipseli is
     /// quoted via the dedicated `IKipseliQuoter.preSwapQuote` contract rather than
     /// the swap wrapper to save gas; Uniswap V3 is priced via QuoterV2 at the
     /// owner-set `fallbackFee` tier. Reverts `UnknownVenue` for any other address.
@@ -350,7 +349,7 @@ contract PropAMMRouter is
         }
     }
 
-    /// @notice Quotes the Uniswap V3 baseline for the pair at the current
+    /// @notice Quotes the Uniswap V3 fallback for the pair at the current
     /// `fallbackFee` tier.
     /// @dev External so `_pickBestVenue` and `quoteV1` can wrap it in a
     /// `try/catch` (an internal library call can't be caught). Not `view`:
@@ -365,7 +364,7 @@ contract PropAMMRouter is
     }
 
     /// @notice Finds the venue offering the best `tokenOut` for `amount` of
-    /// `tokenIn` across the proprietary AMMs and the Uniswap V3 baseline.
+    /// `tokenIn` across the proprietary AMMs and the Uniswap V3 fallback.
     /// @dev Each venue is queried in its own `try/catch` so a reverting venue is
     /// simply skipped. Returns `(0, fallbackSwapRouter)` when nothing can be
     /// priced — callers that need a hard failure (e.g. `quoteV1`) check the
@@ -373,19 +372,19 @@ contract PropAMMRouter is
     /// `fallbackSwapRouter` case to Uniswap. The returned `venue` is one of the
     /// whitelisted proprietary AMMs or `fallbackSwapRouter`; the latter is a
     /// callable venue too (`swapViaVenueV1` / `quoteVenueV1` accept it) and is
-    /// also consumed by `_coreSwap` (via `swapV1`) as the Uniswap baseline.
+    /// also consumed by `_coreSwap` (via `swapV1`) as the Uniswap fallback.
     /// @param tokenIn The address of the token being sold.
     /// @param tokenOut The address of the token being bought.
     /// @param amount The exact amount of `tokenIn` to quote against.
     /// @return bestQuote The best `tokenOut` amount found across all venues.
     /// @return venue The venue that produced `bestQuote` — a proprietary AMM, or
-    /// `fallbackSwapRouter` if the Uniswap V3 baseline won (or nothing could be
+    /// `fallbackSwapRouter` if the Uniswap V3 fallback won (or nothing could be
     /// priced).
     function _pickBestVenue(address tokenIn, address tokenOut, uint256 amount)
         internal
         returns (uint256 bestQuote, address venue)
     {
-        // Uniswap V3 is the always-present baseline, so seed the winner with
+        // Uniswap V3 is the always-present fallback, so seed the winner with
         // its SwapRouter02 address. A proprietary venue overtakes it only by
         // quoting strictly more; if none do (or nothing can be priced at all),
         // `venue` stays `fallbackSwapRouter` and `_coreSwap` routes to Uniswap.
@@ -401,9 +400,9 @@ contract PropAMMRouter is
             } catch {}
         }
 
-        // Uniswap V3 is the always-present baseline candidate: when it wins,
+        // Uniswap V3 is the always-present fallback candidate: when it wins,
         // `venue` is `fallbackSwapRouter`, which `_coreSwap` (via `swapV1`)
-        // treats as the Uniswap baseline. Callers may also name that address
+        // treats as the Uniswap fallback. Callers may also name that address
         // directly through `swapViaVenueV1` / `quoteVenueV1`.
         try this.quoteUniswapV3(tokenIn, tokenOut, amount) returns (uint256 amountOut) {
             if (amountOut > bestQuote) {
@@ -416,7 +415,7 @@ contract PropAMMRouter is
     /// @notice Returns whether `venue` is a venue a caller may name explicitly in
     /// `quoteVenueV1` / `swapViaVenueV1`.
     /// @dev The callable set is the three hardcoded proprietary routers plus the
-    /// Uniswap V3 baseline, identified by the live `fallbackSwapRouter`
+    /// Uniswap V3 fallback, identified by the live `fallbackSwapRouter`
     /// (SwapRouter02) address. `view` rather than `pure` because it reads that
     /// storage address. Internal "is this proprietary?" logic instead keys on
     /// `venue != fallbackSwapRouter` (see `_coreSwap`).
