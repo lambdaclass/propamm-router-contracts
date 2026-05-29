@@ -164,14 +164,14 @@ contract PropAMMRouter is
     /// from `msg.sender`, snapshots `recipient`'s `tokenOut` balance, then:
     /// for a proprietary `venue`, wraps the venue call in `try this._dispatchVenue`
     /// so a revert (including an under-fill, which `_dispatchVenue` turns into a
-    /// revert) is caught and recovered on Uniswap V3; for `fallbackSwapRouter`
-    /// or `address(0)` it runs Uniswap V3 directly, avoiding a pointless
-    /// Uniswap-to-Uniswap fallback. The external self-call is intentional: only
-    /// an external call produces a catchable frame and rolls back the venue's
+    /// revert) is caught and recovered on Uniswap V3; for `address(0)` (no
+    /// proprietary venue selected, or the Uniswap baseline was best) it runs
+    /// Uniswap V3 directly. The external self-call is intentional: only an
+    /// external call produces a catchable frame and rolls back the venue's
     /// `forceApprove`. The Uniswap branch re-measures the delivered delta and
     /// enforces `amountOutMin` to defend against an under-delivering router.
-    /// @param venue The venue to attempt first: a proprietary AMM, or
-    /// `fallbackSwapRouter`/`address(0)` to go straight to Uniswap V3.
+    /// @param venue The proprietary AMM to attempt first, or `address(0)` to go
+    /// straight to the Uniswap V3 fallback.
     /// @param tokenIn The address of the token being sold.
     /// @param tokenOut The address of the token being bought.
     /// @param amountIn The exact amount of `tokenIn` to sell.
@@ -179,8 +179,8 @@ contract PropAMMRouter is
     /// @param recipient The address that will receive `tokenOut`.
     /// @param deadline Unix timestamp after which the swap is no longer valid.
     /// @return amountOut The amount of `tokenOut` delivered to `recipient`.
-    /// @return executedVenue The venue that filled the swap; `fallbackSwapRouter`
-    /// when Uniswap V3 ran.
+    /// @return executedVenue The proprietary AMM that filled the swap, or
+    /// `address(0)` when the Uniswap V3 fallback ran.
     function _coreSwap(
         address venue,
         address tokenIn,
@@ -195,7 +195,7 @@ contract PropAMMRouter is
 
         uint256 prevTokenOutBalance = IERC20(tokenOut).balanceOf(recipient);
 
-        if (venue != address(0) && venue != fallbackSwapRouter) {
+        if (venue != address(0)) {
             try
                 this._dispatchVenue(
                     venue,
@@ -220,7 +220,7 @@ contract PropAMMRouter is
             amountOut >= amountOutMin,
             InsufficientOutput(amountOutMin, amountOut)
         );
-        return (amountOut, fallbackSwapRouter);
+        return (amountOut, address(0));
     }
 
     /// @notice Executes a swap on a proprietary venue with funds already held by
@@ -445,12 +445,15 @@ contract PropAMMRouter is
     /// simply skipped. Returns `(0, address(0))` when nothing can be priced —
     /// callers that need a hard failure (e.g. `quoteV1`) check for that;
     /// `swapV1` instead lets `_coreSwap` route the `address(0)` case to Uniswap.
+    /// Every non-zero `venue` returned here is one of the whitelisted
+    /// proprietary AMMs, so it is always accepted by `swapViaVenueV1` /
+    /// `quoteVenueV1`.
     /// @param tokenIn The address of the token being sold.
     /// @param tokenOut The address of the token being bought.
     /// @param amount The exact amount of `tokenIn` to quote against.
     /// @return bestQuote The best `tokenOut` amount found across all venues.
-    /// @return venue The venue that produced `bestQuote`; `fallbackSwapRouter`
-    /// if the Uniswap V3 baseline won.
+    /// @return venue The proprietary AMM that produced `bestQuote`, or
+    /// `address(0)` if the Uniswap V3 baseline won (or nothing could be priced).
     function _pickBestVenue(
         address tokenIn,
         address tokenOut,
@@ -468,13 +471,15 @@ contract PropAMMRouter is
             } catch {}
         }
 
-        // Uniswap V3 is a baseline candidate, addressed by its SwapRouter.
+        // Uniswap V3 is a baseline candidate but not a nameable venue: when it
+        // wins, `venue` stays `address(0)` so the result is never an address
+        // that `swapViaVenueV1` / `quoteVenueV1` would reject.
         try this.quoteUniswapV3(tokenIn, tokenOut, amount) returns (
             uint256 amountOut
         ) {
             if (amountOut > bestQuote) {
                 bestQuote = amountOut;
-                venue = fallbackSwapRouter;
+                venue = address(0);
             }
         } catch {}
     }
