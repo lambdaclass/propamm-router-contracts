@@ -92,4 +92,58 @@ interface IPropAMMRouter {
     function quoteVenueV1(address venue, address tokenIn, address tokenOut, uint256 amount)
         external
         returns (uint256 amountOut);
+
+    /// @notice Quotes `amountIn` of `tokenIn` against each whitelisted
+    /// proprietary venue named in `venues` and returns the one offering the
+    /// best `tokenOut` output.
+    /// @dev Unlike `quoteV1`, which compares every venue plus the Uniswap V3
+    /// baseline, this restricts the comparison to the caller-supplied subset.
+    /// Entries that revert or are not whitelisted proprietary AMMs are skipped;
+    /// Uniswap V3 cannot be named here (it is only ever the fallback in
+    /// `swapViaBestVenueV1`). Reverts `NoQuotesAvailable` if no named venue can
+    /// produce a positive quote (including an empty `venues` array). Not `view`:
+    /// a venue's quote source may price via revert-based simulation, so call
+    /// this via `eth_call` (staticcall) from off-chain.
+    /// @param venues The candidate proprietary venue addresses to quote against.
+    /// @param tokenIn The address of the token being sold.
+    /// @param tokenOut The address of the token being bought.
+    /// @param amountIn The exact amount of `tokenIn` to quote against.
+    /// @return venue The venue that produced the best quote.
+    /// @return amountOut The best `tokenOut` amount across `venues`.
+    function quoteVenuesV1(address[] calldata venues, address tokenIn, address tokenOut, uint256 amountIn)
+        external
+        returns (address venue, uint256 amountOut);
+
+    /// @notice Swaps an exact amount of `tokenIn` for as much `tokenOut` as
+    /// possible by quoting the proprietary venues named in `venues` on-chain and
+    /// routing through the one with the best quote, falling back to Uniswap V3
+    /// if that venue fails to fill.
+    /// @dev Re-quotes `venues` via `quoteVenuesV1` before pulling funds, then
+    /// executes on the winner. Unlike `swapV1` (which compares every venue plus
+    /// the Uniswap V3 baseline), the best venue is chosen only among the
+    /// caller-supplied subset; Uniswap V3 is never selected, only used as the
+    /// failure fallback. The caller must have approved this contract to spend at
+    /// least `amountIn` of `tokenIn`. Reverts if the final output is below
+    /// `amountOutMin`, or `NoQuotesAvailable` (bubbled from `quoteVenuesV1`)
+    /// when no named venue can price the pair.
+    /// @param venues The candidate proprietary venue addresses to quote and route through.
+    /// @param tokenIn The address of the token being sold.
+    /// @param tokenOut The address of the token being bought.
+    /// @param amountIn The exact amount of `tokenIn` to sell.
+    /// @param amountOutMin The minimum acceptable amount of `tokenOut`; the swap
+    /// reverts if the actual output is lower.
+    /// @param recipient The address that will receive `tokenOut`.
+    /// @param deadline Unix timestamp after which the swap is no longer valid.
+    /// @return amountOut The amount of `tokenOut` actually received by `recipient`.
+    /// @return executedVenue The venue that filled the swap; the Uniswap V3
+    /// SwapRouter address when the fallback ran.
+    function swapViaBestVenueV1(
+        address[] calldata venues,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        address recipient,
+        uint256 deadline
+    ) external returns (uint256 amountOut, address executedVenue);
 }

@@ -2,13 +2,25 @@
 pragma solidity ^0.8.35;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {
+    SafeERC20
+} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
-import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
-import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
-import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import {
+    ReentrancyGuardTransient
+} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
+import {
+    UUPSUpgradeable
+} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {
+    Initializable
+} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {
+    Ownable2StepUpgradeable
+} from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
+import {
+    PausableUpgradeable
+} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {IPropAMMRouter} from "./interfaces/IPropAMMRouter.sol";
 import {FERMI_ROUTER, IFermiSwapper} from "./interfaces/IFermiSwapper.sol";
 import {BEBOP_ROUTER, IBebopRouter} from "./interfaces/IBebopRouter.sol";
@@ -141,6 +153,41 @@ contract PropAMMRouter is
     ) public whenNotPaused nonReentrant returns (uint256 amountOut) {
         require(_isVenue(venue), UnknownVenue());
         (amountOut,) = _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
+    }
+
+    /// @inheritdoc IPropAMMRouter
+    /// @dev Picks the best-quoting venue among the caller-supplied `venues` via
+    /// `quoteVenuesV1`, then executes it through `_coreSwap` — the same flow as
+    /// `swapV1` but restricted to the named subset (and without the Uniswap V3
+    /// baseline as a selectable winner). A reverting best venue is recovered on
+    /// Uniswap V3 inside `_coreSwap`, in which case `executedVenue` is
+    /// `fallbackSwapRouter`. Reverts `NoQuotesAvailable` (bubbled from
+    /// `quoteVenuesV1`) if no named venue can be priced.
+    function swapViaBestVenueV1(
+        address[] calldata venues,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        address recipient,
+        uint256 deadline
+    )
+        external
+        whenNotPaused
+        nonReentrant
+        returns (uint256 amountOut, address executedVenue)
+    {
+        (address venue, ) = quoteVenuesV1(venues, tokenIn, tokenOut, amountIn);
+        return
+            _coreSwap(
+                venue,
+                tokenIn,
+                tokenOut,
+                amountIn,
+                amountOutMin,
+                recipient,
+                deadline
+            );
     }
 
     /// @notice Pulls funds once and executes a swap, attempting `venue` first
@@ -347,6 +394,34 @@ contract PropAMMRouter is
         } else {
             revert UnknownVenue();
         }
+    }
+
+    /// @inheritdoc IPropAMMRouter
+    /// @dev Subset counterpart to `_pickBestVenue`: iterates only the
+    /// caller-supplied `venues`, querying each via `this.quoteVenueV1` in its
+    /// own `try/catch` so a reverting or non-whitelisted entry (including the
+    /// Uniswap V3 SwapRouter, which `quoteVenueV1` rejects) is skipped rather
+    /// than aborting the whole quote. Returns the address/amount pair with the
+    /// largest `amountOut`. Reverts `NoQuotesAvailable` if no named venue yields
+    /// a positive quote, which also covers an empty `venues` array.
+    function quoteVenuesV1(
+        address[] calldata venues,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn
+    ) public returns (address venue, uint256 amountOut) {
+        for (uint256 i = 0; i < venues.length; i++) {
+            try
+                this.quoteVenueV1(venues[i], tokenIn, tokenOut, amountIn)
+            returns (uint256 out) {
+                if (out > amountOut) {
+                    amountOut = out;
+                    venue = venues[i];
+                }
+            } catch {}
+        }
+
+        require(amountOut > 0, NoQuotesAvailable());
     }
 
     /// @notice Quotes the Uniswap V3 fallback for the pair at the current
