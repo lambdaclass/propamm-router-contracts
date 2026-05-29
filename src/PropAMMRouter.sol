@@ -63,6 +63,13 @@ contract PropAMMRouter is
     /// @param receivedAmount The actual amount of `tokenOut` delivered to
     /// `recipient`, measured as a balance delta against the pre-swap snapshot.
     error InsufficientOutput(uint256 expectedAmount, uint256 receivedAmount);
+    /// @notice Thrown by `swapV1` when the best quote across all venues is below
+    /// `amountOutMin`, rejecting the swap before any funds are pulled. Distinct
+    /// from `InsufficientOutput`, which signals a shortfall measured *after*
+    /// execution.
+    /// @param amountOutMin The caller's minimum acceptable amount of `tokenOut`.
+    /// @param bestQuote The best `tokenOut` amount any venue quoted.
+    error QuoteBelowMinimum(uint256 amountOutMin, uint256 bestQuote);
     /// @notice Thrown when a swap is invoked after its `deadline`.
     error Expired();
     /// @notice Thrown when no venue can produce a quote for the requested pair
@@ -105,6 +112,11 @@ contract PropAMMRouter is
     /// Uniswap V3 baseline via `_pickBestVenue`, then executes it through
     /// `_coreSwap`. If every venue fails to quote, `_pickBestVenue` yields
     /// `address(0)` and `_coreSwap` routes straight to the Uniswap fallback.
+    /// Fails fast with `QuoteBelowMinimum` when even the best quote (which spans
+    /// the proprietary venues and the Uniswap fallback at `fallbackFee`) is
+    /// under `amountOutMin`, rejecting a doomed swap before pulling funds and
+    /// running the venue/fallback path. Quotes are advisory, so `_coreSwap`
+    /// still enforces `amountOutMin` against the delivered balance delta.
     function swapV1(
         address tokenIn,
         address tokenOut,
@@ -118,7 +130,15 @@ contract PropAMMRouter is
         nonReentrant
         returns (uint256 amountOut, address executedVenue)
     {
-        (, address venue) = _pickBestVenue(tokenIn, tokenOut, amountIn);
+        (uint256 bestQuote, address venue) = _pickBestVenue(
+            tokenIn,
+            tokenOut,
+            amountIn
+        );
+        require(
+            bestQuote >= amountOutMin,
+            QuoteBelowMinimum(amountOutMin, bestQuote)
+        );
         return
             _coreSwap(
                 venue,
