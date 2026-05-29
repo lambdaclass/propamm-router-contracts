@@ -89,9 +89,12 @@ interface IPropAMMRouter {
     /// @param tokenOut The token being bought.
     /// @param amount The amount of `tokenIn` to quote.
     /// @return amountOut The amount of `tokenOut` quoted by `venue`.
-    function quoteVenueV1(address venue, address tokenIn, address tokenOut, uint256 amount)
-        external
-        returns (uint256 amountOut);
+    function quoteVenueV1(
+        address venue,
+        address tokenIn,
+        address tokenOut,
+        uint256 amount
+    ) external returns (uint256 amountOut);
 
     /// @notice Quotes `amountIn` of `tokenIn` against each whitelisted
     /// proprietary venue named in `venues` and returns the one offering the
@@ -110,9 +113,12 @@ interface IPropAMMRouter {
     /// @param amountIn The exact amount of `tokenIn` to quote against.
     /// @return venue The venue that produced the best quote.
     /// @return amountOut The best `tokenOut` amount across `venues`.
-    function quoteVenuesV1(address[] calldata venues, address tokenIn, address tokenOut, uint256 amountIn)
-        external
-        returns (address venue, uint256 amountOut);
+    function quoteVenuesV1(
+        address[] calldata venues,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn
+    ) external returns (address venue, uint256 amountOut);
 
     /// @notice Swaps an exact amount of `tokenIn` for as much `tokenOut` as
     /// possible by quoting the proprietary venues named in `venues` on-chain and
