@@ -177,7 +177,16 @@ contract PropAMMRouter is
         nonReentrant
         returns (uint256 amountOut, address executedVenue)
     {
-        (address venue, ) = quoteVenuesV1(venues, tokenIn, tokenOut, amountIn);
+        (address venue, uint256 bestQuote) = quoteVenuesV1(
+            venues,
+            tokenIn,
+            tokenOut,
+            amountIn
+        );
+        require(
+            bestQuote >= amountOutMin,
+            InsufficientOutput(amountOutMin, bestQuote)
+        );
         return
             _coreSwap(
                 venue,
