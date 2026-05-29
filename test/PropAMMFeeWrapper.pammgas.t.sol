@@ -6,6 +6,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {PropAMMRouter} from "../src/PropAMMRouter.sol";
 import {PropAMMFeeWrapper} from "../src/PropAMMFeeWrapper.sol";
+import {PropAMMRouterWithFee} from "../src/PropAMMRouterWithFee.sol";
 import {IPropAMMRouter} from "../src/interfaces/IPropAMMRouter.sol";
 
 /// @notice Wrapper-overhead measurement on the GENUINE proprietary-AMM path.
@@ -54,6 +55,7 @@ contract PropAMMFeeWrapperPammForkGasTest is Test {
 
     PropAMMRouter router;
     PropAMMFeeWrapper wrapper;
+    PropAMMRouterWithFee routerWithFee;
     address taker;
     address feeRecipient = makeAddr("feeRecipient");
 
@@ -99,9 +101,19 @@ contract PropAMMFeeWrapperPammForkGasTest is Test {
                 abi.encodeCall(PropAMMFeeWrapper.initialize, (address(router), feeRecipient, FEE_BPS, address(this)))
             )));
 
+            PropAMMRouterWithFee rwfImpl = new PropAMMRouterWithFee();
+            routerWithFee = PropAMMRouterWithFee(payable(address(new ERC1967Proxy(
+                address(rwfImpl),
+                abi.encodeWithSignature(
+                    "initialize(address,address,address,address,uint16)",
+                    SWAP_ROUTER_02, QUOTER_V2, address(this), feeRecipient, FEE_BPS
+                )
+            ))));
+
             _fundTakerUSDC(1_000_000e6);
             _setMaxAllowance(USDC, taker, address(router));
             _setMaxAllowance(USDC, taker, address(wrapper));
+            _setMaxAllowance(USDC, taker, address(routerWithFee));
             vm.deal(taker, 10 ether);
             ready = true;
         } catch {
@@ -169,6 +181,32 @@ contract PropAMMFeeWrapperPammForkGasTest is Test {
         fee = IERC20(WETH).balanceOf(feeRecipient);
     }
 
+    function _directWithFee(IPropAMMRouter.Venue venue)
+        internal
+        returns (uint256 gasUsed, uint256 outUser, uint256 fee)
+    {
+        vm.prank(taker);
+        uint256 g = gasleft();
+        outUser = routerWithFee.swap(venue, USDC, WETH, AMOUNT_IN, 0, taker, UNI_FEE, block.timestamp + 120);
+        gasUsed = g - gasleft();
+        fee = IERC20(WETH).balanceOf(feeRecipient);
+    }
+
+    /// @dev Collapses the 12 measurement values into one memory struct to keep
+    /// the _venueRun stack frame from exceeding Solidity's 16-slot limit.
+    struct VenueRunResult {
+        uint256 gFb;
+        uint256 outFb;
+        uint256 gDir;
+        uint256 outDir;
+        uint256 gDirFee;
+        uint256 outDirFeeUser;
+        uint256 dirFee;
+        uint256 gWrap;
+        uint256 outUser;
+        uint256 fee;
+    }
+
     function _venueRun(
         string memory label,
         IPropAMMRouter.Venue venue,
@@ -178,33 +216,78 @@ contract PropAMMFeeWrapperPammForkGasTest is Test {
         uint256 freshBlock
     ) internal {
         if (!ready) return vm.skip(true);
+        if (so.length == 0) {
+            console.log(label);
+            console.log("  SKIPPED: no Titan overrides for this venue");
+            return vm.skip(true);
+        }
         _applyAll(so, ba, no);
         vm.roll(freshBlock == 0 ? titanBlock : freshBlock);
 
+        VenueRunResult memory r;
         uint256 snap = vm.snapshotState();
 
-        (uint256 gFb, uint256 outFb) = _direct(IPropAMMRouter.Venue.Fallback);
+        (r.gFb, r.outFb) = _direct(IPropAMMRouter.Venue.Fallback);
         vm.revertToState(snap);
 
-        (uint256 gDir, uint256 outDir) = _direct(venue);
+        (r.gDir, r.outDir) = _direct(venue);
         vm.revertToState(snap);
 
-        (uint256 gWrap, uint256 outUser, uint256 fee) = _wrap(venue);
+        (r.gDirFee, r.outDirFeeUser, r.dirFee) = _directWithFee(venue);
+        vm.revertToState(snap);
 
+        (r.gWrap, r.outUser, r.fee) = _wrap(venue);
+
+        _logVenueRun(label, r);
+    }
+
+    function _logVenueRun(string memory label, VenueRunResult memory r) internal pure {
         console.log(label);
-        console.log("  filled via propAMM (1=yes,0=fellback):", outDir != outFb ? 1 : 0);
-        console.log("  direct  gas :", gDir);
-        console.log("  wrapper gas :", gWrap);
-        console.log("  OVERHEAD    :", gWrap - gDir);
-        console.log("  out direct (WETH wei)      :", outDir);
-        console.log("  out wrapper user (WETH wei):", outUser);
-        console.log("  wrapper fee (WETH wei)     :", fee);
-        console.log("  [ref] fallback gas         :", gFb);
-        console.log("  [ref] fallback out         :", outFb);
+        console.log("  filled via propAMM (1=yes,0=fellback):", r.outDir != r.outFb ? 1 : 0);
+        console.log("  direct         gas :", r.gDir);
+        console.log("  directWithFee  gas :", r.gDirFee);
+        console.log("  wrapper        gas :", r.gWrap);
+        console.log("  OVERHEAD wrapper       - direct :", r.gWrap - r.gDir);
+        console.log("  OVERHEAD directWithFee - direct :", r.gDirFee - r.gDir);
+        console.log("  SAVINGS  wrapper       - dirFee :", r.gWrap - r.gDirFee);
+        console.log("  out direct          (WETH wei):", r.outDir);
+        console.log("  out directWithFee u (WETH wei):", r.outDirFeeUser);
+        console.log("  out wrapper user    (WETH wei):", r.outUser);
+        console.log("  fee directWithFee   (WETH wei):", r.dirFee);
+        console.log("  fee wrapper         (WETH wei):", r.fee);
+        console.log("  [ref] fallback gas :", r.gFb);
+        console.log("  [ref] fallback out :", r.outFb);
     }
 
     function test_pammgas_fermi() public {
         _venueRun("[FermiSwap]", IPropAMMRouter.Venue.FermiSwap, fermiStorage, fermiBalances, fermiNonces, 0);
+    }
+
+    /// @notice Single-path mirror of `test_pammgas_kipseli_direct_only` for
+    /// FermiSwap, so a `--flamegraph` run profiles just one `router.swap`.
+    function test_pammgas_fermi_direct_only() public {
+        if (!ready || fermiStorage.length == 0) return vm.skip(true);
+        _applyAll(fermiStorage, fermiBalances, fermiNonces);
+        vm.roll(titanBlock);
+
+        (uint256 gDir, uint256 outDir) = _direct(IPropAMMRouter.Venue.FermiSwap);
+        console.log("[FermiSwap] direct-only");
+        console.log("  direct gas         :", gDir);
+        console.log("  out (WETH wei)     :", outDir);
+    }
+
+    /// @notice Single-path mirror of `test_pammgas_kipseli_wrapper_only` for
+    /// FermiSwap, so a `--flamegraph` run profiles just one `wrapper.swap`.
+    function test_pammgas_fermi_wrapper_only() public {
+        if (!ready || fermiStorage.length == 0) return vm.skip(true);
+        _applyAll(fermiStorage, fermiBalances, fermiNonces);
+        vm.roll(titanBlock);
+
+        (uint256 gWrap, uint256 outUser, uint256 fee) = _wrap(IPropAMMRouter.Venue.FermiSwap);
+        console.log("[FermiSwap] wrapper-only");
+        console.log("  wrapper gas        :", gWrap);
+        console.log("  out user (WETH wei):", outUser);
+        console.log("  fee (WETH wei)     :", fee);
     }
 
     function test_pammgas_kipseli() public {
@@ -217,7 +300,7 @@ contract PropAMMFeeWrapperPammForkGasTest is Test {
     /// and rolls to the Titan block (Kipseli has no Bebop-style freshness gate),
     /// then performs exactly one `router.swap`.
     function test_pammgas_kipseli_direct_only() public {
-        if (!ready) return vm.skip(true);
+        if (!ready || kipseliStorage.length == 0) return vm.skip(true);
         _applyAll(kipseliStorage, kipseliBalances, kipseliNonces);
         vm.roll(titanBlock);
 
@@ -230,7 +313,7 @@ contract PropAMMFeeWrapperPammForkGasTest is Test {
     /// @notice Single-path: ONLY the wrapper swap through Kipseli, for an
     /// isolated `--flamegraph` of the wrapper path. Exactly one `wrapper.swap`.
     function test_pammgas_kipseli_wrapper_only() public {
-        if (!ready) return vm.skip(true);
+        if (!ready || kipseliStorage.length == 0) return vm.skip(true);
         _applyAll(kipseliStorage, kipseliBalances, kipseliNonces);
         vm.roll(titanBlock);
 
@@ -245,5 +328,36 @@ contract PropAMMFeeWrapperPammForkGasTest is Test {
     function test_pammgas_bebop() public {
         uint256 fresh = vm.envOr("BEBOP_FRESH_BLOCK", uint256(0));
         _venueRun("[Bebop]", IPropAMMRouter.Venue.Bebop, bebopStorage, bebopBalances, bebopNonces, fresh);
+    }
+
+    /// @notice Single-path mirror for Bebop's direct router swap. Rolls to
+    /// `BEBOP_FRESH_BLOCK` (Bebop's swap check is strict-equality on
+    /// `block.number`); falls back to `titanBlock` if the env var is absent —
+    /// same idiom as `test_pammgas_bebop`.
+    function test_pammgas_bebop_direct_only() public {
+        if (!ready || bebopStorage.length == 0) return vm.skip(true);
+        _applyAll(bebopStorage, bebopBalances, bebopNonces);
+        uint256 fresh = vm.envOr("BEBOP_FRESH_BLOCK", uint256(0));
+        vm.roll(fresh == 0 ? titanBlock : fresh);
+
+        (uint256 gDir, uint256 outDir) = _direct(IPropAMMRouter.Venue.Bebop);
+        console.log("[Bebop] direct-only");
+        console.log("  direct gas         :", gDir);
+        console.log("  out (WETH wei)     :", outDir);
+    }
+
+    /// @notice Single-path mirror for Bebop's wrapper swap. Same freshness
+    /// gate as `test_pammgas_bebop_direct_only`.
+    function test_pammgas_bebop_wrapper_only() public {
+        if (!ready || bebopStorage.length == 0) return vm.skip(true);
+        _applyAll(bebopStorage, bebopBalances, bebopNonces);
+        uint256 fresh = vm.envOr("BEBOP_FRESH_BLOCK", uint256(0));
+        vm.roll(fresh == 0 ? titanBlock : fresh);
+
+        (uint256 gWrap, uint256 outUser, uint256 fee) = _wrap(IPropAMMRouter.Venue.Bebop);
+        console.log("[Bebop] wrapper-only");
+        console.log("  wrapper gas        :", gWrap);
+        console.log("  out user (WETH wei):", outUser);
+        console.log("  fee (WETH wei)     :", fee);
     }
 }

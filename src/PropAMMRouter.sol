@@ -87,7 +87,7 @@ contract PropAMMRouter is
         address fallbackSwapRouter_,
         address fallbackQuoter_,
         address owner_
-    ) public initializer {
+    ) public virtual initializer {
         fallbackSwapRouter = fallbackSwapRouter_;
         fallbackQuoter = fallbackQuoter_;
         __Ownable_init(owner_);
@@ -120,7 +120,7 @@ contract PropAMMRouter is
         address recipient,
         uint24 uniswapFee,
         uint256 deadline
-    ) public whenNotPaused nonReentrant returns (uint256) {
+    ) public virtual whenNotPaused nonReentrant returns (uint256) {
         require(block.timestamp <= deadline, Expired());
         IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
 
