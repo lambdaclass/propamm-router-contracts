@@ -104,15 +104,12 @@ contract PropAMMRouter is
     }
 
     /// @inheritdoc IPropAMMRouter
-    /// @dev Picks the best-quoting venue across the proprietary AMMs and the
-    /// Uniswap V3 baseline via `_pickBestVenue`, then executes it through
-    /// `_coreSwap`. If every venue fails to quote, `_pickBestVenue` yields
-    /// `address(0)` and `_coreSwap` routes straight to the Uniswap fallback.
-    /// Fails fast with `QuoteBelowMinimum` when even the best quote (which spans
-    /// the proprietary venues and the Uniswap fallback at `fallbackFee`) is
-    /// under `amountOutMin`, rejecting a doomed swap before pulling funds and
-    /// running the venue/fallback path. Quotes are advisory, so `_coreSwap`
-    /// still enforces `amountOutMin` against the delivered balance delta.
+    /// @dev Picks the best-quoting venue via `_pickBestVenue`, then executes
+    /// through `_coreSwap`; an `address(0)` selection (no venue could quote)
+    /// routes straight to the Uniswap fallback. Reverts `QuoteBelowMinimum`
+    /// before pulling funds when the best quote is under `amountOutMin`. Quotes
+    /// are advisory, so `_coreSwap` re-checks `amountOutMin` against the
+    /// delivered balance delta.
     function swapV1(
         address tokenIn,
         address tokenOut,
