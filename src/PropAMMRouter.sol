@@ -157,13 +157,13 @@ contract PropAMMRouter is
 
     /// @inheritdoc IPropAMMRouter
     /// @dev Picks the best-quoting venue among the caller-supplied `venues` via
-    /// `quoteVenuesV1`, then executes it through `_coreSwap` — the same flow as
+    /// `quoteSelectedVenuesV1`, then executes it through `_coreSwap` — the same flow as
     /// `swapV1` but restricted to the named subset (and without the Uniswap V3
     /// baseline as a selectable winner). A reverting best venue is recovered on
     /// Uniswap V3 inside `_coreSwap`, in which case `executedVenue` is
     /// `fallbackSwapRouter`. Reverts `NoQuotesAvailable` (bubbled from
-    /// `quoteVenuesV1`) if no named venue can be priced.
-    function swapViaBestVenueV1(
+    /// `quoteSelectedVenuesV1`) if no named venue can be priced.
+    function swapViaSelectedVenuesV1(
         address[] calldata venues,
         address tokenIn,
         address tokenOut,
@@ -177,7 +177,7 @@ contract PropAMMRouter is
         nonReentrant
         returns (uint256 amountOut, address executedVenue)
     {
-        (address venue, uint256 bestQuote) = quoteVenuesV1(
+        (address venue, uint256 bestQuote) = quoteSelectedVenuesV1(
             venues,
             tokenIn,
             tokenOut,
@@ -410,7 +410,7 @@ contract PropAMMRouter is
     /// than aborting the whole quote. Returns the address/amount pair with the
     /// largest `amountOut`. Reverts `NoQuotesAvailable` if no named venue yields
     /// a positive quote, which also covers an empty `venues` array.
-    function quoteVenuesV1(
+    function quoteSelectedVenuesV1(
         address[] calldata venues,
         address tokenIn,
         address tokenOut,
