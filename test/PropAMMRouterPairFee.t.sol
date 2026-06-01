@@ -50,4 +50,12 @@ contract PropAMMRouterPairFeeTest is Test {
     function test_getPairFee_unset_returnsZero() public view {
         assertEq(router.getPairFee(address(tokenIn), address(tokenOut)), 0);
     }
+
+    function test_resolvedFee_reversed_unset_returnsGlobalDefault() public view {
+        assertEq(router.resolvedFee(address(tokenOut), address(tokenIn)), 3000);
+    }
+
+    function test_getPairFee_reversed_unset_returnsZero() public view {
+        assertEq(router.getPairFee(address(tokenOut), address(tokenIn)), 0);
+    }
 }

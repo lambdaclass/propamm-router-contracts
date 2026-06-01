@@ -508,13 +508,12 @@ contract PropAMMRouter is
         return venue == FERMI_ROUTER || venue == KIPSELI_PAMM || venue == BEBOP_ROUTER || venue == fallbackSwapRouter;
     }
 
-    /// @notice Canonical key for a token pair, order-independent.
-    /// @dev Uniswap V3 pools are symmetric (one pool, `token0 < token1`, serves
-    /// both directions), so {A,B} and {B,A} share one entry.
+    /// @dev Canonical key for a token pair, order-independent. Uniswap V3 pools
+    /// are symmetric (one pool, `token0 < token1`, serves both directions), so
+    /// {A,B} and {B,A} share one entry.
     function _pairKey(address tokenA, address tokenB) private pure returns (bytes32) {
-        return tokenA < tokenB
-            ? keccak256(abi.encodePacked(tokenA, tokenB))
-            : keccak256(abi.encodePacked(tokenB, tokenA));
+        (address a, address b) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
+        return keccak256(abi.encodePacked(a, b));
     }
 
     /// @notice Resolves the Uniswap V3 fallback fee for a pair: the per-pair
