@@ -132,18 +132,18 @@ contract PropAMMRouterForkTests is Test {
         // in case a sibling test (e.g. test_swapV1ViaBebop) `vm.roll`ed
         // earlier and Foundry didn't fully revert it across the shared fork.
         vm.roll(titanBlock);
-        _applyAll(fermiStorage, fermiBalances, fermiNonces);
+        _overrideState(fermiStorage, fermiBalances, fermiNonces);
         _runSwapV1("fermi", FERMI_ROUTER);
     }
 
     function test_swapV1ViaKipseli() public {
         vm.roll(titanBlock);
-        _applyAll(kipseliStorage, kipseliBalances, kipseliNonces);
+        _overrideState(kipseliStorage, kipseliBalances, kipseliNonces);
         _runSwapV1("kipseli", KIPSELI_PAMM);
     }
 
     function test_swapV1ViaBebop() public {
-        _applyAll(bebopStorage, bebopBalances, bebopNonces);
+        _overrideState(bebopStorage, bebopBalances, bebopNonces);
         // Bebop only accepts a swap at the exact block its latest price was
         // published for, which may trail Titan's reported block. Roll to that
         // block so the override is accepted.
@@ -163,18 +163,18 @@ contract PropAMMRouterForkTests is Test {
 
     function test_swapViaVenueV1Fermi() public {
         vm.roll(titanBlock);
-        _applyAll(fermiStorage, fermiBalances, fermiNonces);
+        _overrideState(fermiStorage, fermiBalances, fermiNonces);
         _runSwapViaVenueV1(FERMI_ROUTER);
     }
 
     function test_swapViaVenueV1Kipseli() public {
         vm.roll(titanBlock);
-        _applyAll(kipseliStorage, kipseliBalances, kipseliNonces);
+        _overrideState(kipseliStorage, kipseliBalances, kipseliNonces);
         _runSwapViaVenueV1(KIPSELI_PAMM);
     }
 
     function test_swapViaVenueV1Bebop() public {
-        _applyAll(bebopStorage, bebopBalances, bebopNonces);
+        _overrideState(bebopStorage, bebopBalances, bebopNonces);
         uint256 bebopFresh = vm.envUint("BEBOP_FRESH_BLOCK");
         vm.roll(bebopFresh);
         _runSwapViaVenueV1(BEBOP_ROUTER);
@@ -208,18 +208,18 @@ contract PropAMMRouterForkTests is Test {
 
     function test_swapViaSelectedVenuesV1Fermi() public {
         vm.roll(titanBlock);
-        _applyAll(fermiStorage, fermiBalances, fermiNonces);
+        _overrideState(fermiStorage, fermiBalances, fermiNonces);
         _runSwapViaSelectedVenuesV1("fermi", _venues(FERMI_ROUTER));
     }
 
     function test_swapViaSelectedVenuesV1Kipseli() public {
         vm.roll(titanBlock);
-        _applyAll(kipseliStorage, kipseliBalances, kipseliNonces);
+        _overrideState(kipseliStorage, kipseliBalances, kipseliNonces);
         _runSwapViaSelectedVenuesV1("kipseli", _venues(KIPSELI_PAMM));
     }
 
     function test_swapViaSelectedVenuesV1Bebop() public {
-        _applyAll(bebopStorage, bebopBalances, bebopNonces);
+        _overrideState(bebopStorage, bebopBalances, bebopNonces);
         uint256 bebopFresh = vm.envUint("BEBOP_FRESH_BLOCK");
         vm.roll(bebopFresh);
         _runSwapViaSelectedVenuesV1("bebop", _venues(BEBOP_ROUTER));
@@ -230,7 +230,7 @@ contract PropAMMRouterForkTests is Test {
     /// skipped, so Fermi wins the subset selection.
     function test_swapViaSelectedVenuesV1PicksBestAmongSubset() public {
         vm.roll(titanBlock);
-        _applyAll(fermiStorage, fermiBalances, fermiNonces);
+        _overrideState(fermiStorage, fermiBalances, fermiNonces);
         address[] memory venues = new address[](3);
         venues[0] = FERMI_ROUTER;
         venues[1] = KIPSELI_PAMM;
@@ -252,7 +252,7 @@ contract PropAMMRouterForkTests is Test {
 
     function test_quoteV1() public {
         vm.roll(titanBlock);
-        _applyAll(fermiStorage, fermiBalances, fermiNonces);
+        _overrideState(fermiStorage, fermiBalances, fermiNonces);
 
         (uint256 bestQuote, address venue) = router.quoteV1(
             USDC,
@@ -276,7 +276,7 @@ contract PropAMMRouterForkTests is Test {
 
     function test_quoteVenueV1Fermi() public {
         vm.roll(titanBlock);
-        _applyAll(fermiStorage, fermiBalances, fermiNonces);
+        _overrideState(fermiStorage, fermiBalances, fermiNonces);
         assertGt(
             router.quoteVenueV1(FERMI_ROUTER, USDC, WETH, AMOUNT_IN),
             0,
@@ -305,18 +305,18 @@ contract PropAMMRouterForkTests is Test {
 
     function test_quoteSelectedVenuesV1Fermi() public {
         vm.roll(titanBlock);
-        _applyAll(fermiStorage, fermiBalances, fermiNonces);
+        _overrideState(fermiStorage, fermiBalances, fermiNonces);
         _assertSelectedQuoteSingle(FERMI_ROUTER);
     }
 
     function test_quoteSelectedVenuesV1Kipseli() public {
         vm.roll(titanBlock);
-        _applyAll(kipseliStorage, kipseliBalances, kipseliNonces);
+        _overrideState(kipseliStorage, kipseliBalances, kipseliNonces);
         _assertSelectedQuoteSingle(KIPSELI_PAMM);
     }
 
     function test_quoteSelectedVenuesV1Bebop() public {
-        _applyAll(bebopStorage, bebopBalances, bebopNonces);
+        _overrideState(bebopStorage, bebopBalances, bebopNonces);
         uint256 bebopFresh = vm.envUint("BEBOP_FRESH_BLOCK");
         vm.roll(bebopFresh);
         _assertSelectedQuoteSingle(BEBOP_ROUTER);
@@ -335,7 +335,7 @@ contract PropAMMRouterForkTests is Test {
     /// remaining valid venue still wins.
     function test_quoteSelectedVenuesV1SkipsUnknownAddress() public {
         vm.roll(titanBlock);
-        _applyAll(fermiStorage, fermiBalances, fermiNonces);
+        _overrideState(fermiStorage, fermiBalances, fermiNonces);
         address[] memory venues = new address[](2);
         venues[0] = makeAddr("not-a-venue");
         venues[1] = FERMI_ROUTER;
@@ -385,7 +385,7 @@ contract PropAMMRouterForkTests is Test {
     /// (`vm.store`), per-account balances (`vm.deal`), per-account nonces
     /// (`vm.setNonceUnsafe`, which doesn't reject lower-than-current values the
     /// way `vm.setNonce` does).
-    function _applyAll(
+    function _overrideState(
         StorageOverride[] storage storageList,
         AccountValue[] storage balanceList,
         AccountValue[] storage nonceList
