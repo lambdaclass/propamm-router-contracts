@@ -10,6 +10,8 @@ import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockFeeOnTransferERC20} from "./mocks/MockFeeOnTransferERC20.sol";
 import {MockV3SwapRouter} from "./mocks/MockV3SwapRouter.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
+import {BEBOP_ROUTER} from "../src/interfaces/IBebopRouter.sol";
+import {MockBebop} from "./mocks/MockBebop.sol";
 
 contract PropAMMRouterFeeTest is Test {
     PropAMMRouter router;
@@ -246,6 +248,31 @@ contract PropAMMRouterFeeTest is Test {
         assertEq(amountOut, delivered - expectedFee);
         assertGe(amountOut, netMin); // the core guarantee
         assertEq(tokenOut.balanceOf(feeRecipient), expectedFee);
+        assertEq(tokenOut.balanceOf(address(router)), 0);
+    }
+
+    function test_swapViaVenueWithFee_bebopCustodyPath() public {
+        // Place mock Bebop code at the hard-coded BEBOP_ROUTER address.
+        vm.etch(BEBOP_ROUTER, address(new MockBebop()).code);
+
+        uint256 delivered = 1_000e18;
+        tokenIn.mint(user, 1_000e18);
+        tokenOut.mint(BEBOP_ROUTER, delivered); // Bebop delivers this to the router
+        vm.prank(user);
+        tokenIn.approve(address(router), 1_000e18);
+
+        uint256 fee = delivered * 50 / 10_000;
+        uint256 net = delivered - fee;
+
+        vm.prank(user);
+        uint256 amountOut = router.swapViaVenueWithFeeV1(
+            BEBOP_ROUTER, address(tokenIn), address(tokenOut), 1_000e18, net,
+            user, block.timestamp + 1, FrontendFee({bps: 50, recipient: feeRecipient})
+        );
+
+        assertEq(amountOut, net);
+        assertEq(tokenOut.balanceOf(user), net);
+        assertEq(tokenOut.balanceOf(feeRecipient), fee);
         assertEq(tokenOut.balanceOf(address(router)), 0);
     }
 
