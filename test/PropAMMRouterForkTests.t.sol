@@ -247,6 +247,50 @@ contract PropAMMRouterForkTests is Test {
     }
 
     // -------------------------------------------------------------
+    // Deadline enforcement — every swap entrypoint reverts `Expired`
+    // once `block.timestamp > deadline`, before pulling any funds.
+    // -------------------------------------------------------------
+
+    function test_swapV1RevertsAfterDeadline() public {
+        uint256 pastDeadline = block.timestamp - 1;
+        vm.prank(taker);
+        vm.expectRevert(PropAMMRouter.Expired.selector);
+        router.swapV1(USDC, WETH, AMOUNT_IN, 0, taker, pastDeadline);
+    }
+
+    function test_swapViaVenueV1RevertsAfterDeadline() public {
+        // Pass a valid venue so the deadline check (in `_coreSwap`) is the
+        // reason for the revert, not `UnknownVenue`.
+        uint256 pastDeadline = block.timestamp - 1;
+        vm.prank(taker);
+        vm.expectRevert(PropAMMRouter.Expired.selector);
+        router.swapViaVenueV1(
+            FERMI_ROUTER,
+            USDC,
+            WETH,
+            AMOUNT_IN,
+            0,
+            taker,
+            pastDeadline
+        );
+    }
+
+    function test_swapViaSelectedVenuesV1RevertsAfterDeadline() public {
+        uint256 pastDeadline = block.timestamp - 1;
+        vm.prank(taker);
+        vm.expectRevert(PropAMMRouter.Expired.selector);
+        router.swapViaSelectedVenuesV1(
+            _venues(FERMI_ROUTER),
+            USDC,
+            WETH,
+            AMOUNT_IN,
+            0,
+            taker,
+            pastDeadline
+        );
+    }
+
+    // -------------------------------------------------------------
     // quoteV1 — best quote across all venues
     // -------------------------------------------------------------
 
