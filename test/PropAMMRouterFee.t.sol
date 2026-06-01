@@ -7,6 +7,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IPropAMMRouter} from "../src/interfaces/IPropAMMRouter.sol";
 import {PropAMMRouter, FrontendFee} from "../src/PropAMMRouter.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
+import {MockFeeOnTransferERC20} from "./mocks/MockFeeOnTransferERC20.sol";
 import {MockV3SwapRouter} from "./mocks/MockV3SwapRouter.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
 
@@ -191,6 +192,38 @@ contract PropAMMRouterFeeTest is Test {
             address(tokenIn), address(tokenOut), 1_000e18, 0,
             user, block.timestamp - 1, FrontendFee({bps: 50, recipient: feeRecipient})
         );
+    }
+
+    function _afterFot(uint256 v) internal pure returns (uint256) {
+        return v - v * 100 / 10_000; // 1% burn
+    }
+
+    function test_swapWithFee_feeOnTransferTokenOut() public {
+        MockFeeOnTransferERC20 fotOut = new MockFeeOnTransferERC20("FOT", "FOT", 100); // 1%
+        uint256 routerOut = 1_000e18;
+        tokenIn.mint(user, 1_000e18);
+        fotOut.mint(address(swapRouter), routerOut);
+        swapRouter.setAmountOut(routerOut);
+        quoter.setQuote(routerOut);
+        vm.prank(user);
+        tokenIn.approve(address(router), 1_000e18);
+
+        // Mock transfers routerOut to the router, burning 1% on the way in.
+        uint256 delivered = _afterFot(routerOut);
+        uint256 fee = delivered * 50 / 10_000;
+        uint256 net = delivered - fee;
+
+        vm.prank(user);
+        (uint256 amountOut,) = router.swapWithFeeV1(
+            address(tokenIn), address(fotOut), 1_000e18, 0,
+            user, block.timestamp + 1, FrontendFee({bps: 50, recipient: feeRecipient})
+        );
+
+        assertEq(amountOut, net);
+        // Each outbound leg burns another 1%.
+        assertEq(fotOut.balanceOf(feeRecipient), _afterFot(fee));
+        assertEq(fotOut.balanceOf(user), _afterFot(net));
+        assertEq(fotOut.balanceOf(address(router)), 0);
     }
 
     // Characterization: existing fee-free swapV1 routes through the fallback and
