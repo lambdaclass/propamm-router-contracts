@@ -5,7 +5,7 @@ import {Test, Vm} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IPropAMMRouter} from "../src/interfaces/IPropAMMRouter.sol";
-import {PropAMMRouter} from "../src/PropAMMRouter.sol";
+import {PropAMMRouter, FrontendFee} from "../src/PropAMMRouter.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockV3SwapRouter} from "./mocks/MockV3SwapRouter.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
@@ -46,6 +46,25 @@ contract PropAMMRouterFeeTest is Test {
         quoter.setQuote(delivered);
         vm.prank(user);
         tokenIn.approve(address(router), amountIn);
+    }
+
+    // feeBps = 50 (0.5%); delivered 1_000e18 -> fee 5e18, user 995e18.
+    function test_swapWithFee_takesFeeAndPaysUser() public {
+        _prepare(1_000e18, 1_000e18);
+        uint256 expectedFee = 1_000e18 * 50 / 10_000; // 5e18
+        uint256 expectedNet = 1_000e18 - expectedFee; // 995e18
+
+        vm.prank(user);
+        (uint256 amountOut, address executedVenue) = router.swapWithFeeV1(
+            address(tokenIn), address(tokenOut), 1_000e18, expectedNet,
+            user, block.timestamp + 1, FrontendFee({bps: 50, recipient: feeRecipient})
+        );
+
+        assertEq(amountOut, expectedNet);
+        assertEq(executedVenue, address(swapRouter));
+        assertEq(tokenOut.balanceOf(user), expectedNet);
+        assertEq(tokenOut.balanceOf(feeRecipient), expectedFee);
+        assertEq(tokenOut.balanceOf(address(router)), 0);
     }
 
     // Characterization: existing fee-free swapV1 routes through the fallback and
