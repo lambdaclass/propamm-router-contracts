@@ -13,15 +13,17 @@ contract Upgrade is Script {
 
         // Per-pair fee precondition: unconfigured pairs resolve their Uniswap
         // fallback tier to `fallbackFee`, which is set (=3000) only in `initialize`
-        // (fresh deploy). Before upgrading an existing proxy, confirm the live
-        // `fallbackFee` is non-zero — a 0 value (e.g. an enum-era proxy that never
-        // had `fallbackFee`) makes the fallback resolve to tier 0 (invalid) and
-        // revert for all unconfigured pairs. If so, ship a reinitializer that
-        // backfills `fallbackFee = 3000` and pass its calldata below instead of "".
+        // (fresh deploy) and never re-applied on upgrade. A proxy that predates the
+        // per-pair fee map (an enum-era deployment) therefore carries `fallbackFee = 0`
+        // after this bare upgrade, making the fallback resolve to tier 0 (invalid) and
+        // revert for every unconfigured pair. The fee config is restored as a SEPARATE
+        // owner step right after this upgrade: run `scripts/SeedStablePairs.s.sol`
+        // (sets `fallbackFee = 3000` + the deep per-pair tiers). Consider `pause()`-ing
+        // the router across the two steps if swaps could arrive in between.
         Upgrades.upgradeProxy(
             proxy,
             newImplName,
-            "" // no reinitializer
+            "" // no reinitializer; fee config restored post-upgrade by SeedStablePairs.s.sol
         );
 
         vm.stopBroadcast();
