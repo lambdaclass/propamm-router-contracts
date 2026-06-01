@@ -26,6 +26,26 @@ As a consequence:
 - `quoteV1` and `quoteVenueV1` are not `view`. They must be called via `eth_call` (staticcall) from off-chain so the simulated swaps are rolled back automatically.
 - The Kipseli simulation pulls `tokenIn` from the router's own balance. When quoting against Kipseli (directly via `quoteVenueV1`, or implicitly through `quoteV1`), the RPC call must include a `stateDiff` override that gives the router a sufficient balance of `tokenIn`. Without the override, the Kipseli branch is silently skipped while the other branches still quote.
 
+### Frontend fees
+
+Three implementation-only entrypoints take a per-call, basis-point fee from the swap
+**output token** and forward it to a caller-supplied recipient. They are **not** part of
+`IPropAMMRouter`; encode them against the deployed `PropAMMRouter`.
+
+- `swapWithFeeV1(tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline, fee)`
+- `swapViaVenueWithFeeV1(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline, fee)`
+- `swapViaSelectedVenuesWithFeeV1(venues, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline, fee)`
+
+`fee` is a `FrontendFee { uint16 bps; address recipient }`:
+- `bps` is the fee in basis points, capped at `MAX_FEE_BPS` (100 = 1.00%).
+- `recipient` receives the fee in `tokenOut`; must be non-zero.
+
+`amountOutMin` is the **net** amount the user must receive **after** the fee — the router
+grosses it up internally, so the user always nets at least `amountOutMin`. The returned
+`amountOut` and the `Swapped` event's `amountOut` are the **net** delivered to `recipient`.
+A `FrontendFeeCharged` event is emitted whenever a non-zero fee is taken. Quote functions
+are unchanged and return **gross** output; a frontend nets out by subtracting its own bps.
+
 ## Prerequisites
 
 - [Foundry](https://book.getfoundry.sh/getting-started/installation) installed.
