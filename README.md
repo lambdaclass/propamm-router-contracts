@@ -52,6 +52,30 @@ forge clean && forge script scripts/Deploy.s.sol \
     --private-key $DEPLOYER_KEY
 ```
 
+### Running the fork tests
+
+`test/PropAMMRouterForkTests.t.sol` tests the `PropAMMRouter` against a Foundry fork of mainnet, pinned to the block Titan publishes per request. Each test applies the per-venue Titan stateOverride via `vm.store` / `vm.deal` / `vm.setNonceUnsafe`, then runs a USDC → WETH swap and asserts the delivered `amountOut` is at least the venue's quoted `amountOut`.
+
+Driven by `test/run_fork_tests.sh`, which:
+
+1. Queries Titan for the latest per-PMM overrides, flattens them into JSON arrays Foundry's `parseJson` can decode, and exports them as env vars.
+2. Forks mainnet at `min(titanBlock, rpcHead)` (the local RPC may lag Titan by 1-2 blocks; `vm.createSelectFork` rejects future blocks).
+3. Runs `forge test --match-contract PropAMMRouterForkTests --gas-report -vvvv`.
+
+**Required env vars:**
+
+- `ETH_RPC_URL`: mainnet RPC endpoint
+- `TITAN_URL` (optional): defaults to `https://us.rpc.titanbuilder.xyz`.
+
+Run with:
+
+```bash
+export ETH_RPC_URL=<your mainnet RPC>
+./test/run_fork_tests.sh
+```
+
+You can append any `forge test` flags (e.g. `--match-test test_swapViaVenueV1Kipseli`) — they're forwarded verbatim to the underlying `forge test` invocation.
+
 ### Quoting with Titan state overrides
 
 The proprietary AMMs maintain off-chain liquidity that is not reflected by mainnet state, so a plain `eth_call` to `PropAMMRouter.quoteV1` against the anvil fork only sees stale liquidity. To get accurate quotes, Titan exposes the JSON-RPC method `titan_getPammStateOverrides`, whose result is passed as the third parameter of `eth_call`.
