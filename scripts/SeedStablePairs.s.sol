@@ -27,8 +27,8 @@ contract SeedStablePairs is Script {
         tokenA[0] = USDC; tokenB[0] = USDT; fees[0] = 100;
         // USDC/DAI — deepest at 0.01%.
         tokenA[1] = USDC; tokenB[1] = DAI; fees[1] = 100;
-        // DAI/USDT — VERIFY 100 vs 500 against live liquidity before mainnet.
-        tokenA[2] = DAI; tokenB[2] = USDT; fees[2] = 100;
+        // DAI/USDT — 0.05% default (historically the deeper pool); VERIFY vs 100 against live liquidity before mainnet.
+        tokenA[2] = DAI; tokenB[2] = USDT; fees[2] = 500;
     }
 
     function run() public {

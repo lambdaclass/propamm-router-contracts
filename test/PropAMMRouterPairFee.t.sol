@@ -84,6 +84,12 @@ contract PropAMMRouterPairFeeTest is Test {
         router.setPairFee(address(tokenIn), address(tokenOut), 1_000_000);
     }
 
+    function test_setPairFee_acceptsMaxValidFee() public {
+        router.setPairFee(address(tokenIn), address(tokenOut), 999_999);
+        assertEq(router.getPairFee(address(tokenIn), address(tokenOut)), 999_999);
+        assertEq(router.resolvedFee(address(tokenIn), address(tokenOut)), 999_999);
+    }
+
     function test_setPairFee_emitsEvent() public {
         vm.expectEmit(true, true, false, true, address(router));
         emit PairFeeUpdated(address(tokenIn), address(tokenOut), 0, 100);
