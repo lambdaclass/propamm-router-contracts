@@ -35,6 +35,7 @@ contract SeedStablePairs is Script {
         address proxy = vm.envAddress("ROUTER_PROXY");
         (address[] memory tokenA, address[] memory tokenB, uint24[] memory fees) = seedData();
 
+        // The broadcaster MUST be ROUTER_OWNER — setPairFees is onlyOwner.
         vm.startBroadcast();
         PropAMMRouter(proxy).setPairFees(tokenA, tokenB, fees);
         vm.stopBroadcast();

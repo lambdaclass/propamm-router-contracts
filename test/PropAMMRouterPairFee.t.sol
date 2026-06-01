@@ -241,6 +241,7 @@ contract PropAMMRouterPairFeeTest is Test {
 
         for (uint256 i = 0; i < a.length; i++) {
             assertEq(router.resolvedFee(a[i], b[i]), f[i]);
+            assertEq(router.getPairFee(a[i], b[i]), f[i]);
             // order-independence holds for the seeded pairs too
             assertEq(router.resolvedFee(b[i], a[i]), f[i]);
         }
