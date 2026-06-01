@@ -372,7 +372,7 @@ contract PropAMMRouter is
         address recipient
     ) private returns (uint256 amountOut) {
         amountOut = UniV3Router.swapExactIn(
-            tokenIn, tokenOut, fallbackFee, amountIn, amountOutMin, recipient, fallbackSwapRouter
+            tokenIn, tokenOut, _resolveFee(tokenIn, tokenOut), amountIn, amountOutMin, recipient, fallbackSwapRouter
         );
         return amountOut;
     }
@@ -404,7 +404,7 @@ contract PropAMMRouter is
         } else if (venue == BEBOP_ROUTER) {
             amountOut = IBebopRouter(BEBOP_ROUTER).quote(tokenIn, tokenOut, amount);
         } else if (venue == fallbackSwapRouter) {
-            amountOut = UniV3Router.quoteExactIn(tokenIn, tokenOut, fallbackFee, amount, fallbackQuoter);
+            amountOut = UniV3Router.quoteExactIn(tokenIn, tokenOut, _resolveFee(tokenIn, tokenOut), amount, fallbackQuoter);
         } else {
             revert UnknownVenue();
         }
@@ -432,7 +432,7 @@ contract PropAMMRouter is
     /// @param amount The exact amount of `tokenIn` to quote against.
     /// @return amountOut The amount of `tokenOut` the Uniswap V3 swap would produce.
     function quoteUniswapV3(address tokenIn, address tokenOut, uint256 amount) external returns (uint256 amountOut) {
-        return UniV3Router.quoteExactIn(tokenIn, tokenOut, fallbackFee, amount, fallbackQuoter);
+        return UniV3Router.quoteExactIn(tokenIn, tokenOut, _resolveFee(tokenIn, tokenOut), amount, fallbackQuoter);
     }
 
     /// @notice Finds the venue offering the best `tokenOut` for `amount` of

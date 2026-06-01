@@ -169,4 +169,50 @@ contract PropAMMRouterPairFeeTest is Test {
         // entry 0 must NOT have been committed (whole batch rolled back)
         assertEq(router.getPairFee(address(tokenIn), address(tokenOut)), 0);
     }
+
+    function test_quoteUniswapV3_usesResolvedFee() public {
+        mockQuoter.setAmountOut(1000);
+        router.setPairFee(address(tokenIn), address(tokenOut), 100);
+        router.quoteUniswapV3(address(tokenIn), address(tokenOut), 1 ether);
+        assertEq(mockQuoter.lastFee(), 100);
+    }
+
+    function test_quoteUniswapV3_unconfigured_usesGlobalFee() public {
+        mockQuoter.setAmountOut(1000);
+        router.quoteUniswapV3(address(tokenIn), address(tokenOut), 1 ether);
+        assertEq(mockQuoter.lastFee(), 3000);
+    }
+
+    function test_quoteVenueV1_fallback_usesResolvedFee() public {
+        mockQuoter.setAmountOut(1000);
+        router.setPairFee(address(tokenIn), address(tokenOut), 100);
+        router.quoteVenueV1(address(mockRouter), address(tokenIn), address(tokenOut), 1 ether);
+        assertEq(mockQuoter.lastFee(), 100);
+    }
+
+    function test_swapViaFallback_usesResolvedFee() public {
+        router.setPairFee(address(tokenIn), address(tokenOut), 100);
+        mockRouter.setAmountOut(1000);
+        tokenIn.mint(address(this), 1000);
+        tokenIn.approve(address(router), 1000);
+
+        router.swapViaVenueV1(
+            address(mockRouter), address(tokenIn), address(tokenOut), 1000, 900, recipient, block.timestamp + 1
+        );
+
+        assertEq(mockRouter.lastFee(), 100);
+        assertEq(tokenOut.balanceOf(recipient), 1000);
+    }
+
+    function test_swapViaFallback_unconfigured_usesGlobalFee() public {
+        mockRouter.setAmountOut(1000);
+        tokenIn.mint(address(this), 1000);
+        tokenIn.approve(address(router), 1000);
+
+        router.swapViaVenueV1(
+            address(mockRouter), address(tokenIn), address(tokenOut), 1000, 900, recipient, block.timestamp + 1
+        );
+
+        assertEq(mockRouter.lastFee(), 3000);
+    }
 }
