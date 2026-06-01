@@ -4,6 +4,7 @@ pragma solidity ^0.8.35;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
@@ -16,8 +17,17 @@ import {KIPSELI_PAMM, IKipseliPAMM} from "./interfaces/IKipseliPAMM.sol";
 import {KIPSELI_QUOTER, IKipseliQuoter} from "./interfaces/IKipseliQuoter.sol";
 import {UniV3Router} from "./libraries/UniV3Router.sol";
 
+/// @notice Fee parameters for the `*WithFeeV1` entrypoints. Bundled into a struct
+/// so each entrypoint stays within the EVM stack limit without enabling `via_ir`.
+/// @param bps Fee in basis points (1/10_000 of the output). Must be <= `MAX_FEE_BPS`.
+/// @param recipient Address that receives the fee in `tokenOut`. Must be non-zero.
+struct FrontendFee {
+    uint16 bps;
+    address recipient;
+}
+
 /// @title PropAMMRouter
-/// @notice Routes single-hop swaps to a propAMM and falls back through a fallback 
+/// @notice Routes single-hop swaps to a propAMM and falls back through a fallback
 /// venue if the chosen venue reverts.
 /// @dev Designed to live behind a UUPS proxy. The fallback path is wired at
 /// initialization via `fallbackSwapRouter` and `fallbackQuoter`
@@ -40,6 +50,11 @@ contract PropAMMRouter is
     address public fallbackQuoter;
     /// @notice Fee for the fallback venue.
     uint24 public fallbackFee;
+
+    /// @notice Hard cap on a frontend fee, in basis points (1.00%).
+    uint16 public constant MAX_FEE_BPS = 100;
+    /// @notice Basis-point denominator (100% = 10_000 bps).
+    uint16 public constant BPS_DENOMINATOR = 10_000;
 
     /// @notice Thrown when `_dispatchVenue` is called by anyone other than this
     /// contract itself, i.e. outside of the `try`-wrapped self-call made by
@@ -72,6 +87,10 @@ contract PropAMMRouter is
     error InvalidFallbackFee(uint24 fee);
     /// @notice Thrown when an address argument that must be non-zero is zero.
     error ZeroAddress();
+    /// @notice Thrown when a requested frontend fee exceeds `MAX_FEE_BPS`.
+    /// @param requested The caller-supplied fee in basis points.
+    /// @param max The maximum allowed fee (`MAX_FEE_BPS`).
+    error FeeBpsTooHigh(uint16 requested, uint16 max);
 
     // `Swapped` is declared in IPropAMMRouter (part of the published interface)
     // and inherited here. The operational events below are implementation
@@ -94,6 +113,17 @@ contract PropAMMRouter is
     /// @param to The recipient of the rescued tokens.
     /// @param amount The amount transferred.
     event TokensRescued(address indexed token, address indexed to, uint256 amount);
+    /// @notice Emitted when a frontend fee is skimmed from a `*WithFeeV1` swap output.
+    /// @param feeRecipient The address that received the fee.
+    /// @param tokenOut The output token the fee was taken in.
+    /// @param feeAmount The fee amount transferred to `feeRecipient`.
+    /// @param payer The account that invoked the swap and bore the fee.
+    event FrontendFeeCharged(
+        address indexed feeRecipient,
+        address indexed tokenOut,
+        uint256 feeAmount,
+        address indexed payer
+    );
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
