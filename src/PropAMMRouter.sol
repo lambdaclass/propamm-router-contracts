@@ -4,6 +4,7 @@ pragma solidity ^0.8.35;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
@@ -15,6 +16,15 @@ import {BEBOP_ROUTER, IBebopRouter} from "./interfaces/IBebopRouter.sol";
 import {KIPSELI_PAMM, IKipseliPAMM} from "./interfaces/IKipseliPAMM.sol";
 import {KIPSELI_QUOTER, IKipseliQuoter} from "./interfaces/IKipseliQuoter.sol";
 import {UniV3Router} from "./libraries/UniV3Router.sol";
+
+/// @notice Fee parameters for the `*WithFeeV1` entrypoints. Bundled into a struct
+/// so each entrypoint stays within the EVM stack limit without enabling `via_ir`.
+/// @param bps Fee in basis points (1/10_000 of the output). Must be <= `MAX_FEE_BPS`.
+/// @param recipient Address that receives the fee in `tokenOut`. Must be non-zero.
+struct FrontendFee {
+    uint16 bps;
+    address recipient;
+}
 
 /// @title PropAMMRouter
 /// @notice Routes single-hop swaps to a propAMM and falls back through a fallback
@@ -54,6 +64,11 @@ contract PropAMMRouter is
     address private constant USDT = 0xdAC17F958D2ee523a2206206994597C13D831ec7;
     address private constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
 
+    /// @notice Hard cap on a frontend fee, in basis points (1.00%).
+    uint16 public constant MAX_FEE_BPS = 100;
+    /// @notice Basis-point denominator (100% = 10_000 bps).
+    uint16 public constant BPS_DENOMINATOR = 10_000;
+
     /// @notice Thrown when `_dispatchVenue` is called by anyone other than this
     /// contract itself, i.e. outside of the `try`-wrapped self-call made by
     /// `_coreSwap`.
@@ -85,6 +100,10 @@ contract PropAMMRouter is
     error InvalidFallbackFee(uint24 fee);
     /// @notice Thrown when an address argument that must be non-zero is zero.
     error ZeroAddress();
+    /// @notice Thrown when a requested frontend fee exceeds `MAX_FEE_BPS`.
+    /// @param requested The caller-supplied fee in basis points.
+    /// @param max The maximum allowed fee (`MAX_FEE_BPS`).
+    error FeeBpsTooHigh(uint16 requested, uint16 max);
     /// @notice Thrown when `setPairFees` is given arrays of unequal length.
     error ArrayLengthMismatch();
 
@@ -115,6 +134,17 @@ contract PropAMMRouter is
     /// @param to The recipient of the rescued tokens.
     /// @param amount The amount transferred.
     event TokensRescued(address indexed token, address indexed to, uint256 amount);
+    /// @notice Emitted when a frontend fee is skimmed from a `*WithFeeV1` swap output.
+    /// @param feeRecipient The address that received the fee.
+    /// @param tokenOut The output token the fee was taken in.
+    /// @param feeAmount The fee amount transferred to `feeRecipient`.
+    /// @param payer The account that invoked the swap and bore the fee.
+    event FrontendFeeCharged(
+        address indexed feeRecipient,
+        address indexed tokenOut,
+        uint256 feeAmount,
+        address indexed payer
+    );
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -183,7 +213,51 @@ contract PropAMMRouter is
         require(block.timestamp <= deadline, Expired());
         (uint256 bestQuote, address venue) = _pickBestVenue(tokenIn, tokenOut, amountIn);
         require(bestQuote >= amountOutMin, QuoteBelowMinimum(amountOutMin, bestQuote));
-        return _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
+        (amountOut, executedVenue) =
+            _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
+        _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
+    }
+
+    /// @notice Best-venue swap that skims a frontend fee from the output token.
+    /// @dev Implementation-only (not in `IPropAMMRouter`). Validates `fee`, grosses up
+    /// the net `amountOutMin` so the user still nets at least their minimum, routes the
+    /// swap to this contract, then forwards the fee and the net. Emits `Swapped` with the
+    /// net amount and the real `recipient`. `whenNotPaused`/`nonReentrant` like `swapV1`.
+    /// @param tokenIn The token being sold.
+    /// @param tokenOut The token being bought.
+    /// @param amountIn The exact amount of `tokenIn` to sell.
+    /// @param amountOutMin The minimum NET `tokenOut` the user must receive (after the fee).
+    /// @param recipient The address that receives the net `tokenOut`.
+    /// @param deadline Unix timestamp after which the swap is no longer valid.
+    /// @param fee The frontend fee (bps + recipient).
+    /// @return amountOut The net `tokenOut` delivered to `recipient`.
+    /// @return executedVenue The venue that filled, or the fallback venue address.
+    function swapWithFeeV1(
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        address recipient,
+        uint256 deadline,
+        FrontendFee calldata fee
+    ) external whenNotPaused nonReentrant returns (uint256 amountOut, address executedVenue) {
+        _validateFee(fee);
+        require(block.timestamp <= deadline, Expired());
+
+        uint256 grossMin = _grossUp(amountOutMin, fee.bps);
+        address venue;
+        {
+            uint256 bestQuote;
+            (bestQuote, venue) = _pickBestVenue(tokenIn, tokenOut, amountIn);
+            require(bestQuote >= grossMin, QuoteBelowMinimum(grossMin, bestQuote));
+        }
+
+        uint256 delivered;
+        (delivered, executedVenue) =
+            _coreSwap(venue, tokenIn, tokenOut, amountIn, grossMin, address(this), deadline);
+
+        amountOut = _skimAndDisburse(tokenOut, delivered, fee, recipient);
+        _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
 
     /// @inheritdoc IPropAMMRouter
@@ -199,7 +273,44 @@ contract PropAMMRouter is
         uint256 deadline
     ) public whenNotPaused nonReentrant returns (uint256 amountOut) {
         require(_isVenue(venue), UnknownVenue());
-        (amountOut,) = _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
+        address executedVenue;
+        (amountOut, executedVenue) =
+            _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
+        _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
+    }
+
+    /// @notice Caller-named-venue swap that skims a frontend fee from the output token.
+    /// @dev Implementation-only. Like `swapViaVenueV1` plus the fee skim; the underlying
+    /// swap is routed to this contract, then fee + net are forwarded. Reverts `UnknownVenue`
+    /// if `venue` is neither a whitelisted propAMM nor the fallback address.
+    /// @param venue The venue address (propAMM or the fallback router address).
+    /// @param tokenIn The token being sold.
+    /// @param tokenOut The token being bought.
+    /// @param amountIn The exact amount of `tokenIn` to sell.
+    /// @param amountOutMin The minimum NET `tokenOut` the user must receive (after the fee).
+    /// @param recipient The address that receives the net `tokenOut`.
+    /// @param deadline Unix timestamp after which the swap is no longer valid.
+    /// @param fee The frontend fee (bps + recipient).
+    /// @return amountOut The net `tokenOut` delivered to `recipient`.
+    function swapViaVenueWithFeeV1(
+        address venue,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        address recipient,
+        uint256 deadline,
+        FrontendFee calldata fee
+    ) external whenNotPaused nonReentrant returns (uint256 amountOut) {
+        _validateFee(fee);
+        require(_isVenue(venue), UnknownVenue());
+
+        uint256 grossMin = _grossUp(amountOutMin, fee.bps);
+        (uint256 delivered, address executedVenue) =
+            _coreSwap(venue, tokenIn, tokenOut, amountIn, grossMin, address(this), deadline);
+
+        amountOut = _skimAndDisburse(tokenOut, delivered, fee, recipient);
+        _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
 
     /// @inheritdoc IPropAMMRouter
@@ -220,21 +331,67 @@ contract PropAMMRouter is
         require(block.timestamp <= deadline, Expired());
 
         (uint256 bestQuote, address venue) = _pickBestVenueFrom(venues, tokenIn, tokenOut, amountIn);
-
-        // If no quotes available, or the best quote is below the minimum,
-        // route to the fallback venue, which `_coreSwap` runs directly.
+        // If no quotes are available, or the best quote is below the minimum,
+        // default to the Uniswap fallback venue instead of reverting (#9).
         if (venue == address(0) || bestQuote < amountOutMin) {
             venue = fallbackSwapRouter;
         }
+        (amountOut, executedVenue) =
+            _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
+        _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
+    }
 
-        return _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
+    /// @notice Best-of-a-subset swap that skims a frontend fee from the output token.
+    /// @dev Implementation-only. Like `swapViaSelectedVenuesV1` plus the fee skim; requotes
+    /// only `venues`, grosses up the net min, routes the swap to this contract, then forwards
+    /// fee + net. Reverts `NoQuotesAvailable` if none of `venues` can be priced.
+    /// @param venues The venues to consider — a subset of the available venues.
+    /// @param tokenIn The token being sold.
+    /// @param tokenOut The token being bought.
+    /// @param amountIn The exact amount of `tokenIn` to sell.
+    /// @param amountOutMin The minimum NET `tokenOut` the user must receive (after the fee).
+    /// @param recipient The address that receives the net `tokenOut`.
+    /// @param deadline Unix timestamp after which the swap is no longer valid.
+    /// @param fee The frontend fee (bps + recipient).
+    /// @return amountOut The net `tokenOut` delivered to `recipient`.
+    /// @return executedVenue The venue that filled, or the fallback venue address.
+    function swapViaSelectedVenuesWithFeeV1(
+        address[] calldata venues,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        address recipient,
+        uint256 deadline,
+        FrontendFee calldata fee
+    ) external whenNotPaused nonReentrant returns (uint256 amountOut, address executedVenue) {
+        _validateFee(fee);
+        require(block.timestamp <= deadline, Expired());
+
+        uint256 grossMin = _grossUp(amountOutMin, fee.bps);
+        address venue;
+        {
+            uint256 bestQuote;
+            (bestQuote, venue) = _pickBestVenueFrom(venues, tokenIn, tokenOut, amountIn);
+            require(venue != address(0), NoQuotesAvailable());
+            require(bestQuote >= grossMin, QuoteBelowMinimum(grossMin, bestQuote));
+        }
+
+        uint256 delivered;
+        (delivered, executedVenue) =
+            _coreSwap(venue, tokenIn, tokenOut, amountIn, grossMin, address(this), deadline);
+
+        amountOut = _skimAndDisburse(tokenOut, delivered, fee, recipient);
+        _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
 
     /// @notice Pulls funds once and executes a swap, attempting `venue` first
     /// and recovering via the fallback if it fails.
     /// @dev Shared core for `swapV1` and `swapViaVenueV1`; unguarded so the two
     /// public entrypoints can each apply `whenNotPaused`/`nonReentrant` without
-    /// re-entering the guard through one another.
+    /// re-entering the guard through one another. The `Swapped` event is emitted
+    /// by the calling entrypoint (not here) so the fee entrypoints can log the
+    /// net amount and real recipient.
     /// @param venue The propAMM to attempt first, or `fallbackSwapRouter`.
     /// @param tokenIn The address of the token being sold.
     /// @param tokenOut The address of the token being bought.
@@ -265,7 +422,6 @@ contract PropAMMRouter is
             ) returns (
                 uint256 amountOut_
             ) {
-                _emitSwapped(venue, tokenIn, tokenOut, amountIn, amountOut_, recipient);
                 return (amountOut_, venue);
             } catch {
                 // Fall through to the Uniswap V3 fallback below.
@@ -275,16 +431,16 @@ contract PropAMMRouter is
         swapViaUniswapV3(tokenIn, tokenOut, amountIn, amountOutMin, recipient);
         amountOut = IERC20(tokenOut).balanceOf(recipient) - prevTokenOutBalance;
         require(amountOut >= amountOutMin, InsufficientOutput(amountOutMin, amountOut));
-        _emitSwapped(fallbackSwapRouter, tokenIn, tokenOut, amountIn, amountOut, recipient);
         return (amountOut, fallbackSwapRouter);
     }
 
     /// @notice Logs a completed swap.
-    /// @dev Wraps the `Swapped` emit so `_coreSwap` does not carry the event's
-    /// arguments live on its (already param-heavy) stack at the emit site —
-    /// avoids a stack-too-deep without enabling `viaIR`. `msg.sender` is read
-    /// here and equals `_coreSwap`'s caller (and the entrypoint's), since
-    /// internal calls preserve the message context.
+    /// @dev Wraps the `Swapped` emit so the calling entrypoint does not carry
+    /// the event's arguments live on its (already param-heavy) stack at the
+    /// emit site — avoids a stack-too-deep without enabling `viaIR`. Called
+    /// from the public swap entrypoints after `_coreSwap` returns. `msg.sender`
+    /// is read here and equals the entrypoint's caller, since internal calls
+    /// preserve the message context.
     /// @param marketMaker The venue that filled, or `fallbackSwapRouter`. Placed
     /// first (not in `Swapped`'s field order) so the deepest `_coreSwap` local
     /// (`venue`) is read at the shallowest stack reach — another stack-too-deep
@@ -303,6 +459,56 @@ contract PropAMMRouter is
         address recipient
     ) private {
         emit Swapped(msg.sender, tokenIn, tokenOut, amountIn, amountOut, recipient, marketMaker);
+    }
+
+    /// @notice Reverts unless the frontend fee is within cap and has a real recipient.
+    /// @param fee The caller-supplied fee parameters.
+    function _validateFee(FrontendFee calldata fee) private pure {
+        require(fee.bps <= MAX_FEE_BPS, FeeBpsTooHigh(fee.bps, MAX_FEE_BPS));
+        require(fee.recipient != address(0), ZeroAddress());
+    }
+
+    /// @notice Grosses up a net `amountOutMin` so the post-fee output still meets it.
+    /// @dev `ceilDiv` rounds up to avoid a 1-wei false revert at the slippage boundary.
+    /// Safe from divide-by-zero because `feeBps <= MAX_FEE_BPS < BPS_DENOMINATOR`.
+    /// @param amountOutMin The net minimum the user must receive.
+    /// @param feeBps The fee in basis points.
+    /// @return grossMin The gross minimum the underlying swap must deliver.
+    function _grossUp(uint256 amountOutMin, uint16 feeBps) private pure returns (uint256 grossMin) {
+        grossMin = Math.ceilDiv(amountOutMin * BPS_DENOMINATOR, BPS_DENOMINATOR - feeBps);
+    }
+
+    /// @notice Floored basis-point fee on `amount`.
+    /// @param amount The gross amount the fee is taken from.
+    /// @param feeBps The fee in basis points.
+    /// @return The fee amount (rounds down, favoring the user).
+    function _feeAmount(uint256 amount, uint16 feeBps) private pure returns (uint256) {
+        return amount * feeBps / BPS_DENOMINATOR;
+    }
+
+    /// @notice Splits `delivered` tokenOut (held by this contract) into fee + net,
+    /// forwards the fee to `fee.recipient` and the net to `recipient`.
+    /// @dev Zero-value legs are skipped (gas + tokens that revert on 0-value transfers).
+    /// @param tokenOut The output token held by this contract.
+    /// @param delivered The gross amount this contract received from the swap.
+    /// @param fee The fee parameters.
+    /// @param recipient The end recipient of the net output.
+    /// @return net The amount forwarded to `recipient`.
+    function _skimAndDisburse(
+        address tokenOut,
+        uint256 delivered,
+        FrontendFee calldata fee,
+        address recipient
+    ) private returns (uint256 net) {
+        uint256 feeAmt = _feeAmount(delivered, fee.bps);
+        net = delivered - feeAmt;
+        if (feeAmt > 0) {
+            IERC20(tokenOut).safeTransfer(fee.recipient, feeAmt);
+            emit FrontendFeeCharged(fee.recipient, tokenOut, feeAmt, msg.sender);
+        }
+        if (net > 0) {
+            IERC20(tokenOut).safeTransfer(recipient, net);
+        }
     }
 
     /// @notice Executes a swap on a venue with funds already held by this contract.
