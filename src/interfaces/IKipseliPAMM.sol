@@ -5,10 +5,5 @@ pragma solidity ^0.8.35;
 address constant KIPSELI_PAMM = 0x5CDbE59400Cc2EFDCC2B54acca4a99FE00dD588c;
 
 interface IKipseliPAMM {
-    function swap(
-        address tokenIn,
-        uint256 amountIn,
-        address tokenOut,
-        address recipient
-    ) external returns (uint256);
+    function swap(address tokenIn, uint256 amountIn, address tokenOut, address recipient) external returns (uint256);
 }

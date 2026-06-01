@@ -116,7 +116,7 @@ interface IPropAMMRouter {
     /// @param tokenOut The token being bought.
     /// @param amount The amount of `tokenIn` to quote.
     /// @return bestQuote The best `tokenOut` amount across all venues.
-    /// @return venue The proprietary venue that produced `bestQuote`, or 
+    /// @return venue The proprietary venue that produced `bestQuote`, or
     /// the fallback venue address if the fallback won.
     function quoteV1(address tokenIn, address tokenOut, uint256 amount)
         external
