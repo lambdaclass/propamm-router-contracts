@@ -14,21 +14,23 @@ contract SeedStablePairs is Script {
     address constant DAI = 0x6B175474E89094C44Da98b954EedeAC495271d0F;
 
     /// @notice The pairs/tiers to seed. Edit here; both `run()` and the test use this.
-    function seedData()
-        public
-        pure
-        returns (address[] memory tokenA, address[] memory tokenB, uint24[] memory fees)
-    {
+    function seedData() public pure returns (address[] memory tokenA, address[] memory tokenB, uint24[] memory fees) {
         tokenA = new address[](3);
         tokenB = new address[](3);
         fees = new uint24[](3);
 
         // USDC/USDT — deepest at 0.01%.
-        tokenA[0] = USDC; tokenB[0] = USDT; fees[0] = 100;
+        tokenA[0] = USDC;
+        tokenB[0] = USDT;
+        fees[0] = 100;
         // USDC/DAI — deepest at 0.01%.
-        tokenA[1] = USDC; tokenB[1] = DAI; fees[1] = 100;
+        tokenA[1] = USDC;
+        tokenB[1] = DAI;
+        fees[1] = 100;
         // DAI/USDT — 0.05% default (historically the deeper pool); VERIFY vs 100 against live liquidity before mainnet.
-        tokenA[2] = DAI; tokenB[2] = USDT; fees[2] = 500;
+        tokenA[2] = DAI;
+        tokenB[2] = USDT;
+        fees[2] = 500;
     }
 
     function run() public {

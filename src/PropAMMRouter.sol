@@ -17,7 +17,7 @@ import {KIPSELI_QUOTER, IKipseliQuoter} from "./interfaces/IKipseliQuoter.sol";
 import {UniV3Router} from "./libraries/UniV3Router.sol";
 
 /// @title PropAMMRouter
-/// @notice Routes single-hop swaps to a propAMM and falls back through a fallback 
+/// @notice Routes single-hop swaps to a propAMM and falls back through a fallback
 /// venue if the chosen venue reverts.
 /// @dev Designed to live behind a UUPS proxy. The fallback path is wired at
 /// initialization via `fallbackSwapRouter` and `fallbackQuoter`
@@ -32,7 +32,7 @@ contract PropAMMRouter is
     using SafeERC20 for IERC20;
     using SafeCast for uint256;
 
-    /// @notice Fallback venue address. 
+    /// @notice Fallback venue address.
     /// Owner-settable via `setFallbackSwapRouter`.
     address public fallbackSwapRouter;
     /// @notice Fallback venue address used to price the fallback route.
@@ -161,7 +161,7 @@ contract PropAMMRouter is
     }
 
     /// @inheritdoc IPropAMMRouter
-    /// @dev Swaps via the `venue`. It must be a callable venue or the 
+    /// @dev Swaps via the `venue`. It must be a callable venue or the
     /// fallback venue named by the `fallbackSwapRouter` address.
     function swapViaVenueV1(
         address venue,
@@ -180,8 +180,8 @@ contract PropAMMRouter is
     /// @dev Requotes ONLY the caller-supplied `venues` on-chain via
     /// `_pickBestVenueFrom`, then executes the best through `_coreSwap`. As with
     /// `swapV1`, the fallback remains as the transparent safety net inside `_coreSwap`.
-    /// Reverts `NoQuotesAvailable` if none of `venues` can be priced, and `QuoteBelowMinimum` 
-    /// before pulling funds when the best quote across `venues` is under `amountOutMin`; 
+    /// Reverts `NoQuotesAvailable` if none of `venues` can be priced, and `QuoteBelowMinimum`
+    /// before pulling funds when the best quote across `venues` is under `amountOutMin`;
     /// quotes are advisory, so `_coreSwap` re-checks `amountOutMin` against the delivered
     /// balance delta.
     function swapViaSelectedVenuesV1(
@@ -206,7 +206,7 @@ contract PropAMMRouter is
     /// and recovering via the fallback if it fails.
     /// @dev Shared core for `swapV1` and `swapViaVenueV1`; unguarded so the two
     /// public entrypoints can each apply `whenNotPaused`/`nonReentrant` without
-    /// re-entering the guard through one another. 
+    /// re-entering the guard through one another.
     /// @param venue The propAMM to attempt first, or `fallbackSwapRouter`.
     /// @param tokenIn The address of the token being sold.
     /// @param tokenOut The address of the token being bought.
@@ -405,7 +405,8 @@ contract PropAMMRouter is
         } else if (venue == BEBOP_ROUTER) {
             amountOut = IBebopRouter(BEBOP_ROUTER).quote(tokenIn, tokenOut, amount);
         } else if (venue == fallbackSwapRouter) {
-            amountOut = UniV3Router.quoteExactIn(tokenIn, tokenOut, _resolveFee(tokenIn, tokenOut), amount, fallbackQuoter);
+            amountOut =
+                UniV3Router.quoteExactIn(tokenIn, tokenOut, _resolveFee(tokenIn, tokenOut), amount, fallbackQuoter);
         } else {
             revert UnknownVenue();
         }

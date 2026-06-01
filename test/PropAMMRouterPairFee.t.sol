@@ -113,8 +113,12 @@ contract PropAMMRouterPairFeeTest is Test {
         address[] memory a = new address[](2);
         address[] memory b = new address[](2);
         uint24[] memory f = new uint24[](2);
-        a[0] = address(tokenIn);  b[0] = address(tokenOut); f[0] = 100;
-        a[1] = address(tokenOut); b[1] = address(0x1234);   f[1] = 500;
+        a[0] = address(tokenIn);
+        b[0] = address(tokenOut);
+        f[0] = 100;
+        a[1] = address(tokenOut);
+        b[1] = address(0x1234);
+        f[1] = 500;
 
         router.setPairFees(a, b, f);
 
@@ -126,8 +130,12 @@ contract PropAMMRouterPairFeeTest is Test {
         address[] memory a = new address[](2);
         address[] memory b = new address[](2);
         uint24[] memory f = new uint24[](2);
-        a[0] = address(tokenIn);  b[0] = address(tokenOut); f[0] = 100;
-        a[1] = address(tokenOut); b[1] = address(0x1234);   f[1] = 500;
+        a[0] = address(tokenIn);
+        b[0] = address(tokenOut);
+        f[0] = 100;
+        a[1] = address(tokenOut);
+        b[1] = address(0x1234);
+        f[1] = 500;
 
         vm.expectEmit(true, true, false, true, address(router));
         emit PairFeeUpdated(address(tokenIn), address(tokenOut), 0, 100);
@@ -149,7 +157,9 @@ contract PropAMMRouterPairFeeTest is Test {
         address[] memory a = new address[](1);
         address[] memory b = new address[](1);
         uint24[] memory f = new uint24[](1);
-        a[0] = address(tokenIn); b[0] = address(tokenOut); f[0] = 1_000_000;
+        a[0] = address(tokenIn);
+        b[0] = address(tokenOut);
+        f[0] = 1_000_000;
         vm.expectRevert(abi.encodeWithSelector(PropAMMRouter.InvalidFallbackFee.selector, uint24(1_000_000)));
         router.setPairFees(a, b, f);
     }
@@ -167,8 +177,12 @@ contract PropAMMRouterPairFeeTest is Test {
         address[] memory a = new address[](2);
         address[] memory b = new address[](2);
         uint24[] memory f = new uint24[](2);
-        a[0] = address(tokenIn);  b[0] = address(tokenOut); f[0] = 100;       // valid
-        a[1] = address(tokenOut); b[1] = address(0x1234);   f[1] = 1_000_000; // invalid
+        a[0] = address(tokenIn); // valid
+        b[0] = address(tokenOut);
+        f[0] = 100;
+        a[1] = address(tokenOut); // invalid
+        b[1] = address(0x1234);
+        f[1] = 1_000_000;
 
         vm.expectRevert(abi.encodeWithSelector(PropAMMRouter.InvalidFallbackFee.selector, uint24(1_000_000)));
         router.setPairFees(a, b, f);
@@ -233,8 +247,8 @@ contract PropAMMRouterPairFeeTest is Test {
         (uint256 amountOut, address executedVenue) =
             router.swapV1(address(tokenIn), address(tokenOut), 1000, 900, recipient, block.timestamp + 1);
 
-        assertEq(mockRouter.lastFee(), 100);               // executed at the resolved per-pair tier
-        assertEq(executedVenue, address(mockRouter));      // fallbackSwapRouter won
+        assertEq(mockRouter.lastFee(), 100); // executed at the resolved per-pair tier
+        assertEq(executedVenue, address(mockRouter)); // fallbackSwapRouter won
         assertEq(amountOut, 1000);
         assertEq(tokenOut.balanceOf(recipient), 1000);
     }
