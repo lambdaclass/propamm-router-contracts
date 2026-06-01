@@ -20,7 +20,7 @@ contract PropAMMRouterPairFeeTest is Test {
     address internal recipient = address(0xCAFE);
 
     // Re-declared locally so vm.expectEmit can match the router's emit.
-    // Mirror of PropAMMRouter.PairFeeUpdated (added in a later task); kept in sync so vm.expectEmit matches.
+    // Mirror of PropAMMRouter.PairFeeUpdated (added in Task 3); kept in sync so vm.expectEmit matches.
     event PairFeeUpdated(address indexed tokenA, address indexed tokenB, uint24 oldFee, uint24 newFee);
 
     function setUp() public {
@@ -93,5 +93,12 @@ contract PropAMMRouterPairFeeTest is Test {
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", stranger));
         router.setPairFee(address(tokenIn), address(tokenOut), 100);
+    }
+
+    function test_setPairFee_emitsEventWithPriorFeeAsOld() public {
+        router.setPairFee(address(tokenIn), address(tokenOut), 100);
+        vm.expectEmit(true, true, false, true, address(router));
+        emit PairFeeUpdated(address(tokenIn), address(tokenOut), 100, 500);
+        router.setPairFee(address(tokenIn), address(tokenOut), 500);
     }
 }
