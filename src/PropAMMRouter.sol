@@ -76,6 +76,8 @@ contract PropAMMRouter is
     error InvalidFallbackFee(uint24 fee);
     /// @notice Thrown when an address argument that must be non-zero is zero.
     error ZeroAddress();
+    /// @notice Thrown when `setPairFees` is given arrays of unequal length.
+    error ArrayLengthMismatch();
 
     // `Swapped` is declared in IPropAMMRouter (part of the published interface)
     // and inherited here. The operational events below are implementation
@@ -570,6 +572,23 @@ contract PropAMMRouter is
     /// @param fee Fee tier in hundredths of a bip (e.g. `100` for 0.01%), or 0 to clear.
     function setPairFee(address tokenA, address tokenB, uint24 fee) external onlyOwner {
         _setPairFee(tokenA, tokenB, fee);
+    }
+
+    /// @notice Sets (or clears) per-pair fallback fees for several pairs in one call.
+    /// @dev Owner-gated. The three arrays are zipped index-wise and must be equal
+    /// length. Each entry follows the same rules as `setPairFee` (0 clears) and emits
+    /// its own `PairFeeUpdated`.
+    /// @param tokenA Array whose i-th element is one token of pair `i`.
+    /// @param tokenB Array whose i-th element is the other token of pair `i`.
+    /// @param fees Array whose i-th element is the tier for pair `i`, or 0 to clear.
+    function setPairFees(address[] calldata tokenA, address[] calldata tokenB, uint24[] calldata fees)
+        external
+        onlyOwner
+    {
+        require(tokenA.length == tokenB.length && tokenB.length == fees.length, ArrayLengthMismatch());
+        for (uint256 i = 0; i < fees.length; i++) {
+            _setPairFee(tokenA[i], tokenB[i], fees[i]);
+        }
     }
 
     /// @dev Shared validate-emit-store for both setters. Mirrors `setFallbackFee`'s

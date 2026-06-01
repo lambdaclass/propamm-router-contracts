@@ -101,4 +101,58 @@ contract PropAMMRouterPairFeeTest is Test {
         emit PairFeeUpdated(address(tokenIn), address(tokenOut), 100, 500);
         router.setPairFee(address(tokenIn), address(tokenOut), 500);
     }
+
+    function test_setPairFees_batchSets() public {
+        address[] memory a = new address[](2);
+        address[] memory b = new address[](2);
+        uint24[] memory f = new uint24[](2);
+        a[0] = address(tokenIn);  b[0] = address(tokenOut); f[0] = 100;
+        a[1] = address(tokenOut); b[1] = address(0x1234);   f[1] = 500;
+
+        router.setPairFees(a, b, f);
+
+        assertEq(router.resolvedFee(address(tokenIn), address(tokenOut)), 100);
+        assertEq(router.resolvedFee(address(tokenOut), address(0x1234)), 500);
+    }
+
+    function test_setPairFees_emitsPerPair() public {
+        address[] memory a = new address[](2);
+        address[] memory b = new address[](2);
+        uint24[] memory f = new uint24[](2);
+        a[0] = address(tokenIn);  b[0] = address(tokenOut); f[0] = 100;
+        a[1] = address(tokenOut); b[1] = address(0x1234);   f[1] = 500;
+
+        vm.expectEmit(true, true, false, true, address(router));
+        emit PairFeeUpdated(address(tokenIn), address(tokenOut), 0, 100);
+        vm.expectEmit(true, true, false, true, address(router));
+        emit PairFeeUpdated(address(tokenOut), address(0x1234), 0, 500);
+
+        router.setPairFees(a, b, f);
+    }
+
+    function test_setPairFees_lengthMismatchReverts() public {
+        address[] memory a = new address[](2);
+        address[] memory b = new address[](1);
+        uint24[] memory f = new uint24[](2);
+        vm.expectRevert(PropAMMRouter.ArrayLengthMismatch.selector);
+        router.setPairFees(a, b, f);
+    }
+
+    function test_setPairFees_invalidFeeInSlotReverts() public {
+        address[] memory a = new address[](1);
+        address[] memory b = new address[](1);
+        uint24[] memory f = new uint24[](1);
+        a[0] = address(tokenIn); b[0] = address(tokenOut); f[0] = 1_000_000;
+        vm.expectRevert(abi.encodeWithSelector(PropAMMRouter.InvalidFallbackFee.selector, uint24(1_000_000)));
+        router.setPairFees(a, b, f);
+    }
+
+    function test_setPairFees_onlyOwner() public {
+        address[] memory a = new address[](0);
+        address[] memory b = new address[](0);
+        uint24[] memory f = new uint24[](0);
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", stranger));
+        router.setPairFees(a, b, f);
+    }
 }
