@@ -105,6 +105,94 @@ contract PropAMMRouterFeeTest is Test {
         assertEq(tokenOut.balanceOf(feeRecipient), expectedFee);
     }
 
+    function test_swapWithFee_revertsFeeTooHigh() public {
+        _prepare(1_000e18, 1_000e18);
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(PropAMMRouter.FeeBpsTooHigh.selector, uint16(101), uint16(100)));
+        router.swapWithFeeV1(
+            address(tokenIn), address(tokenOut), 1_000e18, 0,
+            user, block.timestamp + 1, FrontendFee({bps: 101, recipient: feeRecipient})
+        );
+    }
+
+    function test_swapWithFee_revertsZeroFeeRecipient() public {
+        _prepare(1_000e18, 1_000e18);
+        vm.prank(user);
+        vm.expectRevert(PropAMMRouter.ZeroAddress.selector);
+        router.swapWithFeeV1(
+            address(tokenIn), address(tokenOut), 1_000e18, 0,
+            user, block.timestamp + 1, FrontendFee({bps: 50, recipient: address(0)})
+        );
+    }
+
+    // amountOutMin is net; grossMin > best quote (900e18) so the pre-pull check rejects
+    // with the grossed-up minimum.
+    function test_swapWithFee_revertsQuoteBelowGrossMin() public {
+        _prepare(1_000e18, 900e18); // quote + delivered both 900e18
+        uint256 netMin = 950e18;
+        uint256 grossMin = Math.ceilDiv(netMin * 10_000, 10_000 - 50);
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(PropAMMRouter.QuoteBelowMinimum.selector, grossMin, uint256(900e18)));
+        router.swapWithFeeV1(
+            address(tokenIn), address(tokenOut), 1_000e18, netMin,
+            user, block.timestamp + 1, FrontendFee({bps: 50, recipient: feeRecipient})
+        );
+    }
+
+    function test_swapWithFee_zeroFee_paysFullAndNoFeeEvent() public {
+        _prepare(1_000e18, 1_000e18);
+        vm.recordLogs();
+        vm.prank(user);
+        (uint256 amountOut,) = router.swapWithFeeV1(
+            address(tokenIn), address(tokenOut), 1_000e18, 1_000e18,
+            user, block.timestamp + 1, FrontendFee({bps: 0, recipient: feeRecipient})
+        );
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        for (uint256 i = 0; i < logs.length; i++) {
+            assertTrue(
+                logs[i].topics[0] != PropAMMRouter.FrontendFeeCharged.selector,
+                "FrontendFeeCharged must not fire at zero fee"
+            );
+        }
+        assertEq(amountOut, 1_000e18);
+        assertEq(tokenOut.balanceOf(user), 1_000e18);
+        assertEq(tokenOut.balanceOf(feeRecipient), 0);
+    }
+
+    function test_swapWithFee_tinyAmountFloorsFeeToZero() public {
+        // grossMin = ceilDiv(100 * 10_000, 9_950) = 101; deliver 101.
+        _prepare(10, 101);
+        vm.prank(user);
+        (uint256 amountOut,) = router.swapWithFeeV1(
+            address(tokenIn), address(tokenOut), 10, 100,
+            user, block.timestamp + 1, FrontendFee({bps: 50, recipient: feeRecipient})
+        );
+        assertEq(amountOut, 101); // fee = 101*50/10_000 = 0 (floored)
+        assertEq(tokenOut.balanceOf(feeRecipient), 0);
+    }
+
+    function test_swapWithFee_revertsWhenPaused() public {
+        vm.prank(owner);
+        router.pause();
+        _prepare(1_000e18, 1_000e18);
+        vm.prank(user);
+        vm.expectRevert(); // PausableUpgradeable.EnforcedPause
+        router.swapWithFeeV1(
+            address(tokenIn), address(tokenOut), 1_000e18, 0,
+            user, block.timestamp + 1, FrontendFee({bps: 50, recipient: feeRecipient})
+        );
+    }
+
+    function test_swapWithFee_revertsPastDeadline() public {
+        _prepare(1_000e18, 1_000e18);
+        vm.prank(user);
+        vm.expectRevert(PropAMMRouter.Expired.selector);
+        router.swapWithFeeV1(
+            address(tokenIn), address(tokenOut), 1_000e18, 0,
+            user, block.timestamp - 1, FrontendFee({bps: 50, recipient: feeRecipient})
+        );
+    }
+
     // Characterization: existing fee-free swapV1 routes through the fallback and
     // emits Swapped(recipient = user, amountOut = delivered). Guards Task 2.
     function test_swapV1_fallback_emitsSwapped() public {
