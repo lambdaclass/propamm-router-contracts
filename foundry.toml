@@ -7,6 +7,9 @@ libs = ["lib"]
 ffi = true
 ast = true
 build_info = true
+optimizer = true
+optimizer_runs = 999
+via_ir = true
 extra_output = ["storageLayout"]
 
 remappings = [
