@@ -5,14 +5,14 @@ import "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {PropAMMRouter} from "../src/PropAMMRouter.sol";
-import {SeedStablePairs} from "../scripts/SeedStablePairs.s.sol";
+import {SetupRouterVariables} from "../scripts/setupRouterVariables.s.sol";
 
 /// @notice Mainnet-fork test of the real upgrade flow for the live proxy, which
 /// was first deployed with the enum-era implementation (no `fallbackFee` storage).
 /// Reproduces production exactly: a bare `upgradeToAndCall(newImpl, "")` (as
 /// `scripts/Upgrade.s.sol` does), then the post-upgrade fee config applied the way
-/// `scripts/SeedStablePairs.s.sol` does. Asserts the proxy is broken in between and
-/// usable after.
+/// `scripts/setupRouterVariables.s.sol` does. Asserts the proxy is broken in between
+/// and usable after.
 /// @dev Forks via `ETH_RPC_URL`; the whole suite skips (not fails) when it is unset,
 /// so CI without an archive/full node still passes.
 contract UpgradeConfigForkTest is Test {
@@ -25,14 +25,14 @@ contract UpgradeConfigForkTest is Test {
     address constant DAI = 0x6B175474E89094C44Da98b954EedeAC495271d0F;
 
     PropAMMRouter router = PropAMMRouter(PROXY);
-    SeedStablePairs seed;
+    SetupRouterVariables seed;
     bool forked;
 
     function setUp() public {
         string memory rpc = vm.envOr("ETH_RPC_URL", string(""));
         if (bytes(rpc).length == 0) return; // no RPC -> tests self-skip
         vm.createSelectFork(rpc);
-        seed = new SeedStablePairs();
+        seed = new SetupRouterVariables();
         forked = true;
     }
 
@@ -43,13 +43,20 @@ contract UpgradeConfigForkTest is Test {
         UUPSUpgradeable(PROXY).upgradeToAndCall(address(newImpl), "");
     }
 
-    /// @dev Mirrors SeedStablePairs.run(): set the global fallback fee, then the
-    /// deep per-pair tiers, broadcast by the owner.
+    /// @dev Mirrors SetupRouterVariables.run(): set the global fallback fee, then the
+    /// deep per-pair tiers, then re-add the default propAMM venues, broadcast by the
+    /// owner.
     function _runConfigScript() internal {
         (address[] memory a, address[] memory b, uint24[] memory f) = seed.seedData();
+        address[] memory venues = seed.venues();
         vm.startPrank(OWNER);
         router.setFallbackFee(seed.FALLBACK_FEE());
         router.setPairFees(a, b, f);
+        for (uint256 i = 0; i < venues.length; i++) {
+            if (!router.isWhitelistedVenue(venues[i])) {
+                router.addVenue(venues[i]);
+            }
+        }
         vm.stopPrank();
     }
 
@@ -64,9 +71,11 @@ contract UpgradeConfigForkTest is Test {
         _bareUpgrade();
 
         // Upgraded but not yet configured: fallbackFee is 0 and the Uniswap
-        // fallback reverts (invalid tier 0) for any pair.
+        // fallback reverts (invalid tier 0) for any pair. The venue whitelist is
+        // also empty — _seedDefaultVenues is initializer-gated and never re-ran.
         assertEq(router.owner(), OWNER, "owner preserved across upgrade");
         assertEq(router.fallbackFee(), 0, "fallbackFee 0 right after bare upgrade");
+        assertEq(router.whitelistedVenueCount(), 0, "no venues right after bare upgrade");
         vm.expectRevert();
         router.quoteUniswapV3(WETH, USDC, 1e18);
 
@@ -77,6 +86,13 @@ contract UpgradeConfigForkTest is Test {
         assertEq(router.resolvedFee(WETH, USDC), 500, "USDC/WETH seeded tier");
         assertEq(router.resolvedFee(USDT, USDC), 100, "USDC/USDT seeded tier");
         assertEq(router.resolvedFee(DAI, WETH), 3000, "unseeded pair -> global default");
+
+        // Default propAMM venues restored too, so swapV1 can route them again.
+        address[] memory venues = seed.venues();
+        assertEq(router.whitelistedVenueCount(), venues.length, "all default venues whitelisted");
+        for (uint256 i = 0; i < venues.length; i++) {
+            assertTrue(router.isWhitelistedVenue(venues[i]), "venue whitelisted after config");
+        }
 
         // A real swap now works. Bebop may quote highest but cannot fill on a fork
         // (no signed order), so _coreSwap falls through to the Uniswap fallback.

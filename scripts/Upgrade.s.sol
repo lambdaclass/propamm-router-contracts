@@ -17,13 +17,13 @@ contract Upgrade is Script {
         // per-pair fee map (an enum-era deployment) therefore carries `fallbackFee = 0`
         // after this bare upgrade, making the fallback resolve to tier 0 (invalid) and
         // revert for every unconfigured pair. The fee config is restored as a SEPARATE
-        // owner step right after this upgrade: run `scripts/SeedStablePairs.s.sol`
+        // owner step right after this upgrade: run `scripts/setupRouterVariables.s.sol`
         // (sets `fallbackFee = 3000` + the deep per-pair tiers). Consider `pause()`-ing
         // the router across the two steps if swaps could arrive in between.
         Upgrades.upgradeProxy(
             proxy,
             newImplName,
-            "" // no reinitializer; fee config restored post-upgrade by SeedStablePairs.s.sol
+            "" // no reinitializer; fee config restored post-upgrade by setupRouterVariables.s.sol
         );
 
         vm.stopBroadcast();

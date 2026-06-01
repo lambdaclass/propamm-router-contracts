@@ -15,7 +15,7 @@ Venues are identified **by address**: the three proprietary AMM routers (FermiSw
 
 The Uniswap V3 fallback prices and swaps at a per-pair fee tier, resolved on every quote and swap: the owner-set override for that pair if one exists, otherwise the global `fallbackFee` (`3000`, i.e. the 0.30% tier, by default). Callers never pass a fee. The owner sets overrides with `setPairFee(tokenA, tokenB, fee)` or `setPairFees(tokenA[], tokenB[], fee[])` (order-independent; `fee == 0` clears an override), and retunes the global default with `setFallbackFee` — all without a contract upgrade. This lets stablecoin pairs use their tight tier (e.g. USDC/USDT at `100`) while volatile pairs keep `3000`/`10000`. Query the effective tier with `resolvedFee(tokenIn, tokenOut)` and the raw override with `getPairFee(tokenA, tokenB)`.
 
-A from-scratch deploy is pre-seeded by `initialize` with the global `fallbackFee` (`3000`) and the deep mainnet tiers — USDT/USDC at `100`, USDT/WETH and USDC/WETH at `500` — so no post-deploy config step is needed. This runs only in `initialize` (initializer-gated), so it does not re-apply when an existing proxy upgrades; those deployments restore the same config via `scripts/SeedStablePairs.s.sol`, which sets both `fallbackFee` and the per-pair tiers. The owner can clear or retune any seeded tier afterward with `setPairFee`.
+A from-scratch deploy is pre-seeded by `initialize` with the global `fallbackFee` (`3000`), the deep mainnet tiers — USDT/USDC at `100`, USDT/WETH and USDC/WETH at `500` — and the default propAMM venue whitelist (FermiSwap, Kipseli, Bebop), so no post-deploy config step is needed. This runs only in `initialize` (initializer-gated), so it does not re-apply when an existing proxy upgrades; those deployments restore the same config via `scripts/setupRouterVariables.s.sol`, which sets `fallbackFee`, the per-pair tiers, and re-adds the default venues. The owner can clear or retune any seeded tier afterward with `setPairFee`.
 
 ### Kipseli quote caveat
 
@@ -154,7 +154,7 @@ Both functions are restricted to the proxy owner (the address passed as `ROUTER_
 
 Upgrades are authorized by the proxy owner via `_authorizeUpgrade` (`onlyOwner`), so they must be broadcast from the account that holds ownership of the proxy (the address passed as `ROUTER_OWNER` at deployment, or whoever currently holds ownership after an `Ownable2Step` handoff).
 
-> **Per-pair fee precondition:** Unconfigured pairs resolve their Uniswap fallback tier to the global `fallbackFee`, which is set (`= 3000`) only in `initialize` — i.e. on a fresh deploy — and is never re-applied on upgrade. A proxy that predates the per-pair fee map (an enum-era deployment) therefore carries `fallbackFee = 0` after the upgrade, so the fallback resolves to tier `0` (invalid on Uniswap V3) for every unconfigured pair and reverts. **After upgrading such a proxy, run `scripts/SeedStablePairs.s.sol` as the owner** to restore the fee config: it sets `fallbackFee = 3000` and seeds the deep per-pair tiers, matching a fresh `initialize`. Until that runs, the Uniswap fallback is unusable, so consider `pause()`-ing the router across the upgrade + config window if swaps could arrive in between (see "Running the upgrade" below).
+> **Config precondition:** The whole fresh-deploy configuration is seeded only in `initialize` — i.e. on a fresh deploy — and is never re-applied on upgrade. This bites a proxy that predates that config in two ways. (1) Unconfigured pairs resolve their Uniswap fallback tier to the global `fallbackFee`; an enum-era deployment carries `fallbackFee = 0` after the upgrade, so the fallback resolves to tier `0` (invalid on Uniswap V3) for every unconfigured pair and reverts. (2) An enum-era deployment also has an **empty venue whitelist**, so `swapV1` can only ever take the Uniswap fallback and never routes the propAMMs. **After upgrading such a proxy, run `scripts/setupRouterVariables.s.sol` as the owner** to restore the config: it sets `fallbackFee = 3000`, seeds the deep per-pair tiers, and re-adds the default venues (FermiSwap, Kipseli, Bebop), matching a fresh `initialize`. Until that runs, the Uniswap fallback is unusable, so consider `pause()`-ing the router across the upgrade + config window if swaps could arrive in between (see "Running the upgrade" below).
 
 ### Writing a new implementation
 
@@ -200,13 +200,13 @@ forge clean && forge script scripts/Upgrade.s.sol \
 
 The script does not pass any reinitializer calldata (the third argument to `Upgrades.upgradeProxy` is `""`). If the new implementation defines a `reinitializer`, edit `scripts/Upgrade.s.sol` to pass the encoded call (e.g. `abi.encodeCall(PropAMMRouterV2.initializeV2, (newField))`) before broadcasting.
 
-When upgrading a proxy that predates the per-pair fee map (see the precondition above), follow the upgrade immediately with the fee-config script, broadcast from the same owner key:
+When upgrading a proxy that predates the fresh-deploy config (see the precondition above), follow the upgrade immediately with the config script, broadcast from the same owner key:
 
 ```bash
-forge script scripts/SeedStablePairs.s.sol \
+forge script scripts/setupRouterVariables.s.sol \
     --broadcast \
     --rpc-url $RPC_URL \
     --private-key $OWNER_KEY
 ```
 
-This sets `fallbackFee = 3000` and seeds the deep per-pair tiers, restoring the configuration a fresh `initialize` would have produced. Until it runs, the Uniswap fallback reverts for unconfigured pairs.
+This sets `fallbackFee = 3000`, seeds the deep per-pair tiers, and re-adds the default propAMM venues (FermiSwap, Kipseli, Bebop), restoring the configuration a fresh `initialize` would have produced. The `addVenue` calls are guarded by `isWhitelistedVenue`, so the script is idempotent and safe to re-run. Until it runs, the Uniswap fallback reverts for unconfigured pairs and no propAMM venue is routable.
