@@ -132,6 +132,8 @@ Both functions are restricted to the proxy owner (the address passed as `ROUTER_
 
 Upgrades are authorized by the proxy owner via `_authorizeUpgrade` (`onlyOwner`), so they must be broadcast from the account that holds ownership of the proxy (the address passed as `ROUTER_OWNER` at deployment, or whoever currently holds ownership after an `Ownable2Step` handoff).
 
+> **Per-pair fee precondition:** Unconfigured pairs resolve their Uniswap fallback tier to the global `fallbackFee`, which is set (`= 3000`) only in `initialize` — i.e. on a fresh deploy. Before upgrading an existing proxy to a version that includes the per-pair fee map, confirm the live `fallbackFee` is non-zero. Otherwise the fallback resolves to tier `0` (invalid on Uniswap V3) for every unconfigured pair and reverts. If the proxy predates `fallbackFee` (an enum-era deployment), ship a `reinitializer` that backfills `fallbackFee = 3000` when it reads `0` and pass its calldata in `scripts/Upgrade.s.sol` (see "Writing a new implementation" and "Running the upgrade" below).
+
 ### Writing a new implementation
 
 Place the new implementation under `src/` (for example `src/PropAMMRouterV2.sol`). It must:
