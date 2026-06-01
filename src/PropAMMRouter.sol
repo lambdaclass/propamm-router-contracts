@@ -45,6 +45,15 @@ contract PropAMMRouter is
     /// to the global `fallbackFee`. Owner-settable via `setPairFee` / `setPairFees`.
     mapping(bytes32 pairKey => uint24 fee) private _pairFee;
 
+    // Mainnet token addresses for the default per-pair fallback tiers seeded by
+    // `initialize` (see `_seedDefaultPairFees`). Mainnet-specific by design: on
+    // other chains these point at the wrong tokens, which is harmless — they are
+    // only consulted for these exact addresses, and the owner can clear/override
+    // any entry via `setPairFee`.
+    address private constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
+    address private constant USDT = 0xdAC17F958D2ee523a2206206994597C13D831ec7;
+    address private constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+
     /// @notice Thrown when `_dispatchVenue` is called by anyone other than this
     /// contract itself, i.e. outside of the `try`-wrapped self-call made by
     /// `_coreSwap`.
@@ -125,6 +134,10 @@ contract PropAMMRouter is
     /// *subsequent* transfers via `transferOwnership` / `acceptOwnership`.
     /// Controls `_authorizeUpgrade` and any owner-gated administrative paths.
     /// Reverts if zero (enforced by `__Ownable_init`).
+    /// @dev Also seeds the deep mainnet Uniswap V3 fallback tiers via
+    /// `_seedDefaultPairFees`, so a from-scratch deploy is pre-configured without a
+    /// separate owner-run seeding step. Runs only here (initializer-gated), so it
+    /// never re-applies on a UUPS upgrade of an existing proxy.
     function initialize(address fallbackSwapRouter_, address fallbackQuoter_, address owner_) public initializer {
         require(fallbackSwapRouter_ != address(0), ZeroAddress());
         require(fallbackQuoter_ != address(0), ZeroAddress());
@@ -134,6 +147,19 @@ contract PropAMMRouter is
         __Ownable_init(owner_);
         __Ownable2Step_init();
         __Pausable_init();
+        _seedDefaultPairFees();
+    }
+
+    /// @notice Seeds the deep mainnet Uniswap V3 fallback fee tiers so a
+    /// from-scratch deploy is configured without a separate owner-run seeding step.
+    /// @dev Routes through `_setPairFee`, so each seeded pair clears the same
+    /// validation and emits `PairFeeUpdated(tokenA, tokenB, 0, fee)` — an indexer
+    /// sees the initial config exactly as if the owner had set it. Tiers are the
+    /// deepest live mainnet pools: stable/stable at 0.01%, ETH/stable at 0.05%.
+    function _seedDefaultPairFees() private {
+        _setPairFee(USDT, USDC, 100); // stablecoin pair — deepest at 0.01%
+        _setPairFee(USDT, WETH, 500); // ETH/stable — deepest at 0.05%
+        _setPairFee(USDC, WETH, 500); // ETH/stable — deepest at 0.05%
     }
 
     /// @inheritdoc IPropAMMRouter

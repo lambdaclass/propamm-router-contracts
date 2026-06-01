@@ -20,6 +20,12 @@ contract PropAMMRouterPairFeeTest is Test {
     address internal stranger = address(0xBEEF); // used by setPairFee/setPairFees access-control tests in later tasks
     address internal recipient = address(0xCAFE);
 
+    // Mainnet token addresses seeded as defaults by `initialize` (mirror of the
+    // contract's private constants; kept in sync so the seed assertions match).
+    address internal constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
+    address internal constant USDT = 0xdAC17F958D2ee523a2206206994597C13D831ec7;
+    address internal constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+
     // Re-declared locally so vm.expectEmit can match the router's emit.
     // Mirror of PropAMMRouter.PairFeeUpdated (added in Task 3); kept in sync so vm.expectEmit matches.
     event PairFeeUpdated(address indexed tokenA, address indexed tokenB, uint24 oldFee, uint24 newFee);
@@ -42,6 +48,23 @@ contract PropAMMRouterPairFeeTest is Test {
         assertEq(router.fallbackFee(), 3000);
         assertEq(router.fallbackSwapRouter(), address(mockRouter));
         assertEq(router.fallbackQuoter(), address(mockQuoter));
+    }
+
+    function test_initialize_seedsDefaultPairFees() public view {
+        // A from-scratch deploy (the proxy in setUp) is configured with the deep
+        // mainnet tiers without any owner action after init.
+        assertEq(router.getPairFee(USDT, USDC), 100);
+        assertEq(router.getPairFee(USDT, WETH), 500);
+        assertEq(router.getPairFee(USDC, WETH), 500);
+
+        assertEq(router.resolvedFee(USDT, USDC), 100);
+        assertEq(router.resolvedFee(USDT, WETH), 500);
+        assertEq(router.resolvedFee(USDC, WETH), 500);
+
+        // Order-independence holds for the seeded pairs too.
+        assertEq(router.resolvedFee(USDC, USDT), 100);
+        assertEq(router.resolvedFee(WETH, USDT), 500);
+        assertEq(router.resolvedFee(WETH, USDC), 500);
     }
 
     function test_resolvedFee_unset_returnsGlobalDefault() public view {

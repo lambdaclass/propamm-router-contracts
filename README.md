@@ -15,6 +15,8 @@ Venues are identified **by address**: the three proprietary AMM routers (FermiSw
 
 The Uniswap V3 fallback prices and swaps at a per-pair fee tier, resolved on every quote and swap: the owner-set override for that pair if one exists, otherwise the global `fallbackFee` (`3000`, i.e. the 0.30% tier, by default). Callers never pass a fee. The owner sets overrides with `setPairFee(tokenA, tokenB, fee)` or `setPairFees(tokenA[], tokenB[], fee[])` (order-independent; `fee == 0` clears an override), and retunes the global default with `setFallbackFee` — all without a contract upgrade. This lets stablecoin pairs use their tight tier (e.g. USDC/USDT at `100`) while volatile pairs keep `3000`/`10000`. Query the effective tier with `resolvedFee(tokenIn, tokenOut)` and the raw override with `getPairFee(tokenA, tokenB)`.
 
+A from-scratch deploy is pre-seeded by `initialize` with the deep mainnet tiers — USDT/USDC at `100`, USDT/WETH and USDC/WETH at `500` — so no post-deploy seeding step is needed. This runs only in `initialize` (initializer-gated), so it does not re-apply when an existing proxy upgrades; those deployments still seed via `scripts/SeedStablePairs.s.sol`. The owner can clear or retune any seeded tier afterward with `setPairFee`.
+
 ### Kipseli quote caveat
 
 Kipseli does not expose a usable on-chain quote function. To price it, the router calls `Kipseli.simulateKipseliSwap`, which executes a real swap and then reverts with the resulting `amountOut` ABI-encoded in the revert payload. The router decodes that payload to recover the quote.
