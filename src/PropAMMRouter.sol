@@ -40,6 +40,10 @@ contract PropAMMRouter is
     address public fallbackQuoter;
     /// @notice Fee for the fallback venue.
     uint24 public fallbackFee;
+    /// @notice Per-pair Uniswap V3 fallback fee override, keyed by the sorted
+    /// token pair (see `_pairKey`). A value of 0 means "unset" — the pair resolves
+    /// to the global `fallbackFee`. Owner-settable via `setPairFee` / `setPairFees`.
+    mapping(bytes32 pairKey => uint24 fee) private _pairFee;
 
     /// @notice Thrown when `_dispatchVenue` is called by anyone other than this
     /// contract itself, i.e. outside of the `try`-wrapped self-call made by
@@ -504,6 +508,25 @@ contract PropAMMRouter is
         return venue == FERMI_ROUTER || venue == KIPSELI_PAMM || venue == BEBOP_ROUTER || venue == fallbackSwapRouter;
     }
 
+    /// @notice Canonical key for a token pair, order-independent.
+    /// @dev Uniswap V3 pools are symmetric (one pool, `token0 < token1`, serves
+    /// both directions), so {A,B} and {B,A} share one entry.
+    function _pairKey(address tokenA, address tokenB) private pure returns (bytes32) {
+        return tokenA < tokenB
+            ? keccak256(abi.encodePacked(tokenA, tokenB))
+            : keccak256(abi.encodePacked(tokenB, tokenA));
+    }
+
+    /// @notice Resolves the Uniswap V3 fallback fee for a pair: the per-pair
+    /// override if set, otherwise the global `fallbackFee`.
+    /// @param tokenIn The token being sold.
+    /// @param tokenOut The token being bought.
+    /// @return fee The effective fee tier in hundredths of a bip.
+    function _resolveFee(address tokenIn, address tokenOut) private view returns (uint24 fee) {
+        fee = _pairFee[_pairKey(tokenIn, tokenOut)];
+        if (fee == 0) fee = fallbackFee;
+    }
+
     /// @dev Restricts UUPS upgrades to the contract owner set in `initialize`.
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
@@ -515,6 +538,21 @@ contract PropAMMRouter is
         require(fee != 0 && fee < 1_000_000, InvalidFallbackFee(fee));
         emit FallbackFeeUpdated(fallbackFee, fee);
         fallbackFee = fee;
+    }
+
+    /// @notice Returns the raw per-pair fee override for a pair (0 if unset).
+    /// @param tokenA One token of the pair.
+    /// @param tokenB The other token of the pair.
+    function getPairFee(address tokenA, address tokenB) external view returns (uint24) {
+        return _pairFee[_pairKey(tokenA, tokenB)];
+    }
+
+    /// @notice Returns the effective Uniswap V3 fallback tier the router will use
+    /// for a pair: the per-pair override if set, otherwise the global `fallbackFee`.
+    /// @param tokenIn The token being sold.
+    /// @param tokenOut The token being bought.
+    function resolvedFee(address tokenIn, address tokenOut) external view returns (uint24) {
+        return _resolveFee(tokenIn, tokenOut);
     }
 
     /// @notice Repoints the address used by the fallback route.

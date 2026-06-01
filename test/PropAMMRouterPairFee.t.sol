@@ -42,4 +42,12 @@ contract PropAMMRouterPairFeeTest is Test {
         assertEq(router.fallbackSwapRouter(), address(mockRouter));
         assertEq(router.fallbackQuoter(), address(mockQuoter));
     }
+
+    function test_resolvedFee_unset_returnsGlobalDefault() public view {
+        assertEq(router.resolvedFee(address(tokenIn), address(tokenOut)), 3000);
+    }
+
+    function test_getPairFee_unset_returnsZero() public view {
+        assertEq(router.getPairFee(address(tokenIn), address(tokenOut)), 0);
+    }
 }
