@@ -13,7 +13,9 @@ Venues are identified **by address**: the three proprietary AMM routers (FermiSw
 - `quoteVenueV1(venue, tokenIn, tokenOut, amount)`: quotes a single venue by address. Reverts `UnknownVenue` for any address that is neither a proprietary AMM nor the SwapRouter02 fallback, and bubbles up any underlying venue revert.
 - `quoteSelectedVenuesV1(venues, tokenIn, tokenOut, amountIn)`: quotes only the caller-supplied `venues` subset and returns the best `(bestAmountOut, bestVenue)`. Venues that revert (including non-whitelisted addresses) are skipped; reverts `NoQuotesAvailable` if none of them can be priced.
 
-The Uniswap V3 fallback always prices and swaps at the owner-settable `fallbackFee` pool tier (`3000`, i.e. the 0.30% tier, by default) — callers never pass a fee. For pairs whose deepest Uniswap V3 pool is not at the 0.30% tier (e.g. USDC/WETH on mainnet, which is `500`), the owner retunes it with `setFallbackFee` (no contract upgrade required).
+The Uniswap V3 fallback prices and swaps at a per-pair fee tier, resolved on every quote and swap: the owner-set override for that pair if one exists, otherwise the global `fallbackFee` (`3000`, i.e. the 0.30% tier, by default). Callers never pass a fee. The owner sets overrides with `setPairFee(tokenA, tokenB, fee)` or `setPairFees(tokenA[], tokenB[], fee[])` (order-independent; `fee == 0` clears an override), and retunes the global default with `setFallbackFee` — all without a contract upgrade. This lets stablecoin pairs use their tight tier (e.g. USDC/USDT at `100`) while volatile pairs keep `3000`/`10000`. Query the effective tier with `resolvedFee(tokenIn, tokenOut)` and the raw override with `getPairFee(tokenA, tokenB)`.
+
+A from-scratch deploy is pre-seeded by `initialize` with the deep mainnet tiers — USDT/USDC at `100`, USDT/WETH and USDC/WETH at `500` — so no post-deploy seeding step is needed. This runs only in `initialize` (initializer-gated), so it does not re-apply when an existing proxy upgrades; those deployments still seed via `scripts/SeedStablePairs.s.sol`. The owner can clear or retune any seeded tier afterward with `setPairFee`.
 
 ### Kipseli quote caveat
 
@@ -100,8 +102,8 @@ OVERRIDES=$(curl -s -X POST https://eu.rpc.titanbuilder.xyz \
       ')
 
 # 2. eth_call PropAMMRouter.quoteVenueV1(venue, WETH, USDC, 1e18) with the overrides.
-#    The Uniswap V3 fallback always prices at the owner-set `fallbackFee` tier
-#    (3000 by default); there is no per-call fee argument.
+#    The Uniswap V3 fallback prices at the per-pair tier (the override for this
+#    pair, else the global `fallbackFee`, 3000 by default); no per-call fee arg.
 DATA=$(cast calldata "quoteVenueV1(address,address,address,uint256)" $VENUE_ADDR $WETH $USDC 1000000000000000000)
 
 curl -s -X POST $RPC_URL -H "Content-Type: application/json" \
@@ -131,6 +133,8 @@ Both functions are restricted to the proxy owner (the address passed as `ROUTER_
 ### Upgrading the contract
 
 Upgrades are authorized by the proxy owner via `_authorizeUpgrade` (`onlyOwner`), so they must be broadcast from the account that holds ownership of the proxy (the address passed as `ROUTER_OWNER` at deployment, or whoever currently holds ownership after an `Ownable2Step` handoff).
+
+> **Per-pair fee precondition:** Unconfigured pairs resolve their Uniswap fallback tier to the global `fallbackFee`, which is set (`= 3000`) only in `initialize` — i.e. on a fresh deploy. Before upgrading an existing proxy to a version that includes the per-pair fee map, confirm the live `fallbackFee` is non-zero. Otherwise the fallback resolves to tier `0` (invalid on Uniswap V3) for every unconfigured pair and reverts. If the proxy predates `fallbackFee` (an enum-era deployment), ship a `reinitializer` that backfills `fallbackFee = 3000` when it reads `0` and pass its calldata in `scripts/Upgrade.s.sol` (see "Writing a new implementation" and "Running the upgrade" below).
 
 ### Writing a new implementation
 

@@ -11,6 +11,13 @@ contract Upgrade is Script {
 
         vm.startBroadcast();
 
+        // Per-pair fee precondition: unconfigured pairs resolve their Uniswap
+        // fallback tier to `fallbackFee`, which is set (=3000) only in `initialize`
+        // (fresh deploy). Before upgrading an existing proxy, confirm the live
+        // `fallbackFee` is non-zero — a 0 value (e.g. an enum-era proxy that never
+        // had `fallbackFee`) makes the fallback resolve to tier 0 (invalid) and
+        // revert for all unconfigured pairs. If so, ship a reinitializer that
+        // backfills `fallbackFee = 3000` and pass its calldata below instead of "".
         Upgrades.upgradeProxy(
             proxy,
             newImplName,

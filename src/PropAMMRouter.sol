@@ -17,7 +17,7 @@ import {KIPSELI_QUOTER, IKipseliQuoter} from "./interfaces/IKipseliQuoter.sol";
 import {UniV3Router} from "./libraries/UniV3Router.sol";
 
 /// @title PropAMMRouter
-/// @notice Routes single-hop swaps to a propAMM and falls back through a fallback 
+/// @notice Routes single-hop swaps to a propAMM and falls back through a fallback
 /// venue if the chosen venue reverts.
 /// @dev Designed to live behind a UUPS proxy. The fallback path is wired at
 /// initialization via `fallbackSwapRouter` and `fallbackQuoter`
@@ -32,7 +32,7 @@ contract PropAMMRouter is
     using SafeERC20 for IERC20;
     using SafeCast for uint256;
 
-    /// @notice Fallback venue address. 
+    /// @notice Fallback venue address.
     /// Owner-settable via `setFallbackSwapRouter`.
     address public fallbackSwapRouter;
     /// @notice Fallback venue address used to price the fallback route.
@@ -40,6 +40,19 @@ contract PropAMMRouter is
     address public fallbackQuoter;
     /// @notice Fee for the fallback venue.
     uint24 public fallbackFee;
+    /// @notice Per-pair Uniswap V3 fallback fee override, keyed by the sorted
+    /// token pair (see `_pairKey`). A value of 0 means "unset" — the pair resolves
+    /// to the global `fallbackFee`. Owner-settable via `setPairFee` / `setPairFees`.
+    mapping(bytes32 pairKey => uint24 fee) private _pairFee;
+
+    // Mainnet token addresses for the default per-pair fallback tiers seeded by
+    // `initialize` (see `_seedDefaultPairFees`). Mainnet-specific by design: on
+    // other chains these point at the wrong tokens, which is harmless — they are
+    // only consulted for these exact addresses, and the owner can clear/override
+    // any entry via `setPairFee`.
+    address private constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
+    address private constant USDT = 0xdAC17F958D2ee523a2206206994597C13D831ec7;
+    address private constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
 
     /// @notice Thrown when `_dispatchVenue` is called by anyone other than this
     /// contract itself, i.e. outside of the `try`-wrapped self-call made by
@@ -72,6 +85,8 @@ contract PropAMMRouter is
     error InvalidFallbackFee(uint24 fee);
     /// @notice Thrown when an address argument that must be non-zero is zero.
     error ZeroAddress();
+    /// @notice Thrown when `setPairFees` is given arrays of unequal length.
+    error ArrayLengthMismatch();
 
     // `Swapped` is declared in IPropAMMRouter (part of the published interface)
     // and inherited here. The operational events below are implementation
@@ -89,6 +104,12 @@ contract PropAMMRouter is
     /// @param oldQuoter The previous `fallbackQuoter`.
     /// @param newQuoter The new `fallbackQuoter`.
     event FallbackQuoterUpdated(address indexed oldQuoter, address indexed newQuoter);
+    /// @notice Emitted when the owner sets or clears a per-pair fallback fee.
+    /// @param tokenA One token of the pair (as supplied to the setter).
+    /// @param tokenB The other token of the pair (as supplied to the setter).
+    /// @param oldFee The previous override (0 if it was unset).
+    /// @param newFee The new override (0 means cleared / use global default).
+    event PairFeeUpdated(address indexed tokenA, address indexed tokenB, uint24 oldFee, uint24 newFee);
     /// @notice Emitted when the owner rescues tokens stranded on the router.
     /// @param token The ERC-20 rescued.
     /// @param to The recipient of the rescued tokens.
@@ -113,6 +134,10 @@ contract PropAMMRouter is
     /// *subsequent* transfers via `transferOwnership` / `acceptOwnership`.
     /// Controls `_authorizeUpgrade` and any owner-gated administrative paths.
     /// Reverts if zero (enforced by `__Ownable_init`).
+    /// @dev Also seeds the deep mainnet Uniswap V3 fallback tiers via
+    /// `_seedDefaultPairFees`, so a from-scratch deploy is pre-configured without a
+    /// separate owner-run seeding step. Runs only here (initializer-gated), so it
+    /// never re-applies on a UUPS upgrade of an existing proxy.
     function initialize(address fallbackSwapRouter_, address fallbackQuoter_, address owner_) public initializer {
         require(fallbackSwapRouter_ != address(0), ZeroAddress());
         require(fallbackQuoter_ != address(0), ZeroAddress());
@@ -122,6 +147,19 @@ contract PropAMMRouter is
         __Ownable_init(owner_);
         __Ownable2Step_init();
         __Pausable_init();
+        _seedDefaultPairFees();
+    }
+
+    /// @notice Seeds the deep mainnet Uniswap V3 fallback fee tiers so a
+    /// from-scratch deploy is configured without a separate owner-run seeding step.
+    /// @dev Routes through `_setPairFee`, so each seeded pair clears the same
+    /// validation and emits `PairFeeUpdated(tokenA, tokenB, 0, fee)` — an indexer
+    /// sees the initial config exactly as if the owner had set it. Tiers are the
+    /// deepest live mainnet pools: stable/stable at 0.01%, ETH/stable at 0.05%.
+    function _seedDefaultPairFees() private {
+        _setPairFee(USDT, USDC, 100); // stablecoin pair — deepest at 0.01%
+        _setPairFee(USDT, WETH, 500); // ETH/stable — deepest at 0.05%
+        _setPairFee(USDC, WETH, 500); // ETH/stable — deepest at 0.05%
     }
 
     /// @inheritdoc IPropAMMRouter
@@ -149,7 +187,7 @@ contract PropAMMRouter is
     }
 
     /// @inheritdoc IPropAMMRouter
-    /// @dev Swaps via the `venue`. It must be a callable venue or the 
+    /// @dev Swaps via the `venue`. It must be a callable venue or the
     /// fallback venue named by the `fallbackSwapRouter` address.
     function swapViaVenueV1(
         address venue,
@@ -196,7 +234,7 @@ contract PropAMMRouter is
     /// and recovering via the fallback if it fails.
     /// @dev Shared core for `swapV1` and `swapViaVenueV1`; unguarded so the two
     /// public entrypoints can each apply `whenNotPaused`/`nonReentrant` without
-    /// re-entering the guard through one another. 
+    /// re-entering the guard through one another.
     /// @param venue The propAMM to attempt first, or `fallbackSwapRouter`.
     /// @param tokenIn The address of the token being sold.
     /// @param tokenOut The address of the token being bought.
@@ -345,8 +383,9 @@ contract PropAMMRouter is
     /// @notice Executes the fallback swap on Uniswap V3 with funds already held
     /// by this contract.
     /// @dev Assumes the router already holds `amountIn` of `tokenIn` — pulled
-    /// once by `_coreSwap` before the try/catch. Uses the owner-set `fallbackFee`
-    /// pool tier. `UniV3Router.swapExactIn` only approves `fallbackSwapRouter`
+    /// once by `_coreSwap` before the try/catch. Uses the per-pair resolved fee
+    /// tier (`_resolveFee`: the pair override if set, otherwise the global
+    /// `fallbackFee`). `UniV3Router.swapExactIn` only approves `fallbackSwapRouter`
     /// and executes the swap; it does not pull from `msg.sender`.
     /// @param tokenIn The address of the token being sold.
     /// @param tokenOut The address of the token being bought.
@@ -362,7 +401,7 @@ contract PropAMMRouter is
         address recipient
     ) private returns (uint256 amountOut) {
         amountOut = UniV3Router.swapExactIn(
-            tokenIn, tokenOut, fallbackFee, amountIn, amountOutMin, recipient, fallbackSwapRouter
+            tokenIn, tokenOut, _resolveFee(tokenIn, tokenOut), amountIn, amountOutMin, recipient, fallbackSwapRouter
         );
         return amountOut;
     }
@@ -394,7 +433,8 @@ contract PropAMMRouter is
         } else if (venue == BEBOP_ROUTER) {
             amountOut = IBebopRouter(BEBOP_ROUTER).quote(tokenIn, tokenOut, amount);
         } else if (venue == fallbackSwapRouter) {
-            amountOut = UniV3Router.quoteExactIn(tokenIn, tokenOut, fallbackFee, amount, fallbackQuoter);
+            amountOut =
+                UniV3Router.quoteExactIn(tokenIn, tokenOut, _resolveFee(tokenIn, tokenOut), amount, fallbackQuoter);
         } else {
             revert UnknownVenue();
         }
@@ -413,8 +453,8 @@ contract PropAMMRouter is
         require(bestAmountOut > 0, NoQuotesAvailable());
     }
 
-    /// @notice Quotes the Uniswap V3 fallback for the pair at the current
-    /// `fallbackFee` tier.
+    /// @notice Quotes the Uniswap V3 fallback for the pair at its resolved fee
+    /// tier (the per-pair override if set, otherwise the global `fallbackFee`).
     /// @dev External so `_pickBestVenue` and `quoteV1` can wrap it in a
     /// `try/catch` (an internal library call can't be caught).
     /// @param tokenIn The address of the token being sold.
@@ -422,7 +462,7 @@ contract PropAMMRouter is
     /// @param amount The exact amount of `tokenIn` to quote against.
     /// @return amountOut The amount of `tokenOut` the Uniswap V3 swap would produce.
     function quoteUniswapV3(address tokenIn, address tokenOut, uint256 amount) external returns (uint256 amountOut) {
-        return UniV3Router.quoteExactIn(tokenIn, tokenOut, fallbackFee, amount, fallbackQuoter);
+        return UniV3Router.quoteExactIn(tokenIn, tokenOut, _resolveFee(tokenIn, tokenOut), amount, fallbackQuoter);
     }
 
     /// @notice Finds the venue offering the best `tokenOut` for `amount` of
@@ -506,6 +546,24 @@ contract PropAMMRouter is
         return venue == FERMI_ROUTER || venue == KIPSELI_PAMM || venue == BEBOP_ROUTER || venue == fallbackSwapRouter;
     }
 
+    /// @dev Canonical key for a token pair, order-independent. Uniswap V3 pools
+    /// are symmetric (one pool, `token0 < token1`, serves both directions), so
+    /// {A,B} and {B,A} share one entry.
+    function _pairKey(address tokenA, address tokenB) private pure returns (bytes32) {
+        (address a, address b) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
+        return keccak256(abi.encodePacked(a, b));
+    }
+
+    /// @notice Resolves the Uniswap V3 fallback fee for a pair: the per-pair
+    /// override if set, otherwise the global `fallbackFee`.
+    /// @param tokenIn The token being sold.
+    /// @param tokenOut The token being bought.
+    /// @return fee The effective fee tier in hundredths of a bip.
+    function _resolveFee(address tokenIn, address tokenOut) private view returns (uint24 fee) {
+        fee = _pairFee[_pairKey(tokenIn, tokenOut)];
+        if (fee == 0) fee = fallbackFee;
+    }
+
     /// @dev Restricts UUPS upgrades to the contract owner set in `initialize`.
     function _authorizeUpgrade(address) internal override onlyOwner {}
 
@@ -517,6 +575,60 @@ contract PropAMMRouter is
         require(fee != 0 && fee < 1_000_000, InvalidFallbackFee(fee));
         emit FallbackFeeUpdated(fallbackFee, fee);
         fallbackFee = fee;
+    }
+
+    /// @notice Returns the raw per-pair fee override for a pair (0 if unset).
+    /// @param tokenA One token of the pair.
+    /// @param tokenB The other token of the pair.
+    function getPairFee(address tokenA, address tokenB) external view returns (uint24) {
+        return _pairFee[_pairKey(tokenA, tokenB)];
+    }
+
+    /// @notice Returns the effective Uniswap V3 fallback tier the router will use
+    /// for a pair: the per-pair override if set, otherwise the global `fallbackFee`.
+    /// @param tokenIn The token being sold.
+    /// @param tokenOut The token being bought.
+    function resolvedFee(address tokenIn, address tokenOut) external view returns (uint24) {
+        return _resolveFee(tokenIn, tokenOut);
+    }
+
+    /// @notice Sets (or clears) the Uniswap V3 fallback fee tier for a specific pair.
+    /// @dev Owner-gated. Order-independent. Pass `fee == 0` to clear the override and
+    /// revert the pair to the global `fallbackFee`. A tier with no pool simply makes
+    /// the fallback quote revert and be skipped for that pair — it does not corrupt
+    /// state.
+    /// @param tokenA One token of the pair.
+    /// @param tokenB The other token of the pair.
+    /// @param fee Fee tier in hundredths of a bip (e.g. `100` for 0.01%), or 0 to clear.
+    function setPairFee(address tokenA, address tokenB, uint24 fee) external onlyOwner {
+        _setPairFee(tokenA, tokenB, fee);
+    }
+
+    /// @notice Sets (or clears) per-pair fallback fees for several pairs in one call.
+    /// @dev Owner-gated. The three arrays are zipped index-wise and must be equal
+    /// length. Each entry follows the same rules as `setPairFee` (0 clears) and emits
+    /// its own `PairFeeUpdated`.
+    /// @param tokenA Array whose i-th element is one token of pair `i`.
+    /// @param tokenB Array whose i-th element is the other token of pair `i`.
+    /// @param fees Array whose i-th element is the tier for pair `i`, or 0 to clear.
+    function setPairFees(address[] calldata tokenA, address[] calldata tokenB, uint24[] calldata fees)
+        external
+        onlyOwner
+    {
+        require(tokenA.length == tokenB.length && tokenB.length == fees.length, ArrayLengthMismatch());
+        for (uint256 i = 0; i < fees.length; i++) {
+            _setPairFee(tokenA[i], tokenB[i], fees[i]);
+        }
+    }
+
+    /// @dev Shared validate-emit-store for both setters. Mirrors `setFallbackFee`'s
+    /// upper bound and reuses `InvalidFallbackFee`, but allows 0 (the "unset"
+    /// sentinel that clears the override).
+    function _setPairFee(address tokenA, address tokenB, uint24 fee) private {
+        require(fee < 1_000_000, InvalidFallbackFee(fee)); // 0 allowed = clear
+        bytes32 key = _pairKey(tokenA, tokenB);
+        emit PairFeeUpdated(tokenA, tokenB, _pairFee[key], fee);
+        _pairFee[key] = fee;
     }
 
     /// @notice Repoints the address used by the fallback route.
