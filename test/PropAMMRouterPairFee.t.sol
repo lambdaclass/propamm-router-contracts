@@ -155,4 +155,18 @@ contract PropAMMRouterPairFeeTest is Test {
         vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", stranger));
         router.setPairFees(a, b, f);
     }
+
+    function test_setPairFees_midBatchInvalidFeeRevertsAll() public {
+        address[] memory a = new address[](2);
+        address[] memory b = new address[](2);
+        uint24[] memory f = new uint24[](2);
+        a[0] = address(tokenIn);  b[0] = address(tokenOut); f[0] = 100;       // valid
+        a[1] = address(tokenOut); b[1] = address(0x1234);   f[1] = 1_000_000; // invalid
+
+        vm.expectRevert(abi.encodeWithSelector(PropAMMRouter.InvalidFallbackFee.selector, uint24(1_000_000)));
+        router.setPairFees(a, b, f);
+
+        // entry 0 must NOT have been committed (whole batch rolled back)
+        assertEq(router.getPairFee(address(tokenIn), address(tokenOut)), 0);
+    }
 }
