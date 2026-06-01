@@ -226,6 +226,29 @@ contract PropAMMRouterFeeTest is Test {
         assertEq(fotOut.balanceOf(address(router)), 0);
     }
 
+    // For any feeBps in [0, MAX_FEE_BPS] and any delivered >= grossMin, the user nets
+    // at least amountOutMin, the fee is the floored bps, and nothing is stranded.
+    function testFuzz_swapWithFee_netNeverBelowMin(uint16 rawBps, uint256 netMin, uint256 delivered) public {
+        uint16 bps = uint16(bound(rawBps, 0, 100));
+        netMin = bound(netMin, 0, 1e27);
+        uint256 grossMin = Math.ceilDiv(netMin * 10_000, 10_000 - bps);
+        delivered = bound(delivered, grossMin == 0 ? 1 : grossMin, 1e30);
+
+        _prepare(1e18, delivered);
+
+        vm.prank(user);
+        (uint256 amountOut,) = router.swapWithFeeV1(
+            address(tokenIn), address(tokenOut), 1e18, netMin,
+            user, block.timestamp + 1, FrontendFee({bps: bps, recipient: feeRecipient})
+        );
+
+        uint256 expectedFee = delivered * bps / 10_000;
+        assertEq(amountOut, delivered - expectedFee);
+        assertGe(amountOut, netMin); // the core guarantee
+        assertEq(tokenOut.balanceOf(feeRecipient), expectedFee);
+        assertEq(tokenOut.balanceOf(address(router)), 0);
+    }
+
     // Characterization: existing fee-free swapV1 routes through the fallback and
     // emits Swapped(recipient = user, amountOut = delivered). Guards Task 2.
     function test_swapV1_fallback_emitsSwapped() public {
