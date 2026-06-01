@@ -4,24 +4,27 @@ Single-hop router that quotes and executes swaps against a proprietary AMM (Ferm
 
 ## Overview
 
-The router exposes a `Venue` enum (`Fallback`, `FermiSwap`, `Kipseli`, `Bebop`) and the following external functions (see `src/interfaces/IPropAMMRouter.sol` for the full NatSpec):
+Venues are identified **by address**: the three proprietary AMM routers (FermiSwap, Kipseli, Bebop) plus the Uniswap V3 fallback, denoted by the SwapRouter02 address wired in at deployment. The router exposes the following external functions (see `src/interfaces/IPropAMMRouter.sol` for the full NatSpec):
 
-- `swap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, uniswapFee, deadline)`: pulls `amountIn` of `tokenIn` from `msg.sender`, attempts the swap on the selected venue, and falls back to Uniswap V3 (using `uniswapFee` as the pool tier) if that venue reverts or under-delivers. Passing `Venue.Fallback` skips the proprietary AMMs and routes directly to Uniswap V3. Enforces `amountOutMin` on the measured balance delta of `recipient`. Reverts when the contract is paused (see [Pausing the contract](#pausing-the-contract)); quote functions remain callable.
-- `quote(tokenIn, tokenOut, amount, uniswapFee)`: quotes every venue (the proprietary AMMs and the Uniswap V3 fallback at `uniswapFee`) and returns the best `amountOut` along with the venue that produced it. Reverts `NoQuotesAvailable` if every venue is skipped or reverts. A 3-arg overload `quote(tokenIn, tokenOut, amount)` uses `DEFAULT_FALLBACK_FEE` (`3000`, i.e. the 0.30% tier) for the Uniswap V3 branch.
-- `quoteVenue(venue, tokenIn, tokenOut, amount, uniswapFee)`: quotes a single specified venue. Reverts `UnknownVenue` for unsupported enum values and bubbles up any underlying venue revert. A 4-arg overload `quoteVenue(venue, tokenIn, tokenOut, amount)` uses `DEFAULT_FALLBACK_FEE` when `venue` is `Venue.Fallback` (and is ignored otherwise).
+- `swapV1(tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline)`: pulls `amountIn` of `tokenIn` from `msg.sender`, routes through the best-quoting venue, and falls back to Uniswap V3 if that venue reverts or under-delivers. Returns `(amountOut, executedVenue)`, where `executedVenue` is the proprietary venue that filled or the SwapRouter02 address when the fallback ran. Reverts `QuoteBelowMinimum` before pulling funds if the best quote is below `amountOutMin`, and re-checks `amountOutMin` against the measured balance delta of `recipient` after execution. Reverts when the contract is paused (see [Pausing the contract](#pausing-the-contract)); quote functions remain callable.
+- `swapViaVenueV1(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline)`: attempts the caller-specified `venue` first. A proprietary venue still falls back to Uniswap V3 if it fails to fill; naming the Uniswap V3 SwapRouter02 address routes directly to Uniswap V3 (it *is* the fallback, so there is nothing further to fall back to). Reverts `UnknownVenue` if `venue` is neither a whitelisted proprietary AMM nor the SwapRouter02 address.
+- `swapViaSelectedVenuesV1(venues, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline)`: like `swapV1`, but considers only the caller-supplied `venues` subset. An on-chain requote across them selects the best, which executes — with the Uniswap V3 fallback still applying as the transparent safety net if the chosen venue fails to fill. Reverts `NoQuotesAvailable` if none of the listed venues can be priced. Returns `(amountOut, executedVenue)`. List the SwapRouter02 address among `venues` to opt Uniswap V3 into the selection (it is not a selection candidate otherwise, only the execution-time safety net).
+- `quoteV1(tokenIn, tokenOut, amount)`: quotes every venue (the proprietary AMMs and the Uniswap V3 fallback) and returns the best `amountOut` along with the venue address that produced it. Reverts `NoQuotesAvailable` if every venue is skipped or reverts.
+- `quoteVenueV1(venue, tokenIn, tokenOut, amount)`: quotes a single venue by address. Reverts `UnknownVenue` for any address that is neither a proprietary AMM nor the SwapRouter02 fallback, and bubbles up any underlying venue revert.
+- `quoteSelectedVenuesV1(venues, tokenIn, tokenOut, amountIn)`: quotes only the caller-supplied `venues` subset and returns the best `(bestAmountOut, bestVenue)`. Venues that revert (including non-whitelisted addresses) are skipped; reverts `NoQuotesAvailable` if none of them can be priced.
 
-For pairs whose deepest Uniswap V3 pool is not at the 0.30% tier (e.g. USDC/WETH on mainnet, which is `500`), prefer the explicit-fee overloads.
+The Uniswap V3 fallback always prices and swaps at the owner-settable `fallbackFee` pool tier (`3000`, i.e. the 0.30% tier, by default) — callers never pass a fee. For pairs whose deepest Uniswap V3 pool is not at the 0.30% tier (e.g. USDC/WETH on mainnet, which is `500`), the owner retunes it with `setFallbackFee` (no contract upgrade required).
 
 ### Kipseli quote caveat
 
 Kipseli does not expose a usable on-chain quote function. To price it, the router calls `Kipseli.simulateKipseliSwap`, which executes a real swap and then reverts with the resulting `amountOut` ABI-encoded in the revert payload. The router decodes that payload to recover the quote.
 
-The Uniswap V3 `Venue.Fallback` branch also prices via revert-based simulation, since QuoterV2 reverts with the simulated `amountOut`.
+The Uniswap V3 fallback branch also prices via revert-based simulation, since QuoterV2 reverts with the simulated `amountOut`.
 
 As a consequence:
 
-- `quote` and `quoteVenue` are not `view`. They must be called via `eth_call` (staticcall) from off-chain so the simulated swaps are rolled back automatically.
-- The Kipseli simulation pulls `tokenIn` from the router's own balance. When quoting against Kipseli (directly via `quoteVenue`, or implicitly through `quote`), the RPC call must include a `stateDiff` override that gives the router a sufficient balance of `tokenIn`. Without the override, the Kipseli branch is silently skipped while the other branches still quote.
+- `quoteV1` and `quoteVenueV1` are not `view`. They must be called via `eth_call` (staticcall) from off-chain so the simulated swaps are rolled back automatically.
+- The Kipseli simulation pulls `tokenIn` from the router's own balance. When quoting against Kipseli (directly via `quoteVenueV1`, or implicitly through `quoteV1`), the RPC call must include a `stateDiff` override that gives the router a sufficient balance of `tokenIn`. Without the override, the Kipseli branch is silently skipped while the other branches still quote.
 
 ## Prerequisites
 
@@ -51,7 +54,7 @@ forge clean && forge script scripts/Deploy.s.sol \
 
 ### Quoting with Titan state overrides
 
-The proprietary AMMs maintain off-chain liquidity that is not reflected by mainnet state, so a plain `eth_call` to `PropAMMRouter.quote` against the anvil fork only sees stale liquidity. To get accurate quotes, Titan exposes the JSON-RPC method `titan_getPammStateOverrides`, whose result is passed as the third parameter of `eth_call`.
+The proprietary AMMs maintain off-chain liquidity that is not reflected by mainnet state, so a plain `eth_call` to `PropAMMRouter.quoteV1` against the anvil fork only sees stale liquidity. To get accurate quotes, Titan exposes the JSON-RPC method `titan_getPammStateOverrides`, whose result is passed as the third parameter of `eth_call`.
 The Titan endpoint only serves `titan_getPammStateOverrides`. The `eth_call` itself is sent to the anvil fork.
 
 The response is keyed by proprietary AMM router address, with one entry per venue:
@@ -67,7 +70,7 @@ The response is keyed by proprietary AMM router address, with one entry per venu
 }
 ```
 
-The three keys are the FermiSwap, Bebop, and Kipseli routers, respectively. When calling `quoteVenue(venue, ...)`, pick the entry matching the venue you want to quote. Kipseli additionally requires the router to hold `tokenIn`, since `simulateKipseliSwap` transfers it to Kipseli; we fund it with a `stateDiff` over the token contract's `_balances` slot for the router. FermiSwap and Bebop ignore the balance override, so the same snippet works for all three proprietary venues (only the address and the enum value need to change). For `Venue.Fallback` the Titan overrides aren't needed at all — Uniswap V3's QuoterV2 only reads on-chain pool state — so you can skip the `titan_getPammStateOverrides` call entirely and pass an empty state override (or omit the third `eth_call` parameter).
+The three keys are the FermiSwap, Bebop, and Kipseli routers, respectively. When calling `quoteVenueV1(venue, ...)`, pick the entry matching the venue address you want to quote. Kipseli additionally requires the router to hold `tokenIn`, since `simulateKipseliSwap` transfers it to Kipseli; we fund it with a `stateDiff` over the token contract's `_balances` slot for the router. FermiSwap and Bebop ignore the balance override, so the same snippet works for all three proprietary venues (only the venue address needs to change). For the Uniswap V3 fallback (naming the SwapRouter02 address) the Titan overrides aren't needed at all — QuoterV2 only reads on-chain pool state — so you can skip the `titan_getPammStateOverrides` call entirely and pass an empty state override (or omit the third `eth_call` parameter).
 
 **Example: quote 1 WETH for USDC against the deployed router on the anvil fork.**
 
@@ -77,17 +80,17 @@ ROUTER=<PropAMMRouter proxy address logged by Deploy.s.sol>
 WETH=0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2
 USDC=0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48
 
-# === Pick the venue to quote (only edit these two lines) ===
-# Venue enum: 0 = Fallback (Uniswap V3), 1 = FermiSwap, 2 = Kipseli, 3 = Bebop.
+# === Pick the venue to quote (only edit this line) ===
+# Venues are addresses: the Uniswap V3 fallback is the SwapRouter02 address;
+# the three proprietary AMM routers are listed in the table below.
 VENUE_ADDR=0x5cdbe59400cc2efdcc2b54acca4a99fe00dd588c    # Kipseli
-VENUE_ENUM=2
 
 # WETH stores balances in storage slot 3 (mapping(address => uint)).
 # balanceOf[ROUTER] lives at keccak256(abi.encode(ROUTER, 3)).
 WETH_BAL_SLOT=$(cast index address $ROUTER 3)
 
 # 1. Fetch the venue's Titan overrides and fund the router with 10 WETH.
-#    (Skip this step for Venue.Fallback — QuoterV2 only needs on-chain state.)
+#    (Skip this step for the Uniswap V3 fallback — QuoterV2 only needs on-chain state.)
 OVERRIDES=$(curl -s -X POST https://eu.rpc.titanbuilder.xyz \
     -H "Content-Type: application/json" \
     -d '{"jsonrpc":"2.0","id":1,"method":"titan_getPammStateOverrides","params":[]}' \
@@ -96,11 +99,10 @@ OVERRIDES=$(curl -s -X POST https://eu.rpc.titanbuilder.xyz \
         + { ($weth): { stateDiff: { ($slot): "0x0000000000000000000000000000000000000000000000008ac7230489e80000" } } }
       ')
 
-# 2. eth_call PropAMMRouter.quoteVenue(venue, WETH, USDC, 1e18) with the overrides.
-#    This uses the no-fee overload, which falls back to DEFAULT_FALLBACK_FEE (3000)
-#    when VENUE_ENUM is 0; for a different Uniswap V3 tier, use the 5-arg overload
-#    `quoteVenue(uint8,address,address,uint256,uint24)`.
-DATA=$(cast calldata "quoteVenue(uint8,address,address,uint256)" $VENUE_ENUM $WETH $USDC 1000000000000000000)
+# 2. eth_call PropAMMRouter.quoteVenueV1(venue, WETH, USDC, 1e18) with the overrides.
+#    The Uniswap V3 fallback always prices at the owner-set `fallbackFee` tier
+#    (3000 by default); there is no per-call fee argument.
+DATA=$(cast calldata "quoteVenueV1(address,address,address,uint256)" $VENUE_ADDR $WETH $USDC 1000000000000000000)
 
 curl -s -X POST $RPC_URL -H "Content-Type: application/json" \
     -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"$ROUTER\",\"data\":\"$DATA\"},\"latest\",$OVERRIDES]}" \
@@ -108,21 +110,21 @@ curl -s -X POST $RPC_URL -H "Content-Type: application/json" \
     | xargs cast --abi-decode "f()(uint256)"
 ```
 
-This prints `amountOut`, e.g. `2115659878` (≈ 2115.66 USDC for 1 WETH, with USDC's 6 decimals) at the current state. To quote a different venue, edit only `VENUE_ADDR` and `VENUE_ENUM`:
+This prints `amountOut`, e.g. `2115659878` (≈ 2115.66 USDC for 1 WETH, with USDC's 6 decimals) at the current state. To quote a different venue, edit only `VENUE_ADDR`:
 
-| Venue | `VENUE_ADDR` | `VENUE_ENUM` |
-|-------|--------------|--------------|
-| Fallback (Uniswap V3) | n/a — skip the Titan call | `0` |
-| FermiSwap | `0xb1076fe3ab5e28005c7c323bac5ac06a680d452e` | `1` |
-| Kipseli | `0x5cdbe59400cc2efdcc2b54acca4a99fe00dd588c` | `2` |
-| Bebop | `0x160141a205f5ddcf096ba3f48b7ed21eb52c62ea` | `3` |
+| Venue | `VENUE_ADDR` |
+|-------|--------------|
+| Uniswap V3 fallback (SwapRouter02) | `0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45` — skip the Titan call |
+| FermiSwap | `0xb1076fe3ab5e28005c7c323bac5ac06a680d452e` |
+| Kipseli | `0x5cdbe59400cc2efdcc2b54acca4a99fe00dd588c` |
+| Bebop | `0x160141a205f5ddcf096ba3f48b7ed21eb52c62ea` |
 
 ### Pausing the contract
 
 The router is `PausableUpgradeable`. The owner can stop all new swaps with:
 
-- `pause()` — owner-gated; flips the contract into the paused state. While paused, `swap` reverts with OpenZeppelin's `EnforcedPause` error. `quote` and `quoteVenue` are unaffected and remain callable.
-- `unpause()` — owner-gated; clears the paused state and re-enables `swap`.
+- `pause()` — owner-gated; flips the contract into the paused state. While paused, `swapV1`, `swapViaVenueV1`, and `swapViaSelectedVenuesV1` revert with OpenZeppelin's `EnforcedPause` error. `quoteV1`, `quoteVenueV1`, and `quoteSelectedVenuesV1` are unaffected and remain callable.
+- `unpause()` — owner-gated; clears the paused state and re-enables swaps.
 
 Both functions are restricted to the proxy owner (the address passed as `ROUTER_OWNER` at deployment, or the current owner after an `Ownable2Step` handoff). The state initializes to unpaused on `initialize`.
 

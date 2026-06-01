@@ -2,127 +2,152 @@
 pragma solidity ^0.8.35;
 
 /// @title IPropAMMRouter
-/// @notice Interface for a router that executes single-hop swaps against a
-/// proprietary AMM (FermiSwap, Kipseli, or Bebop) or a public-venue fallback
-/// (Uniswap V3), with the public venue also serving as the recovery path when
-/// the chosen proprietary AMM cannot fill the swap.
+/// @notice Router for single-hop swaps across whitelisted proprietary venues,
+/// with a public-venue fallback used when the chosen propAMM cannot fill.
+/// @dev A venue is either a whitelisted propAMM address or the public-venue fallback.
 interface IPropAMMRouter {
-    /// @notice Identifies which venue the caller wants to route through.
-    /// @dev `Fallback` selects the public venue (Uniswap V3) directly,
-    /// bypassing the proprietary AMMs. For the proprietary entries the
-    /// implementation is still free to fall back to Uniswap V3 if the
-    /// selected venue cannot fulfill the swap.
-    enum Venue {
-        Fallback,
-        FermiSwap,
-        Kipseli,
-        Bebop
-    }
+    /// @notice Emitted once per successful swap (via `swapV1`, `swapViaVenueV1`,
+    /// `swapViaSelectedVenuesV1`) after `tokenOut` is delivered to `recipient`.
+    /// @param sender The address that invoked the swap entrypoint and supplied
+    /// `amountIn` of `tokenIn`. Indexed so consumers can fetch a given account's
+    /// recent swaps.
+    /// @param tokenIn The token sold.
+    /// @param tokenOut The token bought.
+    /// @param amountIn The exact amount of `tokenIn` pulled from `sender`.
+    /// @param amountOut The amount of `tokenOut` delivered to `recipient`,
+    /// measured as a balance delta.
+    /// @param recipient The address that received `tokenOut`.
+    /// @param marketMaker The proprietary AMM that filled, or the public-venue
+    /// fallback address.
+    event Swapped(
+        address indexed sender,
+        address indexed tokenIn,
+        address indexed tokenOut,
+        uint256 amountIn,
+        uint256 amountOut,
+        address recipient,
+        address marketMaker
+    );
 
-    /// @notice Swaps an exact amount of `tokenIn` for as much `tokenOut` as possible,
-    /// routing first through the selected venue and falling back to the public
-    /// venue if that route fails.
-    /// @dev The caller must have approved this contract to spend at least `amountIn`
-    /// of `tokenIn`. Reverts if the final output is below `amountOutMin`.
-    /// @param venue The venue to attempt the swap on first; pass `Venue.Fallback`
-    /// to skip the proprietary AMMs and go straight to Uniswap V3.
-    /// @param tokenIn The address of the token being sold.
-    /// @param tokenOut The address of the token being bought.
+    /// @notice Swaps an exact `amountIn` of `tokenIn` for as much `tokenOut` as
+    /// possible, routing through the best-quoting venue and falling back to the
+    /// public-venue fallback if the chosen venue fails to fill.
+    /// @dev The caller must approve this contract for at least `amountIn` of
+    /// `tokenIn`. Reverts if the output is below `amountOutMin`.
+    /// @param tokenIn The token being sold.
+    /// @param tokenOut The token being bought.
     /// @param amountIn The exact amount of `tokenIn` to sell.
-    /// @param amountOutMin The minimum acceptable amount of `tokenOut`; the swap
-    /// reverts if the actual output is lower.
-    /// @param recipient The address that will receive `tokenOut`.
-    /// @param uniswapFee The Uniswap V3 pool fee tier (in hundredths of a bip) used by
-    /// the fallback route; ignored by the proprietary AMM path.
+    /// @param amountOutMin The minimum acceptable amount of `tokenOut`.
+    /// @param recipient The address that receives `tokenOut`.
     /// @param deadline Unix timestamp after which the swap is no longer valid.
-    /// @return amountOut The amount of `tokenOut` actually received by `recipient`.
-    function swap(
-        Venue venue,
+    /// @return amountOut The amount of `tokenOut` received by `recipient`.
+    /// @return executedVenue The venue that filled the swap, or the fallback venue address.
+    function swapV1(
         address tokenIn,
         address tokenOut,
         uint256 amountIn,
         uint256 amountOutMin,
         address recipient,
-        uint24 uniswapFee,
+        uint256 deadline
+    ) external returns (uint256 amountOut, address executedVenue);
+
+    /// @notice Swaps an exact `amountIn` of `tokenIn` through a caller-specified
+    /// venue, falling back to the public venue if it fails.
+    /// @dev The caller must approve this contract for at least `amountIn` of
+    /// `tokenIn`. Reverts `UnknownVenue` if `venue` is neither a whitelisted
+    /// propAMM nor the fallback address, or reverts if the output is
+    /// below `amountOutMin`. Naming the fallback address routes directly to the
+    /// public venue with no further fallback (it is the fallback).
+    /// @param venue The venue address.
+    /// @param tokenIn The token being sold.
+    /// @param tokenOut The token being bought.
+    /// @param amountIn The exact amount of `tokenIn` to sell.
+    /// @param amountOutMin The minimum acceptable amount of `tokenOut`.
+    /// @param recipient The address that receives `tokenOut`.
+    /// @param deadline Unix timestamp after which the swap is no longer valid.
+    /// @return amountOut The amount of `tokenOut` received by `recipient`.
+    function swapViaVenueV1(
+        address venue,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        address recipient,
         uint256 deadline
     ) external returns (uint256 amountOut);
 
-    /// @notice Quotes `amount` of `tokenIn` against every supported venue
-    /// (the proprietary AMMs and the Uniswap V3 fallback) and returns the
-    /// best output along with the venue that produced it.
-    /// @dev Venues that revert when quoting are skipped. Reverts if no venue
-    /// can produce a quote. Not `view`: the Uniswap V3 QuoterV2 branch
-    /// prices via revert-based simulation. Call this via `eth_call`
-    /// (staticcall) from off-chain.
-    /// @param tokenIn The address of the token being sold.
-    /// @param tokenOut The address of the token being bought.
-    /// @param amount The exact amount of `tokenIn` to quote against.
-    /// @param uniswapFee The Uniswap V3 pool fee tier used when quoting the
-    /// `Venue.Fallback` branch; ignored by the proprietary AMM branches.
-    /// @return quote The best `tokenOut` amount across all venues.
-    /// @return venue The venue that produced `quote`.
-    function quote(
+    /// @notice Swaps an exact `amountIn` of `tokenIn` routing through the
+    /// best-quoting venue among a caller-selected set, instead of all available
+    /// venues. An on-chain requote across `venues` selects the best.
+    /// @dev The caller must approve this contract for at least `amountIn` of
+    /// `tokenIn`. Venues that revert while quoting (including non-whitelisted
+    /// addresses) are skipped. The public-venue fallback still applies as the
+    /// transparent safety net if the chosen proprietary venue fails to fill.
+    /// Reverts `NoQuotesAvailable` if none of `venues` can be priced, and
+    /// `QuoteBelowMinimum` before pulling funds if the best quote across `venues`
+    /// is below `amountOutMin`, and re-checks `amountOutMin` against the
+    /// delivered balance delta after execution.
+    /// @param venues The venues to consider — a subset of the available venues.
+    /// @param tokenIn The token being sold.
+    /// @param tokenOut The token being bought.
+    /// @param amountIn The exact amount of `tokenIn` to sell.
+    /// @param amountOutMin The minimum acceptable amount of `tokenOut`.
+    /// @param recipient The address that receives `tokenOut`.
+    /// @param deadline Unix timestamp after which the swap is no longer valid.
+    /// @return amountOut The amount of `tokenOut` received by `recipient`.
+    /// @return executedVenue The venue that filled the swap, or the public-venue
+    /// fallback address when the fallback ran.
+    function swapViaSelectedVenuesV1(
+        address[] calldata venues,
         address tokenIn,
         address tokenOut,
-        uint256 amount,
-        uint24 uniswapFee
-    ) external returns (uint256 quote, Venue venue);
+        uint256 amountIn,
+        uint256 amountOutMin,
+        address recipient,
+        uint256 deadline
+    ) external returns (uint256 amountOut, address executedVenue);
 
-    /// @notice `quote` overload that uses the implementation's default
-    /// Uniswap V3 fee tier (`DEFAULT_FALLBACK_FEE`) for the `Venue.Fallback`
-    /// branch.
-    /// @dev Convenience wrapper for callers that don't want to pick a fee
-    /// tier. For pairs whose deepest pool is not at the default tier (e.g.
-    /// USDC/WETH on mainnet, which is `500`), prefer the 4-arg overload.
-    /// @param tokenIn The address of the token being sold.
-    /// @param tokenOut The address of the token being bought.
-    /// @param amount The exact amount of `tokenIn` to quote against.
-    /// @return quote The best `tokenOut` amount across all venues.
-    /// @return venue The venue that produced `quote`.
-    function quote(
-        address tokenIn,
-        address tokenOut,
-        uint256 amount
-    ) external returns (uint256 quote, Venue venue);
+    /// @notice Quotes `amount` of `tokenIn` across every venue and returns the
+    /// best output and the venue that produced it.
+    /// @dev Venues that revert while quoting are skipped. Reverts
+    /// `NoQuotesAvailable` if no venue can quote. Not `view`; call via
+    /// `eth_call` (staticcall) off-chain.
+    /// @param tokenIn The token being sold.
+    /// @param tokenOut The token being bought.
+    /// @param amount The amount of `tokenIn` to quote.
+    /// @return bestQuote The best `tokenOut` amount across all venues.
+    /// @return venue The proprietary venue that produced `bestQuote`, or 
+    /// the fallback venue address if the fallback won.
+    function quoteV1(address tokenIn, address tokenOut, uint256 amount)
+        external
+        returns (uint256 bestQuote, address venue);
 
-    /// @notice Quotes `amount` of `tokenIn` against a single specified venue.
-    /// Not `view`: the Uniswap V3 fallback branch prices via revert-based
-    /// simulation, which is incompatible with `view`. Call this via
-    /// `eth_call` (staticcall) from off-chain.
-    ///
-    /// Reverts `UnknownVenue` if `venue` is not a recognized enum value.
-    /// Bubbles up any revert from the underlying venue (e.g. unsupported
-    /// pair, no liquidity, stale Kipseli oracle).
-    /// @param venue The venue to quote against.
-    /// @param tokenIn The address of the token being sold.
-    /// @param tokenOut The address of the token being bought.
-    /// @param amount The exact amount of `tokenIn` to quote against.
-    /// @param uniswapFee The Uniswap V3 pool fee tier used when `venue` is
-    /// `Venue.Fallback`; ignored by the proprietary AMM branches.
+    /// @notice Quotes `amount` of `tokenIn` against a single venue — a whitelisted
+    /// propAMM or the public-venue fallback.
+    /// @dev Reverts `UnknownVenue` if `venue` is neither a whitelisted propAMM nor the
+    /// fallback address, and bubbles up any revert from the underlying venue.
+    /// @param venue The venue to quote against — a propAMM address, or the
+    /// fallback address for the public venue.
+    /// @param tokenIn The token being sold.
+    /// @param tokenOut The token being bought.
+    /// @param amount The amount of `tokenIn` to quote.
     /// @return amountOut The amount of `tokenOut` quoted by `venue`.
-    function quoteVenue(
-        Venue venue,
-        address tokenIn,
-        address tokenOut,
-        uint256 amount,
-        uint24 uniswapFee
-    ) external returns (uint256 amountOut);
+    function quoteVenueV1(address venue, address tokenIn, address tokenOut, uint256 amount)
+        external
+        returns (uint256 amountOut);
 
-    /// @notice `quoteVenue` overload that uses the implementation's default
-    /// Uniswap V3 fee tier (`DEFAULT_FALLBACK_FEE`) when `venue` is
-    /// `Venue.Fallback`.
-    /// @dev Convenience wrapper for callers that don't want to pick a fee
-    /// tier. For pairs whose deepest pool is not at the default tier, prefer
-    /// the 5-arg overload.
-    /// @param venue The venue to quote against.
-    /// @param tokenIn The address of the token being sold.
-    /// @param tokenOut The address of the token being bought.
-    /// @param amount The exact amount of `tokenIn` to quote against.
-    /// @return amountOut The amount of `tokenOut` quoted by `venue`.
-    function quoteVenue(
-        Venue venue,
-        address tokenIn,
-        address tokenOut,
-        uint256 amount
-    ) external returns (uint256 amountOut);
+    /// @notice Quotes `amountIn` of `tokenIn` across a caller-selected set of
+    /// venues and returns the best output and the venue that produced it.
+    /// @dev Considers ONLY `venues` (not all available venues). Venues that
+    /// revert while quoting — including non-whitelisted addresses — are skipped.
+    /// Reverts `NoQuotesAvailable` if none of `venues` can be priced.
+    /// @param venues The venues to consider — a subset of the available venues.
+    /// @param tokenIn The token being sold.
+    /// @param tokenOut The token being bought.
+    /// @param amountIn The amount of `tokenIn` to quote.
+    /// @return bestAmountOut The best `tokenOut` amount across `venues`.
+    /// @return bestVenue The venue that produced `bestAmountOut`.
+    function quoteSelectedVenuesV1(address[] calldata venues, address tokenIn, address tokenOut, uint256 amountIn)
+        external
+        returns (uint256 bestAmountOut, address bestVenue);
 }
