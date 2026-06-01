@@ -16,10 +16,11 @@ contract PropAMMRouterPairFeeTest is Test {
     MockERC20 internal tokenOut;
 
     address internal owner = address(this);
-    address internal stranger = address(0xBEEF);
+    address internal stranger = address(0xBEEF); // used by setPairFee/setPairFees access-control tests in later tasks
     address internal recipient = address(0xCAFE);
 
     // Re-declared locally so vm.expectEmit can match the router's emit.
+    // Mirror of PropAMMRouter.PairFeeUpdated (added in a later task); kept in sync so vm.expectEmit matches.
     event PairFeeUpdated(address indexed tokenA, address indexed tokenB, uint24 oldFee, uint24 newFee);
 
     function setUp() public {

@@ -7,7 +7,7 @@ import {IQuoterV2} from "@uniswap/v3-periphery/contracts/interfaces/IQuoterV2.so
 /// and returns a configurable amountOut.
 contract MockQuoterV2 {
     uint24 public lastFee;
-    uint256 public amountOutToReturn;
+    uint256 public amountOutToReturn; // defaults to 0; call setAmountOut(...) before swap/quote tests
 
     function setAmountOut(uint256 amountOut_) external {
         amountOutToReturn = amountOut_;
