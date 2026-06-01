@@ -4,12 +4,14 @@ pragma solidity ^0.8.35;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
+import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {IPropAMMRouter} from "./interfaces/IPropAMMRouter.sol";
+import {IPropAMM} from "./interfaces/IPropAMM.sol";
 import {FERMI_ROUTER, IFermiSwapper} from "./interfaces/IFermiSwapper.sol";
 import {BEBOP_ROUTER, IBebopRouter} from "./interfaces/IBebopRouter.sol";
 import {KIPSELI_PAMM, IKipseliPAMM} from "./interfaces/IKipseliPAMM.sol";
@@ -31,6 +33,7 @@ contract PropAMMRouter is
 {
     using SafeERC20 for IERC20;
     using SafeCast for uint256;
+    using EnumerableSet for EnumerableSet.AddressSet;
 
     /// @notice Fallback venue address.
     /// Owner-settable via `setFallbackSwapRouter`.
@@ -44,6 +47,20 @@ contract PropAMMRouter is
     /// token pair (see `_pairKey`). A value of 0 means "unset" — the pair resolves
     /// to the global `fallbackFee`. Owner-settable via `setPairFee` / `setPairFees`.
     mapping(bytes32 pairKey => uint24 fee) private _pairFee;
+    /// @notice Whitelist of propAMM venues the router may route through. This is
+    /// the authoritative check for whether an address may be used as a propAMM
+    /// (`_isVenue`, `quoteVenueV1`, `_dispatchVenue`): a venue de-listed here is
+    /// skipped by every selection path and rejected on every explicit path. As an
+    /// enumerable set it is also the source of candidates iterated by
+    /// `_pickBestVenue`, so a venue added via `addVenue` is automatically
+    /// considered by `swapV1` / `quoteV1` without a contract upgrade. The Uniswap
+    /// V3 fallback (`fallbackSwapRouter`) is the always-available safety net and is
+    /// intentionally NOT a member — it is accepted independently of this set.
+    /// Seeded with the known propAMMs in `initialize` and owner-managed via
+    /// `addVenue` / `removeVenue`. Owner-controlled, so its size (and thus the
+    /// `_pickBestVenue` loop bound) is trusted to stay small.
+    /// @dev Declared last to keep the upgradeable storage layout append-only.
+    EnumerableSet.AddressSet private _whitelistedVenues;
 
     // Mainnet token addresses for the default per-pair fallback tiers seeded by
     // `initialize` (see `_seedDefaultPairFees`). Mainnet-specific by design: on
@@ -87,6 +104,10 @@ contract PropAMMRouter is
     error ZeroAddress();
     /// @notice Thrown when `setPairFees` is given arrays of unequal length.
     error ArrayLengthMismatch();
+    /// @notice Thrown when `addVenue` is given a venue already on the whitelist.
+    error VenueAlreadyWhitelisted(address venue);
+    /// @notice Thrown when `removeVenue` is given a venue not on the whitelist.
+    error VenueNotWhitelisted(address venue);
 
     // `Swapped` is declared in IPropAMMRouter (part of the published interface)
     // and inherited here. The operational events below are implementation
@@ -115,6 +136,14 @@ contract PropAMMRouter is
     /// @param to The recipient of the rescued tokens.
     /// @param amount The amount transferred.
     event TokensRescued(address indexed token, address indexed to, uint256 amount);
+    /// @notice Emitted when a propAMM venue is added to the whitelist — via
+    /// `addVenue`, or for each seeded default venue during `initialize` /
+    /// `initializeVenueWhitelist`.
+    /// @param venue The venue address added.
+    event VenueWhitelisted(address indexed venue);
+    /// @notice Emitted when the owner removes a propAMM venue from the whitelist.
+    /// @param venue The venue address removed.
+    event VenueRemoved(address indexed venue);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -135,9 +164,11 @@ contract PropAMMRouter is
     /// Controls `_authorizeUpgrade` and any owner-gated administrative paths.
     /// Reverts if zero (enforced by `__Ownable_init`).
     /// @dev Also seeds the deep mainnet Uniswap V3 fallback tiers via
-    /// `_seedDefaultPairFees`, so a from-scratch deploy is pre-configured without a
+    /// `_seedDefaultPairFees` and the known propAMMs onto the venue whitelist via
+    /// `_seedDefaultVenues`, so a from-scratch deploy is pre-configured without a
     /// separate owner-run seeding step. Runs only here (initializer-gated), so it
-    /// never re-applies on a UUPS upgrade of an existing proxy.
+    /// never re-applies on a UUPS upgrade of an existing proxy — proxies deployed
+    /// before the whitelist existed backfill it via `initializeVenueWhitelist`.
     function initialize(address fallbackSwapRouter_, address fallbackQuoter_, address owner_) public initializer {
         require(fallbackSwapRouter_ != address(0), ZeroAddress());
         require(fallbackQuoter_ != address(0), ZeroAddress());
@@ -148,6 +179,20 @@ contract PropAMMRouter is
         __Ownable2Step_init();
         __Pausable_init();
         _seedDefaultPairFees();
+        _seedDefaultVenues();
+    }
+
+    /// @notice One-time backfill of the venue whitelist for proxies deployed
+    /// before the whitelist existed.
+    /// @dev `reinitializer(2)` so it runs at most once, owner-gated. From-scratch
+    /// deploys are already seeded by `initialize` and never need this. Wire it as
+    /// the upgrade call's calldata
+    /// (`abi.encodeCall(PropAMMRouter.initializeVenueWhitelist, ())`) so the
+    /// whitelist is populated atomically with the upgrade — otherwise the upgraded
+    /// proxy treats every propAMM as non-whitelisted and silently routes all swaps
+    /// through the Uniswap fallback until the owner adds them.
+    function initializeVenueWhitelist() external reinitializer(2) onlyOwner {
+        _seedDefaultVenues();
     }
 
     /// @notice Seeds the deep mainnet Uniswap V3 fallback fee tiers so a
@@ -160,6 +205,29 @@ contract PropAMMRouter is
         _setPairFee(USDT, USDC, 100); // stablecoin pair — deepest at 0.01%
         _setPairFee(USDT, WETH, 500); // ETH/stable — deepest at 0.05%
         _setPairFee(USDC, WETH, 500); // ETH/stable — deepest at 0.05%
+    }
+
+    /// @notice Seeds the whitelist with the propAMMs the router ships with so a
+    /// from-scratch deploy can route to them without a separate owner-run step.
+    /// @dev Routes through `_addVenue` (the same core the public `addVenue` uses),
+    /// so it is safe to run against an already-seeded proxy: an entry that is
+    /// already listed is left untouched and emits nothing, while a newly added
+    /// entry emits `VenueWhitelisted`.
+    function _seedDefaultVenues() private {
+        _addVenue(FERMI_ROUTER);
+        _addVenue(KIPSELI_PAMM);
+        _addVenue(BEBOP_ROUTER);
+    }
+
+    /// @dev Shared whitelist-insertion core for the public `addVenue` and the
+    /// seeding paths (`_seedDefaultVenues`). Adds `venue` if absent and emits
+    /// `VenueWhitelisted` only when the set actually changed; idempotent, so the
+    /// seeding paths never revert on a venue that is already listed. Callers that
+    /// must reject a redundant add (the public `addVenue`) check the return value.
+    /// @return added True if `venue` was newly inserted, false if already present.
+    function _addVenue(address venue) private returns (bool added) {
+        added = _whitelistedVenues.add(venue);
+        if (added) emit VenueWhitelisted(venue);
     }
 
     /// @inheritdoc IPropAMMRouter
@@ -333,6 +401,10 @@ contract PropAMMRouter is
         uint256 prevTokenOutBalance
     ) external returns (uint256 amountOut) {
         require(msg.sender == address(this), OnlySelf());
+        // `_coreSwap` only reaches here for a non-fallback venue; it must be a
+        // whitelisted propAMM. A de-listed venue reverts so the catch arm in
+        // `_coreSwap` engages the Uniswap fallback.
+        require(_whitelistedVenues.contains(venue), UnknownVenue());
 
         if (venue == FERMI_ROUTER) {
             IERC20(tokenIn).forceApprove(FERMI_ROUTER, amountIn);
@@ -369,7 +441,13 @@ contract PropAMMRouter is
                 IERC20(tokenOut).safeTransfer(recipient, received);
             }
         } else {
-            revert UnknownVenue();
+            // Any other whitelisted venue speaks the common `IPropAMM` interface.
+            // Push-payment model: transfer `tokenIn` first, then let the venue
+            // consume it and deliver `tokenOut` straight to `recipient`. A revert
+            // (or an under-delivery caught below) rolls back this transfer via the
+            // `_coreSwap` self-call `try/catch` and engages the Uniswap fallback.
+            IERC20(tokenIn).safeTransfer(venue, amountIn);
+            IPropAMM(venue).swap(tokenIn, tokenOut, amountIn, amountOutMin, recipient);
         }
 
         amountOut = IERC20(tokenOut).balanceOf(recipient) - prevTokenOutBalance;
@@ -418,12 +496,26 @@ contract PropAMMRouter is
     }
 
     /// @inheritdoc IPropAMMRouter
-    /// @dev Dispatches by address across the propAMMs and the fallback.
-    /// Reverts `UnknownVenue` for any other address.
+    /// @dev The Uniswap fallback is always quotable; any other `venue` must be on
+    /// the whitelist (`_whitelistedVenues`), otherwise reverts `UnknownVenue`.
+    /// The three built-in propAMMs are priced through their bespoke quoters; every
+    /// other whitelisted venue is priced through the common `IPropAMM.quote`
+    /// interface. Because the selection helpers (`_pickBestVenue`,
+    /// `_pickBestVenueFrom`) call this in a `try/catch`, a de-listed venue (or one
+    /// whose quote reverts, e.g. an address that does not implement `IPropAMM`) is
+    /// simply skipped rather than surfaced.
     function quoteVenueV1(address venue, address tokenIn, address tokenOut, uint256 amount)
         public
         returns (uint256 amountOut)
     {
+        // The fallback (Uniswap V3) is the always-available safety net and is not
+        // part of the propAMM whitelist, so it is checked before the gate.
+        if (venue == fallbackSwapRouter) {
+            return UniV3Router.quoteExactIn(tokenIn, tokenOut, _resolveFee(tokenIn, tokenOut), amount, fallbackQuoter);
+        }
+
+        require(_whitelistedVenues.contains(venue), UnknownVenue());
+
         if (venue == FERMI_ROUTER) {
             int256 amountInt256 = amount.toInt256();
             (, amountOut) = IFermiSwapper(FERMI_ROUTER).quoteAmounts(tokenIn, tokenOut, amountInt256);
@@ -432,11 +524,9 @@ contract PropAMMRouter is
                 .preSwapQuote(tokenIn, amount, tokenOut, block.timestamp * 1000, address(0));
         } else if (venue == BEBOP_ROUTER) {
             amountOut = IBebopRouter(BEBOP_ROUTER).quote(tokenIn, tokenOut, amount);
-        } else if (venue == fallbackSwapRouter) {
-            amountOut =
-                UniV3Router.quoteExactIn(tokenIn, tokenOut, _resolveFee(tokenIn, tokenOut), amount, fallbackQuoter);
         } else {
-            revert UnknownVenue();
+            // Any other whitelisted venue speaks the common `IPropAMM` interface.
+            amountOut = IPropAMM(venue).quote(tokenIn, tokenOut, amount);
         }
     }
 
@@ -466,13 +556,15 @@ contract PropAMMRouter is
     }
 
     /// @notice Finds the venue offering the best `tokenOut` for `amount` of
-    /// `tokenIn` across the propAMMs and the fallback.
-    /// @dev Each venue is queried in its own `try/catch` so a reverting venue is
-    /// simply skipped. Returns `(0, fallbackSwapRouter)` when nothing can be
-    /// priced — callers that need a hard failure (e.g. `quoteV1`) check the
-    /// zero quote; `swapV1` instead lets `_coreSwap` route the
-    /// `fallbackSwapRouter` to the fallback. The returned `venue` is one of the
-    /// whitelisted venues.
+    /// `tokenIn` across the whitelisted propAMMs and the fallback.
+    /// @dev Iterates the live venue whitelist (`_whitelistedVenues`), so venues
+    /// added or removed by the owner are reflected without a contract upgrade.
+    /// Each venue is queried in its own `try/catch` so a reverting venue —
+    /// including one listed ahead of its interface — is simply skipped. Returns
+    /// `(0, fallbackSwapRouter)` when nothing can be priced — callers that need a
+    /// hard failure (e.g. `quoteV1`) check the zero quote; `swapV1` instead lets
+    /// `_coreSwap` route the `fallbackSwapRouter` to the fallback. The returned
+    /// `venue` is either a whitelisted propAMM or `fallbackSwapRouter`.
     /// @param tokenIn The address of the token being sold.
     /// @param tokenOut The address of the token being bought.
     /// @param amount The exact amount of `tokenIn` to quote against.
@@ -486,12 +578,13 @@ contract PropAMMRouter is
         // `venue` stays `fallbackSwapRouter` and `_coreSwap` routes to fallback.
         venue = fallbackSwapRouter;
 
-        address[3] memory venues = [FERMI_ROUTER, KIPSELI_PAMM, BEBOP_ROUTER];
-        for (uint256 i = 0; i < venues.length; i++) {
-            try this.quoteVenueV1(venues[i], tokenIn, tokenOut, amount) returns (uint256 amountOut) {
+        uint256 venueCount = _whitelistedVenues.length();
+        for (uint256 i = 0; i < venueCount; i++) {
+            address candidate = _whitelistedVenues.at(i);
+            try this.quoteVenueV1(candidate, tokenIn, tokenOut, amount) returns (uint256 amountOut) {
                 if (amountOut > bestQuote) {
                     bestQuote = amountOut;
-                    venue = venues[i];
+                    venue = candidate;
                 }
             } catch {}
         }
@@ -540,10 +633,11 @@ contract PropAMMRouter is
     }
 
     /// @notice Returns whether `venue` is a venue a caller may name explicitly in
-    /// `quoteVenueV1` / `swapViaVenueV1`.
+    /// `quoteVenueV1` / `swapViaVenueV1`: a whitelisted propAMM, or the Uniswap
+    /// fallback (which is always accepted, independent of the whitelist).
     function _isVenue(address venue) private view returns (bool) {
         if (venue == address(0)) return false;
-        return venue == FERMI_ROUTER || venue == KIPSELI_PAMM || venue == BEBOP_ROUTER || venue == fallbackSwapRouter;
+        return _whitelistedVenues.contains(venue) || venue == fallbackSwapRouter;
     }
 
     /// @dev Canonical key for a token pair, order-independent. Uniswap V3 pools
@@ -652,6 +746,68 @@ contract PropAMMRouter is
         require(newQuoter != address(0), ZeroAddress());
         emit FallbackQuoterUpdated(fallbackQuoter, newQuoter);
         fallbackQuoter = newQuoter;
+    }
+
+    /// @notice Returns whether `venue` is a whitelisted propAMM.
+    /// @dev Reflects only the propAMM whitelist. The Uniswap fallback
+    /// (`fallbackSwapRouter`) is usable as a venue without being whitelisted, so
+    /// this returns false for it — use it to inspect the propAMM set specifically.
+    /// @param venue The address to check.
+    function isWhitelistedVenue(address venue) external view returns (bool) {
+        return _whitelistedVenues.contains(venue);
+    }
+
+    /// @notice Returns every whitelisted propAMM venue.
+    /// @dev Excludes the Uniswap fallback (not a set member). Order is not
+    /// guaranteed — `removeVenue` swap-and-pops, so positions shift. Intended for
+    /// off-chain reads / `eth_call`; the set is owner-controlled and small, but
+    /// avoid calling this from another contract on a hot path.
+    /// @return The list of whitelisted venue addresses.
+    function getWhitelistedVenues() external view returns (address[] memory) {
+        return _whitelistedVenues.values();
+    }
+
+    /// @notice Returns the number of whitelisted propAMM venues.
+    /// @dev Pair with `whitelistedVenueAt` to enumerate on-chain without
+    /// materializing the whole array.
+    function whitelistedVenueCount() external view returns (uint256) {
+        return _whitelistedVenues.length();
+    }
+
+    /// @notice Returns the whitelisted venue at `index`.
+    /// @dev Reverts if `index >= whitelistedVenueCount()`. Order is not stable
+    /// across `removeVenue` calls (swap-and-pop), so treat indices as ephemeral.
+    /// @param index Position in `[0, whitelistedVenueCount())`.
+    function whitelistedVenueAt(uint256 index) external view returns (address) {
+        return _whitelistedVenues.at(index);
+    }
+
+    /// @notice Adds a propAMM venue to the whitelist, allowing the router to route
+    /// (and quote) through it — including as an auto-selection candidate in
+    /// `swapV1` / `quoteV1`, which iterate the whitelist.
+    /// @dev Owner-gated. Reverts `ZeroAddress` if `venue` is zero, or
+    /// `VenueAlreadyWhitelisted` if it is already listed. Other than the three
+    /// built-in propAMMs (which use their bespoke interfaces), a venue is expected
+    /// to implement the common `IPropAMM` interface. Listing an address that does
+    /// not (an EOA, the wrong contract, a not-yet-deployed adapter) is not a
+    /// foot-gun: its `quote`/`swap` calls revert, so it is skipped by selection
+    /// and, on an explicit swap, the reverting `_dispatchVenue` rolls back and the
+    /// Uniswap fallback engages — no funds are stranded.
+    /// @param venue The venue address to whitelist.
+    function addVenue(address venue) external onlyOwner {
+        require(venue != address(0), ZeroAddress());
+        require(_addVenue(venue), VenueAlreadyWhitelisted(venue));
+    }
+
+    /// @notice Removes a propAMM venue from the whitelist, after which the router
+    /// will neither quote nor route through it on any path.
+    /// @dev Owner-gated. Reverts `VenueNotWhitelisted` if `venue` is not listed.
+    /// Does not affect the Uniswap fallback, which remains the always-available
+    /// safety net.
+    /// @param venue The venue address to de-list.
+    function removeVenue(address venue) external onlyOwner {
+        require(_whitelistedVenues.remove(venue), VenueNotWhitelisted(venue));
+        emit VenueRemoved(venue);
     }
 
     /// @notice Pauses swaps, blocking new swaps until `unpause` is called.

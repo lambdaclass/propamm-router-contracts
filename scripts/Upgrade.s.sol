@@ -18,6 +18,14 @@ contract Upgrade is Script {
         // had `fallbackFee`) makes the fallback resolve to tier 0 (invalid) and
         // revert for all unconfigured pairs. If so, ship a reinitializer that
         // backfills `fallbackFee = 3000` and pass its calldata below instead of "".
+        //
+        // Venue-whitelist precondition: the whitelist (`_whitelistedVenues`) is
+        // seeded only in `initialize` (fresh deploy). A proxy deployed before the
+        // whitelist existed comes up with NO whitelisted propAMMs, so every swap
+        // silently routes through the Uniswap fallback until they are added. To
+        // backfill atomically with the upgrade, pass
+        // `abi.encodeCall(PropAMMRouter.initializeVenueWhitelist, ())` as the call
+        // below instead of "" (it is `reinitializer(2)`, so it runs at most once).
         Upgrades.upgradeProxy(
             proxy,
             newImplName,
