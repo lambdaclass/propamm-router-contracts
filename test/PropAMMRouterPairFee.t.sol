@@ -7,6 +7,7 @@ import {PropAMMRouter} from "../src/PropAMMRouter.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockSwapRouter02} from "./mocks/MockSwapRouter02.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
+import {SeedStablePairs} from "../scripts/SeedStablePairs.s.sol";
 
 contract PropAMMRouterPairFeeTest is Test {
     PropAMMRouter internal router;
@@ -230,5 +231,18 @@ contract PropAMMRouterPairFeeTest is Test {
         assertEq(executedVenue, address(mockRouter));      // fallbackSwapRouter won
         assertEq(amountOut, 1000);
         assertEq(tokenOut.balanceOf(recipient), 1000);
+    }
+
+    function test_seedStablePairs_resolveToSeededTiers() public {
+        SeedStablePairs seed = new SeedStablePairs();
+        (address[] memory a, address[] memory b, uint24[] memory f) = seed.seedData();
+
+        router.setPairFees(a, b, f);
+
+        for (uint256 i = 0; i < a.length; i++) {
+            assertEq(router.resolvedFee(a[i], b[i]), f[i]);
+            // order-independence holds for the seeded pairs too
+            assertEq(router.resolvedFee(b[i], a[i]), f[i]);
+        }
     }
 }
