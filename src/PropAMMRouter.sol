@@ -241,6 +241,40 @@ contract PropAMMRouter is
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
 
+    /// @notice Caller-named-venue swap that skims a frontend fee from the output token.
+    /// @dev Implementation-only. Like `swapViaVenueV1` plus the fee skim; the underlying
+    /// swap is routed to this contract, then fee + net are forwarded. Reverts `UnknownVenue`
+    /// if `venue` is neither a whitelisted propAMM nor the fallback address.
+    /// @param venue The venue address (propAMM or the fallback router address).
+    /// @param tokenIn The token being sold.
+    /// @param tokenOut The token being bought.
+    /// @param amountIn The exact amount of `tokenIn` to sell.
+    /// @param amountOutMin The minimum NET `tokenOut` the user must receive (after the fee).
+    /// @param recipient The address that receives the net `tokenOut`.
+    /// @param deadline Unix timestamp after which the swap is no longer valid.
+    /// @param fee The frontend fee (bps + recipient).
+    /// @return amountOut The net `tokenOut` delivered to `recipient`.
+    function swapViaVenueWithFeeV1(
+        address venue,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        address recipient,
+        uint256 deadline,
+        FrontendFee calldata fee
+    ) external whenNotPaused nonReentrant returns (uint256 amountOut) {
+        _validateFee(fee);
+        require(_isVenue(venue), UnknownVenue());
+
+        uint256 grossMin = _grossUp(amountOutMin, fee.bps);
+        (uint256 delivered, address executedVenue) =
+            _coreSwap(venue, tokenIn, tokenOut, amountIn, grossMin, address(this), deadline);
+
+        amountOut = _skimAndDisburse(tokenOut, delivered, fee, recipient);
+        _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
+    }
+
     /// @inheritdoc IPropAMMRouter
     /// @dev Requotes ONLY the caller-supplied `venues` on-chain via
     /// `_pickBestVenueFrom`, then executes the best through `_coreSwap`. As with

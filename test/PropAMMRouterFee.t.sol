@@ -67,6 +67,24 @@ contract PropAMMRouterFeeTest is Test {
         assertEq(tokenOut.balanceOf(address(router)), 0);
     }
 
+    function test_swapViaVenueWithFee_fallback_takesFee() public {
+        _prepare(1_000e18, 1_000e18);
+        uint256 expectedFee = 1_000e18 * 50 / 10_000;
+        uint256 expectedNet = 1_000e18 - expectedFee;
+
+        vm.prank(user);
+        uint256 amountOut = router.swapViaVenueWithFeeV1(
+            address(swapRouter), // the fallback venue address is a valid venue
+            address(tokenIn), address(tokenOut), 1_000e18, expectedNet,
+            user, block.timestamp + 1, FrontendFee({bps: 50, recipient: feeRecipient})
+        );
+
+        assertEq(amountOut, expectedNet);
+        assertEq(tokenOut.balanceOf(user), expectedNet);
+        assertEq(tokenOut.balanceOf(feeRecipient), expectedFee);
+        assertEq(tokenOut.balanceOf(address(router)), 0);
+    }
+
     // Characterization: existing fee-free swapV1 routes through the fallback and
     // emits Swapped(recipient = user, amountOut = delivered). Guards Task 2.
     function test_swapV1_fallback_emitsSwapped() public {
