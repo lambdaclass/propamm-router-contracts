@@ -145,11 +145,13 @@ contract PropAMMRouter is
         require(block.timestamp <= deadline, Expired());
         (uint256 bestQuote, address venue) = _pickBestVenue(tokenIn, tokenOut, amountIn);
         require(bestQuote >= amountOutMin, QuoteBelowMinimum(amountOutMin, bestQuote));
-        return _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
+        (amountOut, executedVenue) =
+            _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
+        _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
 
     /// @inheritdoc IPropAMMRouter
-    /// @dev Swaps via the `venue`. It must be a callable venue or the 
+    /// @dev Swaps via the `venue`. It must be a callable venue or the
     /// fallback venue named by the `fallbackSwapRouter` address.
     function swapViaVenueV1(
         address venue,
@@ -161,7 +163,10 @@ contract PropAMMRouter is
         uint256 deadline
     ) public whenNotPaused nonReentrant returns (uint256 amountOut) {
         require(_isVenue(venue), UnknownVenue());
-        (amountOut,) = _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
+        address executedVenue;
+        (amountOut, executedVenue) =
+            _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
+        _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
 
     /// @inheritdoc IPropAMMRouter
@@ -187,14 +192,18 @@ contract PropAMMRouter is
         // Reject when none of the selected venues could be priced (venue stays address(0)).
         require(venue != address(0), NoQuotesAvailable());
         require(bestQuote >= amountOutMin, QuoteBelowMinimum(amountOutMin, bestQuote));
-        return _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
+        (amountOut, executedVenue) =
+            _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
+        _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
 
     /// @notice Pulls funds once and executes a swap, attempting `venue` first
     /// and recovering via the fallback if it fails.
     /// @dev Shared core for `swapV1` and `swapViaVenueV1`; unguarded so the two
     /// public entrypoints can each apply `whenNotPaused`/`nonReentrant` without
-    /// re-entering the guard through one another. 
+    /// re-entering the guard through one another. The `Swapped` event is emitted
+    /// by the calling entrypoint (not here) so the fee entrypoints can log the
+    /// net amount and real recipient.
     /// @param venue The propAMM to attempt first, or `fallbackSwapRouter`.
     /// @param tokenIn The address of the token being sold.
     /// @param tokenOut The address of the token being bought.
@@ -225,7 +234,6 @@ contract PropAMMRouter is
             ) returns (
                 uint256 amountOut_
             ) {
-                _emitSwapped(venue, tokenIn, tokenOut, amountIn, amountOut_, recipient);
                 return (amountOut_, venue);
             } catch {
                 // Fall through to the Uniswap V3 fallback below.
@@ -235,16 +243,16 @@ contract PropAMMRouter is
         swapViaUniswapV3(tokenIn, tokenOut, amountIn, amountOutMin, recipient);
         amountOut = IERC20(tokenOut).balanceOf(recipient) - prevTokenOutBalance;
         require(amountOut >= amountOutMin, InsufficientOutput(amountOutMin, amountOut));
-        _emitSwapped(fallbackSwapRouter, tokenIn, tokenOut, amountIn, amountOut, recipient);
         return (amountOut, fallbackSwapRouter);
     }
 
     /// @notice Logs a completed swap.
-    /// @dev Wraps the `Swapped` emit so `_coreSwap` does not carry the event's
-    /// arguments live on its (already param-heavy) stack at the emit site —
-    /// avoids a stack-too-deep without enabling `viaIR`. `msg.sender` is read
-    /// here and equals `_coreSwap`'s caller (and the entrypoint's), since
-    /// internal calls preserve the message context.
+    /// @dev Wraps the `Swapped` emit so the calling entrypoint does not carry
+    /// the event's arguments live on its (already param-heavy) stack at the
+    /// emit site — avoids a stack-too-deep without enabling `viaIR`. Called
+    /// from the public swap entrypoints after `_coreSwap` returns. `msg.sender`
+    /// is read here and equals the entrypoint's caller, since internal calls
+    /// preserve the message context.
     /// @param marketMaker The venue that filled, or `fallbackSwapRouter`. Placed
     /// first (not in `Swapped`'s field order) so the deepest `_coreSwap` local
     /// (`venue`) is read at the shallowest stack reach — another stack-too-deep
