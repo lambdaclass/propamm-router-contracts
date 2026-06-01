@@ -303,6 +303,50 @@ contract PropAMMRouter is
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
 
+    /// @notice Best-of-a-subset swap that skims a frontend fee from the output token.
+    /// @dev Implementation-only. Like `swapViaSelectedVenuesV1` plus the fee skim; requotes
+    /// only `venues`, grosses up the net min, routes the swap to this contract, then forwards
+    /// fee + net. Reverts `NoQuotesAvailable` if none of `venues` can be priced.
+    /// @param venues The venues to consider — a subset of the available venues.
+    /// @param tokenIn The token being sold.
+    /// @param tokenOut The token being bought.
+    /// @param amountIn The exact amount of `tokenIn` to sell.
+    /// @param amountOutMin The minimum NET `tokenOut` the user must receive (after the fee).
+    /// @param recipient The address that receives the net `tokenOut`.
+    /// @param deadline Unix timestamp after which the swap is no longer valid.
+    /// @param fee The frontend fee (bps + recipient).
+    /// @return amountOut The net `tokenOut` delivered to `recipient`.
+    /// @return executedVenue The venue that filled, or the fallback venue address.
+    function swapViaSelectedVenuesWithFeeV1(
+        address[] calldata venues,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        address recipient,
+        uint256 deadline,
+        FrontendFee calldata fee
+    ) external whenNotPaused nonReentrant returns (uint256 amountOut, address executedVenue) {
+        _validateFee(fee);
+        require(block.timestamp <= deadline, Expired());
+
+        uint256 grossMin = _grossUp(amountOutMin, fee.bps);
+        address venue;
+        {
+            uint256 bestQuote;
+            (bestQuote, venue) = _pickBestVenueFrom(venues, tokenIn, tokenOut, amountIn);
+            require(venue != address(0), NoQuotesAvailable());
+            require(bestQuote >= grossMin, QuoteBelowMinimum(grossMin, bestQuote));
+        }
+
+        uint256 delivered;
+        (delivered, executedVenue) =
+            _coreSwap(venue, tokenIn, tokenOut, amountIn, grossMin, address(this), deadline);
+
+        amountOut = _skimAndDisburse(tokenOut, delivered, fee, recipient);
+        _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
+    }
+
     /// @notice Pulls funds once and executes a swap, attempting `venue` first
     /// and recovering via the fallback if it fails.
     /// @dev Shared core for `swapV1` and `swapViaVenueV1`; unguarded so the two
