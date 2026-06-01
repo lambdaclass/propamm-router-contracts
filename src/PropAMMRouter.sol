@@ -183,8 +183,8 @@ contract PropAMMRouter is
 
         (uint256 bestQuote, address venue) = _pickBestVenueFrom(venues, tokenIn, tokenOut, amountIn);
 
-        // Quote step "failed" (none of `venues` priced, or the best is below the
-        // minimum): route to the fallback venue, which `_coreSwap` runs directly.
+        // If no quotes available, or the best quote is below the minimum,
+        // route to the fallback venue, which `_coreSwap` runs directly.
         if (venue == address(0) || bestQuote < amountOutMin) {
             venue = fallbackSwapRouter;
         }
