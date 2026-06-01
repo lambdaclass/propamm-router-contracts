@@ -7,7 +7,7 @@ import {PropAMMRouter} from "../src/PropAMMRouter.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockSwapRouter02} from "./mocks/MockSwapRouter02.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
-import {SeedStablePairs} from "../scripts/SeedStablePairs.s.sol";
+import {SetupRouterVariables} from "../scripts/setupRouterVariables.s.sol";
 
 contract PropAMMRouterPairFeeTest is Test {
     PropAMMRouter internal router;
@@ -277,7 +277,7 @@ contract PropAMMRouterPairFeeTest is Test {
     }
 
     function test_seedStablePairs_resolveToSeededTiers() public {
-        SeedStablePairs seed = new SeedStablePairs();
+        SetupRouterVariables seed = new SetupRouterVariables();
         (address[] memory a, address[] memory b, uint24[] memory f) = seed.seedData();
 
         router.setPairFees(a, b, f);
