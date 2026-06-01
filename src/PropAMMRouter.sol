@@ -7,7 +7,7 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
+import {AccessManagedUpgradeable} from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {IPropAMMRouter} from "./interfaces/IPropAMMRouter.sol";
 import {FERMI_ROUTER, IFermiSwapper} from "./interfaces/IFermiSwapper.sol";
@@ -26,17 +26,17 @@ contract PropAMMRouter is
     ReentrancyGuardTransient,
     Initializable,
     PausableUpgradeable,
-    Ownable2StepUpgradeable,
+    AccessManagedUpgradeable,
     UUPSUpgradeable
 {
     using SafeERC20 for IERC20;
     using SafeCast for uint256;
 
     /// @notice Fallback venue address. 
-    /// Owner-settable via `setFallbackSwapRouter`.
+    /// Settable (access-controlled) via `setFallbackSwapRouter`.
     address public fallbackSwapRouter;
     /// @notice Fallback venue address used to price the fallback route.
-    /// Owner-settable via `setFallbackQuoter`.
+    /// Settable (access-controlled) via `setFallbackQuoter`.
     address public fallbackQuoter;
     /// @notice Fee for the fallback venue.
     uint24 public fallbackFee;
@@ -100,27 +100,30 @@ contract PropAMMRouter is
         _disableInitializers();
     }
 
-    /// @notice Initializes the router, pinning fallback venue address
-    /// and setting the owner who controls future upgrades.
+    /// @notice Initializes the router, pinning the fallback venue address
+    /// and the `AccessManager` authority that governs administrative actions.
     /// @param fallbackSwapRouter_ Address of fallback router used
     /// to execute the fallback swap. Reverts `ZeroAddress` if zero — it also
     /// doubles as the fallback venue sentinel, so a zero value would corrupt
     /// venue identity (`_isVenue`, `_pickBestVenue`, `_coreSwap`).
     /// @param fallbackQuoter_ Address of the fallback quoter used to quote
     /// the fallback swap off-chain. Reverts `ZeroAddress` if zero.
-    /// @param owner_ Initial owner of the proxy. Set directly here with no
-    /// acceptance step — `Ownable2Step`'s two-step handoff only governs
-    /// *subsequent* transfers via `transferOwnership` / `acceptOwnership`.
-    /// Controls `_authorizeUpgrade` and any owner-gated administrative paths.
-    /// Reverts if zero (enforced by `__Ownable_init`).
-    function initialize(address fallbackSwapRouter_, address fallbackQuoter_, address owner_) public initializer {
+    /// @param authority_ The `AccessManager` instance that governs every
+    /// `restricted` administrative entrypoint: `_authorizeUpgrade` (UUPS
+    /// upgrades), the fallback setters, `pause`/`unpause`, and `rescueTokens`.
+    /// Which role may call each selector, the per-role execution delays, and the
+    /// instant guardian pause are all configured on the manager itself — not
+    /// here — so the router stays policy-agnostic. Reverts `ZeroAddress` if zero;
+    /// `__AccessManaged_init` does not validate it and a zero authority would
+    /// leave the contract permanently unmanageable.
+    function initialize(address fallbackSwapRouter_, address fallbackQuoter_, address authority_) public initializer {
         require(fallbackSwapRouter_ != address(0), ZeroAddress());
         require(fallbackQuoter_ != address(0), ZeroAddress());
+        require(authority_ != address(0), ZeroAddress());
         fallbackSwapRouter = fallbackSwapRouter_;
         fallbackQuoter = fallbackQuoter_;
         fallbackFee = 3000;
-        __Ownable_init(owner_);
-        __Ownable2Step_init();
+        __AccessManaged_init(authority_);
         __Pausable_init();
     }
 
@@ -504,62 +507,73 @@ contract PropAMMRouter is
         return venue == FERMI_ROUTER || venue == KIPSELI_PAMM || venue == BEBOP_ROUTER || venue == fallbackSwapRouter;
     }
 
-    /// @dev Restricts UUPS upgrades to the contract owner set in `initialize`.
-    function _authorizeUpgrade(address) internal override onlyOwner {}
+    /// @dev Gates UUPS upgrades through the `AccessManager`. The `restricted`
+    /// modifier keys off the *entering* selector, which for an upgrade is
+    /// `upgradeToAndCall(address,bytes)`; assign the upgrade role and its
+    /// execution delay to that selector on the manager. Using `restricted` on an
+    /// internal function is the documented UUPS+AccessManaged pattern precisely
+    /// because the gate resolves against that entrypoint selector.
+    function _authorizeUpgrade(address) internal override restricted {}
 
     /// @notice Sets the fallback fee used by the fallback route.
-    /// @dev Owner-gated. Lets the deepest pool for the traded pairs be selected
+    /// @dev Access-controlled via the AccessManager authority. Lets the deepest pool for the traded pairs be selected
     /// without a contract upgrade.
     /// @param fee in hundredths of a bip (e.g. `3000` for 0.30%).
-    function setFallbackFee(uint24 fee) external onlyOwner {
+    function setFallbackFee(uint24 fee) external restricted {
         require(fee != 0 && fee < 1_000_000, InvalidFallbackFee(fee));
         emit FallbackFeeUpdated(fallbackFee, fee);
         fallbackFee = fee;
     }
 
     /// @notice Repoints the address used by the fallback route.
-    /// @dev Owner-gated. Lets a new SwapRouter deployment be adopted without a
+    /// @dev Access-controlled via the AccessManager authority. Lets a new SwapRouter deployment be adopted without a
     /// contract upgrade. Reverts `ZeroAddress` if zero — this address also
     /// identifies the fallback venue (`_isVenue`, `_pickBestVenue`, `_coreSwap`),
     /// so a zero value would corrupt venue identity. Note that `executedVenue`
     /// values observed off-chain are only meaningful relative to the router's
     /// configuration at the time of the swap.
     /// @param newRouter Address of thew new router.
-    function setFallbackSwapRouter(address newRouter) external onlyOwner {
+    function setFallbackSwapRouter(address newRouter) external restricted {
         require(newRouter != address(0), ZeroAddress());
         emit FallbackSwapRouterUpdated(fallbackSwapRouter, newRouter);
         fallbackSwapRouter = newRouter;
     }
 
     /// @notice Repoints the fallback quoter used to price the fallback route.
-    /// @dev Owner-gated. Reverts `ZeroAddress` if zero.
+    /// @dev Access-controlled via the AccessManager authority. Reverts `ZeroAddress` if zero.
     /// @param newQuoter Address of the new fallback quoter.
-    function setFallbackQuoter(address newQuoter) external onlyOwner {
+    function setFallbackQuoter(address newQuoter) external restricted {
         require(newQuoter != address(0), ZeroAddress());
         emit FallbackQuoterUpdated(fallbackQuoter, newQuoter);
         fallbackQuoter = newQuoter;
     }
 
     /// @notice Pauses swaps, blocking new swaps until `unpause` is called.
-    /// @dev Owner-gated. Quote functions remain callable while paused.
-    function pause() external onlyOwner {
+    /// @dev Access-controlled via the AccessManager authority. Intended for an
+    /// instant (zero-delay) guardian role: pausing is fail-safe — it can only
+    /// restrict — so it must be able to fire immediately as a circuit breaker.
+    /// Quote functions remain callable while paused.
+    function pause() external restricted {
         _pause();
     }
 
     /// @notice Unpauses swaps.
-    function unpause() external onlyOwner {
+    /// @dev Access-controlled via the AccessManager authority. Kept separate from
+    /// the guardian's instant pause: resuming is fail-open, so it is intended for
+    /// a deliberate role carrying its own (non-zero) execution delay.
+    function unpause() external restricted {
         _unpause();
     }
 
     /// @notice Rescues ERC-20 tokens stranded on the router.
-    /// @dev Owner-gated. The router holds no balance between swaps, so any
+    /// @dev Access-controlled via the AccessManager authority. The router holds no balance between swaps, so any
     /// standing balance is unintended (mis-sent funds, fee-on-transfer dust, or
     /// a partial-pull remainder). Not `nonReentrant`: it must stay callable and
     /// it moves no in-flight swap funds — swaps are atomic and `nonReentrant`.
     /// @param token The ERC-20 to rescue.
     /// @param to The recipient of the rescued tokens.
     /// @param amount The amount to transfer.
-    function rescueTokens(address token, address to, uint256 amount) external onlyOwner {
+    function rescueTokens(address token, address to, uint256 amount) external restricted {
         require(to != address(0), ZeroAddress());
         IERC20(token).safeTransfer(to, amount);
         emit TokensRescued(token, to, amount);
