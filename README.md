@@ -1,10 +1,10 @@
 # PropAMMRouter
 
-Single-hop router that quotes and executes swaps against a proprietary AMM (FermiSwap, Kipseli, or Bebop) or directly against Uniswap V3, and falls back to Uniswap V3 when the chosen proprietary venue cannot fill the swap.
+Single-hop router that quotes and executes swaps against a **modifiable whitelist** of proprietary AMMs (propAMMs) or directly against Uniswap V3, and falls back to Uniswap V3 when the chosen propAMM cannot fill the swap. PropAMMs are integrated through a uniform `IPropAMM` interface and can be added or removed by the owner at runtime; FermiSwap, Kipseli, and Bebop ship as `IPropAMM` adapters.
 
 ## Overview
 
-Venues are identified **by address**: the three proprietary AMM routers (FermiSwap, Kipseli, Bebop) plus the Uniswap V3 fallback, denoted by the SwapRouter02 address wired in at deployment. The router exposes the following external functions (see `src/interfaces/IPropAMMRouter.sol` for the full NatSpec):
+Venues are identified **by address**. The owner maintains a modifiable whitelist of propAMM venues, each an address implementing `IPropAMM` (see [Modifiable propAMM whitelist](#modifiable-propamm-whitelist)); the Uniswap V3 fallback is separate, denoted by the SwapRouter02 address wired in at deployment. The router exposes the following external functions (see `src/interfaces/IPropAMMRouter.sol` for the full NatSpec):
 
 - `swapV1(tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline)`: pulls `amountIn` of `tokenIn` from `msg.sender`, routes through the best-quoting venue, and falls back to Uniswap V3 if that venue reverts or under-delivers. Returns `(amountOut, executedVenue)`, where `executedVenue` is the proprietary venue that filled or the SwapRouter02 address when the fallback ran. Reverts `QuoteBelowMinimum` before pulling funds if the best quote is below `amountOutMin`, and re-checks `amountOutMin` against the measured balance delta of `recipient` after execution. Reverts when the contract is paused (see [Pausing the contract](#pausing-the-contract)); quote functions remain callable.
 - `swapViaVenueV1(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline)`: attempts the caller-specified `venue` first. A proprietary venue still falls back to Uniswap V3 if it fails to fill; naming the Uniswap V3 SwapRouter02 address routes directly to Uniswap V3 (it *is* the fallback, so there is nothing further to fall back to). Reverts `UnknownVenue` if `venue` is neither a whitelisted proprietary AMM nor the SwapRouter02 address.
@@ -14,6 +14,25 @@ Venues are identified **by address**: the three proprietary AMM routers (FermiSw
 - `quoteSelectedVenuesV1(venues, tokenIn, tokenOut, amountIn)`: quotes only the caller-supplied `venues` subset and returns the best `(bestAmountOut, bestVenue)`. Venues that revert (including non-whitelisted addresses) are skipped; reverts `NoQuotesAvailable` if none of them can be priced.
 
 The Uniswap V3 fallback always prices and swaps at the owner-settable `fallbackFee` pool tier (`3000`, i.e. the 0.30% tier, by default) — callers never pass a fee. For pairs whose deepest Uniswap V3 pool is not at the 0.30% tier (e.g. USDC/WETH on mainnet, which is `500`), the owner retunes it with `setFallbackFee` (no contract upgrade required).
+
+### Modifiable propAMM whitelist
+
+PropAMM venues live in an owner-managed whitelist rather than being hardcoded. Each venue is an address implementing the `IPropAMM` interface (`src/interfaces/IPropAMM.sol`):
+
+- `isActive(tokenIn, tokenOut) → bool` — cheap `view` liveness check; the router skips inactive venues before paying to quote them.
+- `quote(tokenIn, tokenOut, amountIn) → amountOut` — prices a swap; must revert if inactive and must not require a `tokenIn` balance from the caller.
+- `swap(tokenIn, tokenOut, amountIn, minAmountOut, recipient)` — executes a swap, expecting `amountIn` to have already been transferred in (push-payment).
+- `getPairs() → Pair[]` — advisory pair enumeration for off-chain discovery.
+
+The three existing venues are integrated through thin adapters under `src/adapters/` (`FermiAdapter`, `KipseliAdapter`, `BebopAdapter`) that translate each venue's bespoke calling convention into `IPropAMM`. To onboard a new propAMM, deploy an `IPropAMM` implementation (the venue itself, or an adapter wrapping it) and whitelist it — no router upgrade required.
+
+Owner-gated admin (all `onlyOwner`):
+
+- `addPropAMM(venue)` — whitelists `venue`. Reverts `ZeroAddress`, `FallbackCannotBeWhitelisted` (the fallback venue has a distinct identity), or `PropAMMAlreadyWhitelisted`.
+- `removePropAMM(venue)` — removes `venue`. Reverts `NotWhitelisted` if it is not currently whitelisted.
+- `isPropAMM(venue) → bool`, `propAMMs() → address[]`, `propAMMCount() → uint256` — views.
+
+Whitelist membership is stored in ERC-7201 namespaced storage, so it occupies no sequential storage slot and stays upgrade-safe regardless of other appended storage.
 
 ### Kipseli quote caveat
 
@@ -81,9 +100,12 @@ WETH=0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2
 USDC=0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48
 
 # === Pick the venue to quote (only edit this line) ===
-# Venues are addresses: the Uniswap V3 fallback is the SwapRouter02 address;
-# the three proprietary AMM routers are listed in the table below.
-VENUE_ADDR=0x5cdbe59400cc2efdcc2b54acca4a99fe00dd588c    # Kipseli
+# `quoteVenueV1`/`swapViaVenueV1` take a WHITELISTED venue address — i.e. an
+# adapter address logged by the deploy/upgrade scripts, NOT the raw venue
+# router. The Titan state overrides below remain keyed by the *underlying*
+# venue router (the addresses in the table), since that is where the off-chain
+# liquidity state lives. The Uniswap V3 fallback is the SwapRouter02 address.
+VENUE_ADDR=<adapter address>    # e.g. the KipseliAdapter
 
 # WETH stores balances in storage slot 3 (mapping(address => uint)).
 # balanceOf[ROUTER] lives at keccak256(abi.encode(ROUTER, 3)).
@@ -110,14 +132,16 @@ curl -s -X POST $RPC_URL -H "Content-Type: application/json" \
     | xargs cast --abi-decode "f()(uint256)"
 ```
 
-This prints `amountOut`, e.g. `2115659878` (≈ 2115.66 USDC for 1 WETH, with USDC's 6 decimals) at the current state. To quote a different venue, edit only `VENUE_ADDR`:
+This prints `amountOut`, e.g. `2115659878` (≈ 2115.66 USDC for 1 WETH, with USDC's 6 decimals) at the current state. To quote a different venue, set `VENUE_ADDR` to that venue's whitelisted (adapter) address and key the Titan override by the underlying venue router below:
 
-| Venue | `VENUE_ADDR` |
-|-------|--------------|
-| Uniswap V3 fallback (SwapRouter02) | `0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45` — skip the Titan call |
-| FermiSwap | `0xb1076fe3ab5e28005c7c323bac5ac06a680d452e` |
-| Kipseli | `0x5cdbe59400cc2efdcc2b54acca4a99fe00dd588c` |
-| Bebop | `0x160141a205f5ddcf096ba3f48b7ed21eb52c62ea` |
+| Venue | Underlying venue router (Titan override key) |
+|-------|----------------------------------------------|
+| Uniswap V3 fallback (SwapRouter02) | `0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45` — pass its address as `VENUE_ADDR`; skip the Titan call |
+| FermiSwap (via `FermiAdapter`) | `0xb1076fe3ab5e28005c7c323bac5ac06a680d452e` |
+| Kipseli (via `KipseliAdapter`) | `0x5cdbe59400cc2efdcc2b54acca4a99fe00dd588c` |
+| Bebop (via `BebopAdapter`) | `0x160141a205f5ddcf096ba3f48b7ed21eb52c62ea` |
+
+For the propAMM venues, `VENUE_ADDR` is the corresponding adapter address (logged by `scripts/Deploy.s.sol` / `scripts/Upgrade.s.sol`); the table address is only used as the Titan `stateOverride` key.
 
 ### Pausing the contract
 
@@ -155,23 +179,21 @@ contract PropAMMRouterV2 {
 
 ### Running the upgrade
 
-The upgrade script lives at `scripts/Upgrade.s.sol`. It calls `Upgrades.upgradeProxy(proxy, newImplName, "")`, which deploys the new implementation, validates storage layout against the previous version, and calls `upgradeToAndCall` on the proxy in a single transaction.
+The upgrade script lives at `scripts/Upgrade.s.sol`. For the upgrade that introduces the modifiable whitelist it: (1) deploys the `FermiAdapter`, `KipseliAdapter`, and `BebopAdapter` (pointed at the real venue addresses), then (2) calls `Upgrades.upgradeProxy(proxy, "PropAMMRouter.sol", abi.encodeCall(PropAMMRouter.initializeV2, (adapters)))`, which deploys the new implementation, validates storage layout against the previous version, and `upgradeToAndCall`s the proxy — seeding the whitelist with the three adapters in the same transaction.
 
-It reads two environment variables:
+It reads one environment variable:
 - `ROUTER_PROXY`: address of the deployed proxy to upgrade.
-- `ROUTER_IMPL_NAME`: filename of the new implementation in `src/` (e.g. `"PropAMMRouterV2.sol"`).
 
 The script can be executed with the following command
 
 ```bash
 export ROUTER_PROXY=<proxy address logged by Deploy.s.sol>
-export ROUTER_IMPL_NAME=PropAMMRouterV2.sol
 forge clean && forge script scripts/Upgrade.s.sol \
     --broadcast \
     --rpc-url $RPC_URL \
     --private-key $OWNER_KEY
 ```
 
-`$OWNER_KEY` must be the private key of the current proxy owner; otherwise `_authorizeUpgrade` will revert.
+`$OWNER_KEY` must be the private key of the current proxy owner; otherwise both `_authorizeUpgrade` and `initializeV2` (which is `onlyOwner`) will revert. The script logs the three deployed adapter addresses; those are the whitelisted venue addresses to use with `quoteVenueV1` / `swapViaVenueV1`.
 
-The script does not pass any reinitializer calldata (the third argument to `Upgrades.upgradeProxy` is `""`). If the new implementation defines a `reinitializer`, edit `scripts/Upgrade.s.sol` to pass the encoded call (e.g. `abi.encodeCall(PropAMMRouterV2.initializeV2, (newField))`) before broadcasting.
+`initializeV2` is a `reinitializer(2)`, so it runs exactly once. Subsequent whitelist changes use `addPropAMM` / `removePropAMM` directly — no upgrade needed.
