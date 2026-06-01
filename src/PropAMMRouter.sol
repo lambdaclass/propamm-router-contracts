@@ -166,12 +166,9 @@ contract PropAMMRouter is
 
     /// @inheritdoc IPropAMMRouter
     /// @dev Requotes ONLY the caller-supplied `venues` on-chain via
-    /// `_pickBestVenueFrom`, then executes the best through `_coreSwap`. As with
-    /// `swapV1`, the fallback remains as the transparent safety net inside `_coreSwap`.
-    /// Reverts `NoQuotesAvailable` if none of `venues` can be priced, and `QuoteBelowMinimum` 
-    /// before pulling funds when the best quote across `venues` is under `amountOutMin`; 
-    /// quotes are advisory, so `_coreSwap` re-checks `amountOutMin` against the delivered
-    /// balance delta.
+    /// `_pickBestVenueFrom`, and if any venue returns a quote that is at least
+    /// `amountOutMin`, then attempts to swap via that venue. Otherwise, it defaults
+    /// to swapping via Uniswap V3
     function swapViaSelectedVenuesV1(
         address[] calldata venues,
         address tokenIn,
@@ -183,10 +180,15 @@ contract PropAMMRouter is
     ) public whenNotPaused nonReentrant returns (uint256 amountOut, address executedVenue) {
         // Fail fast before the on-chain requote; `_coreSwap` re-checks deadline.
         require(block.timestamp <= deadline, Expired());
+
         (uint256 bestQuote, address venue) = _pickBestVenueFrom(venues, tokenIn, tokenOut, amountIn);
-        // Reject when none of the selected venues could be priced (venue stays address(0)).
-        require(venue != address(0), NoQuotesAvailable());
-        require(bestQuote >= amountOutMin, QuoteBelowMinimum(amountOutMin, bestQuote));
+
+        // If no quotes available, or the best quote is below the minimum,
+        // route to the fallback venue, which `_coreSwap` runs directly.
+        if (venue == address(0) || bestQuote < amountOutMin) {
+            venue = fallbackSwapRouter;
+        }
+
         return _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
     }
 
