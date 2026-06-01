@@ -81,12 +81,9 @@ interface IPropAMMRouter {
     /// venues. An on-chain requote across `venues` selects the best.
     /// @dev The caller must approve this contract for at least `amountIn` of
     /// `tokenIn`. Venues that revert while quoting (including non-whitelisted
-    /// addresses) are skipped. The public-venue fallback still applies as the
-    /// transparent safety net if the chosen proprietary venue fails to fill.
-    /// Reverts `NoQuotesAvailable` if none of `venues` can be priced, and
-    /// `QuoteBelowMinimum` before pulling funds if the best quote across `venues`
-    /// is below `amountOutMin`, and re-checks `amountOutMin` against the
-    /// delivered balance delta after execution.
+    /// addresses) are skipped. The whole requote-and-swap over `venues` falls
+    /// back to the public venue if it fails for any reason.
+    /// Reverts only if even the public-venue fallback cannot deliver `amountOutMin`.
     /// @param venues The venues to consider — a subset of the available venues.
     /// @param tokenIn The token being sold.
     /// @param tokenOut The token being bought.
