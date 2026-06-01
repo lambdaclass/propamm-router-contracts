@@ -156,13 +156,9 @@ contract PropAMMRouter is
     }
 
     /// @inheritdoc IPropAMMRouter
-    /// @dev Picks the best-quoting venue among the caller-supplied `venues` via
-    /// `quoteSelectedVenuesV1`, then executes it through `_coreSwap` — the same flow as
-    /// `swapV1` but restricted to the named subset (and without the Uniswap V3
-    /// baseline as a selectable winner). A reverting best venue is recovered on
-    /// Uniswap V3 inside `_coreSwap`, in which case `executedVenue` is
-    /// `fallbackSwapRouter`. Reverts `NoQuotesAvailable` (bubbled from
-    /// `quoteSelectedVenuesV1`) if no named venue can be priced.
+    /// @dev Pulls `amountIn` once, then wraps the whole "re-quote the selected
+    /// venues and swap via the best" step in `try this.quoteAndSwapViaSelectedVenues`
+    /// so that if it reverts it then falls back to swapping via Uniswap V3.
     function swapViaSelectedVenuesV1(
         address[] calldata venues,
         address tokenIn,
@@ -177,6 +173,58 @@ contract PropAMMRouter is
         nonReentrant
         returns (uint256 amountOut, address executedVenue)
     {
+        require(block.timestamp <= deadline, Expired());
+        IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
+
+        uint256 prevTokenOutBalance = IERC20(tokenOut).balanceOf(recipient);
+
+        try
+            this._quoteAndSwapViaSelectedVenues(
+                venues,
+                tokenIn,
+                tokenOut,
+                amountIn,
+                amountOutMin,
+                recipient,
+                deadline,
+                prevTokenOutBalance
+            )
+        returns (uint256 amountOut_, address executedVenue_) {
+            return (amountOut_, executedVenue_);
+        } catch {
+            swapViaUniswapV3(tokenIn, tokenOut, amountIn, amountOutMin, recipient);
+            amountOut = IERC20(tokenOut).balanceOf(recipient) - prevTokenOutBalance;
+            require(amountOut >= amountOutMin, InsufficientOutput(amountOutMin, amountOut));
+            return (amountOut, fallbackSwapRouter);
+        }
+    }
+
+    /// @notice Re-quotes the named `venues` and executes the swap on the best
+    /// one, with funds already held by this contract.
+    /// @param venues The candidate venue addresses to re-quote and route through.
+    /// @param tokenIn The address of the token being sold.
+    /// @param tokenOut The address of the token being bought.
+    /// @param amountIn The exact amount of `tokenIn` to sell.
+    /// @param amountOutMin The minimum acceptable amount of `tokenOut`.
+    /// @param recipient The address that will receive `tokenOut`.
+    /// @param deadline Unix timestamp after which the swap is no longer valid;
+    /// only honored by venues that enforce it (e.g. Bebop).
+    /// @param prevTokenOutBalance `recipient`'s `tokenOut` balance snapshotted by
+    /// `swapViaSelectedVenuesV1` before this call, used to compute the delivered delta.
+    /// @return amountOut The amount of `tokenOut` delivered to `recipient`.
+    /// @return executedVenue The proprietary venue that filled the swap.
+    function _quoteAndSwapViaSelectedVenues(
+        address[] calldata venues,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        address recipient,
+        uint256 deadline,
+        uint256 prevTokenOutBalance
+    ) external returns (uint256 amountOut, address executedVenue) {
+        require(msg.sender == address(this), OnlySelf());
+
         (address venue, uint256 bestQuote) = quoteSelectedVenuesV1(
             venues,
             tokenIn,
@@ -184,16 +232,18 @@ contract PropAMMRouter is
             amountIn
         );
         require(bestQuote >= amountOutMin, QuoteBelowMinimum(amountOutMin, bestQuote));
-        return
-            _coreSwap(
-                venue,
-                tokenIn,
-                tokenOut,
-                amountIn,
-                amountOutMin,
-                recipient,
-                deadline
-            );
+
+        amountOut = this._dispatchVenue(
+            venue,
+            tokenIn,
+            tokenOut,
+            amountIn,
+            amountOutMin,
+            recipient,
+            deadline,
+            prevTokenOutBalance
+        );
+        return (amountOut, venue);
     }
 
     /// @notice Pulls funds once and executes a swap, attempting `venue` first

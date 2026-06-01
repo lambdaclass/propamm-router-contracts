@@ -123,15 +123,9 @@ interface IPropAMMRouter {
     /// @notice Swaps an exact amount of `tokenIn` for as much `tokenOut` as
     /// possible by quoting the proprietary venues named in `venues` on-chain and
     /// routing through the one with the best quote, falling back to Uniswap V3
-    /// if that venue fails to fill.
-    /// @dev Re-quotes `venues` via `quoteSelectedVenuesV1` before pulling funds, then
-    /// executes on the winner. Unlike `swapV1` (which compares every venue plus
-    /// the Uniswap V3 baseline), the best venue is chosen only among the
-    /// caller-supplied subset; Uniswap V3 is never selected, only used as the
-    /// failure fallback. The caller must have approved this contract to spend at
-    /// least `amountIn` of `tokenIn`. Reverts if the final output is below
-    /// `amountOutMin`, or `NoQuotesAvailable` (bubbled from `quoteSelectedVenuesV1`)
-    /// when no named venue can price the pair.
+    /// if that step fails.
+    /// @dev Pulls `amountIn` once, then attempts the re-quote-and-swap over the
+    /// named subset; if that whole step fails, it falls back to swapping via Uniswap V3.
     /// @param venues The candidate proprietary venue addresses to quote and route through.
     /// @param tokenIn The address of the token being sold.
     /// @param tokenOut The address of the token being bought.
