@@ -215,4 +215,20 @@ contract PropAMMRouterPairFeeTest is Test {
 
         assertEq(mockRouter.lastFee(), 3000);
     }
+
+    function test_swapV1_fallbackWins_usesResolvedFee() public {
+        router.setPairFee(address(tokenIn), address(tokenOut), 100);
+        mockQuoter.setAmountOut(1000); // fallback quote wins the auction
+        mockRouter.setAmountOut(1000); // fallback execution delivers tokenOut
+        tokenIn.mint(address(this), 1000);
+        tokenIn.approve(address(router), 1000);
+
+        (uint256 amountOut, address executedVenue) =
+            router.swapV1(address(tokenIn), address(tokenOut), 1000, 900, recipient, block.timestamp + 1);
+
+        assertEq(mockRouter.lastFee(), 100);               // executed at the resolved per-pair tier
+        assertEq(executedVenue, address(mockRouter));      // fallbackSwapRouter won
+        assertEq(amountOut, 1000);
+        assertEq(tokenOut.balanceOf(recipient), 1000);
+    }
 }

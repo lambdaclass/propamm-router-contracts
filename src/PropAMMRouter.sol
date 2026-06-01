@@ -355,8 +355,9 @@ contract PropAMMRouter is
     /// @notice Executes the fallback swap on Uniswap V3 with funds already held
     /// by this contract.
     /// @dev Assumes the router already holds `amountIn` of `tokenIn` — pulled
-    /// once by `_coreSwap` before the try/catch. Uses the owner-set `fallbackFee`
-    /// pool tier. `UniV3Router.swapExactIn` only approves `fallbackSwapRouter`
+    /// once by `_coreSwap` before the try/catch. Uses the per-pair resolved fee
+    /// tier (`_resolveFee`: the pair override if set, otherwise the global
+    /// `fallbackFee`). `UniV3Router.swapExactIn` only approves `fallbackSwapRouter`
     /// and executes the swap; it does not pull from `msg.sender`.
     /// @param tokenIn The address of the token being sold.
     /// @param tokenOut The address of the token being bought.
@@ -423,8 +424,8 @@ contract PropAMMRouter is
         require(bestAmountOut > 0, NoQuotesAvailable());
     }
 
-    /// @notice Quotes the Uniswap V3 fallback for the pair at the current
-    /// `fallbackFee` tier.
+    /// @notice Quotes the Uniswap V3 fallback for the pair at its resolved fee
+    /// tier (the per-pair override if set, otherwise the global `fallbackFee`).
     /// @dev External so `_pickBestVenue` and `quoteV1` can wrap it in a
     /// `try/catch` (an internal library call can't be caught).
     /// @param tokenIn The address of the token being sold.
