@@ -58,4 +58,40 @@ contract PropAMMRouterPairFeeTest is Test {
     function test_getPairFee_reversed_unset_returnsZero() public view {
         assertEq(router.getPairFee(address(tokenOut), address(tokenIn)), 0);
     }
+
+    function test_setPairFee_setsAndResolves() public {
+        router.setPairFee(address(tokenIn), address(tokenOut), 100);
+        assertEq(router.resolvedFee(address(tokenIn), address(tokenOut)), 100);
+        assertEq(router.getPairFee(address(tokenIn), address(tokenOut)), 100);
+    }
+
+    function test_setPairFee_isOrderIndependent() public {
+        router.setPairFee(address(tokenIn), address(tokenOut), 100);
+        assertEq(router.resolvedFee(address(tokenOut), address(tokenIn)), 100);
+        assertEq(router.getPairFee(address(tokenOut), address(tokenIn)), 100);
+    }
+
+    function test_setPairFee_clearWithZero() public {
+        router.setPairFee(address(tokenIn), address(tokenOut), 100);
+        router.setPairFee(address(tokenIn), address(tokenOut), 0);
+        assertEq(router.resolvedFee(address(tokenIn), address(tokenOut)), 3000);
+        assertEq(router.getPairFee(address(tokenIn), address(tokenOut)), 0);
+    }
+
+    function test_setPairFee_revertsAboveMax() public {
+        vm.expectRevert(abi.encodeWithSelector(PropAMMRouter.InvalidFallbackFee.selector, uint24(1_000_000)));
+        router.setPairFee(address(tokenIn), address(tokenOut), 1_000_000);
+    }
+
+    function test_setPairFee_emitsEvent() public {
+        vm.expectEmit(true, true, false, true, address(router));
+        emit PairFeeUpdated(address(tokenIn), address(tokenOut), 0, 100);
+        router.setPairFee(address(tokenIn), address(tokenOut), 100);
+    }
+
+    function test_setPairFee_onlyOwner() public {
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", stranger));
+        router.setPairFee(address(tokenIn), address(tokenOut), 100);
+    }
 }

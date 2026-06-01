@@ -93,6 +93,12 @@ contract PropAMMRouter is
     /// @param oldQuoter The previous `fallbackQuoter`.
     /// @param newQuoter The new `fallbackQuoter`.
     event FallbackQuoterUpdated(address indexed oldQuoter, address indexed newQuoter);
+    /// @notice Emitted when the owner sets or clears a per-pair fallback fee.
+    /// @param tokenA One token of the pair (as supplied to the setter).
+    /// @param tokenB The other token of the pair (as supplied to the setter).
+    /// @param oldFee The previous override (0 if it was unset).
+    /// @param newFee The new override (0 means cleared / use global default).
+    event PairFeeUpdated(address indexed tokenA, address indexed tokenB, uint24 oldFee, uint24 newFee);
     /// @notice Emitted when the owner rescues tokens stranded on the router.
     /// @param token The ERC-20 rescued.
     /// @param to The recipient of the rescued tokens.
@@ -552,6 +558,28 @@ contract PropAMMRouter is
     /// @param tokenOut The token being bought.
     function resolvedFee(address tokenIn, address tokenOut) external view returns (uint24) {
         return _resolveFee(tokenIn, tokenOut);
+    }
+
+    /// @notice Sets (or clears) the Uniswap V3 fallback fee tier for a specific pair.
+    /// @dev Owner-gated. Order-independent. Pass `fee == 0` to clear the override and
+    /// revert the pair to the global `fallbackFee`. A tier with no pool simply makes
+    /// the fallback quote revert and be skipped for that pair — it does not corrupt
+    /// state.
+    /// @param tokenA One token of the pair.
+    /// @param tokenB The other token of the pair.
+    /// @param fee Fee tier in hundredths of a bip (e.g. `100` for 0.01%), or 0 to clear.
+    function setPairFee(address tokenA, address tokenB, uint24 fee) external onlyOwner {
+        _setPairFee(tokenA, tokenB, fee);
+    }
+
+    /// @dev Shared validate-emit-store for both setters. Mirrors `setFallbackFee`'s
+    /// upper bound and reuses `InvalidFallbackFee`, but allows 0 (the "unset"
+    /// sentinel that clears the override).
+    function _setPairFee(address tokenA, address tokenB, uint24 fee) private {
+        require(fee < 1_000_000, InvalidFallbackFee(fee)); // 0 allowed = clear
+        bytes32 key = _pairKey(tokenA, tokenB);
+        emit PairFeeUpdated(tokenA, tokenB, _pairFee[key], fee);
+        _pairFee[key] = fee;
     }
 
     /// @notice Repoints the address used by the fallback route.
