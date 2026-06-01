@@ -182,19 +182,6 @@ contract PropAMMRouter is
         _seedDefaultVenues();
     }
 
-    /// @notice One-time backfill of the venue whitelist for proxies deployed
-    /// before the whitelist existed.
-    /// @dev `reinitializer(2)` so it runs at most once, owner-gated. From-scratch
-    /// deploys are already seeded by `initialize` and never need this. Wire it as
-    /// the upgrade call's calldata
-    /// (`abi.encodeCall(PropAMMRouter.initializeVenueWhitelist, ())`) so the
-    /// whitelist is populated atomically with the upgrade — otherwise the upgraded
-    /// proxy treats every propAMM as non-whitelisted and silently routes all swaps
-    /// through the Uniswap fallback until the owner adds them.
-    function initializeVenueWhitelist() external reinitializer(2) onlyOwner {
-        _seedDefaultVenues();
-    }
-
     /// @notice Seeds the deep mainnet Uniswap V3 fallback fee tiers so a
     /// from-scratch deploy is configured without a separate owner-run seeding step.
     /// @dev Routes through `_setPairFee`, so each seeded pair clears the same

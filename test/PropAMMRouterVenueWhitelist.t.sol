@@ -22,9 +22,10 @@ contract PropAMMRouterVenueWhitelistTest is Test {
     address internal stranger = address(0xBEEF);
     address internal recipient = address(0xCAFE);
 
-    // An address that is neither a default propAMM nor the fallback. It has no
-    // code, so once whitelisted it has no quoting/dispatch interface and falls
-    // through to the Uniswap fallback — exactly what we use to exercise the gate.
+    // An address that is neither a default propAMM nor the fallback, and has no
+    // code. Once whitelisted it still has no working `IPropAMM` implementation, so
+    // its quote/swap calls revert and execution falls through to the Uniswap
+    // fallback. Lets tests exercise the whitelist gate on its own.
     address internal genericVenue = address(0xABCD);
 
     // Re-declared locally so vm.expectEmit can match the router's emit (mirror of
@@ -214,9 +215,9 @@ contract PropAMMRouterVenueWhitelistTest is Test {
 
     function test_swapViaVenueV1_afterAdd_passesGateAndFallsBack() public {
         // Whitelisting `genericVenue` lets the call clear the `_isVenue` gate.
-        // It has no dispatch interface, so `_dispatchVenue` reverts and the swap
-        // transparently routes through the Uniswap fallback — proving the gate,
-        // not the venue, is what changed.
+        // The address has no code, so `_dispatchVenue` reverts and the swap routes
+        // transparently through the Uniswap fallback; the swap succeeding confirms
+        // the gate opened rather than the venue itself executing.
         router.addVenue(genericVenue);
         mockRouter.setAmountOut(1000);
         tokenIn.mint(address(this), 1000);
