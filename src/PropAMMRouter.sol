@@ -253,20 +253,11 @@ contract PropAMMRouter is
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
 
-    /// @notice Best-venue swap that skims a frontend fee from the output token.
-    /// @dev Implementation-only (not in `IPropAMMRouter`). Validates `fee`, grosses up
-    /// the net `amountOutMin` so the user still nets at least their minimum, routes the
-    /// swap to this contract, then forwards the fee and the net. Emits `Swapped` with the
-    /// net amount and the real `recipient`. `whenNotPaused`/`nonReentrant` like `swapV1`.
-    /// @param tokenIn The token being sold.
-    /// @param tokenOut The token being bought.
-    /// @param amountIn The exact amount of `tokenIn` to sell.
-    /// @param amountOutMin The minimum NET `tokenOut` the user must receive (after the fee).
-    /// @param recipient The address that receives the net `tokenOut`.
-    /// @param deadline Unix timestamp after which the swap is no longer valid.
-    /// @param fee The frontend fee (bps + recipient).
-    /// @return amountOut The net `tokenOut` delivered to `recipient`.
-    /// @return executedVenue The venue that filled, or the fallback venue address.
+    /// @inheritdoc IPropAMMRouter
+    /// @dev Validates `fee`, grosses up the net `amountOutMin` so the user still nets 
+    /// at least their minimum, routes the swap to this contract, then forwards the fee
+    /// and the net. Emits `Swapped` with the net amount and the real `recipient`.
+    /// `whenNotPaused`/`nonReentrant` like `swapV1`.
     function swapWithFeeV1(
         address tokenIn,
         address tokenOut,
@@ -313,19 +304,11 @@ contract PropAMMRouter is
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
 
-    /// @notice Caller-named-venue swap that skims a frontend fee from the output token.
-    /// @dev Implementation-only. Like `swapViaVenueV1` plus the fee skim; the underlying
-    /// swap is routed to this contract, then fee + net are forwarded. Reverts `UnknownVenue`
-    /// if `venue` is neither a whitelisted propAMM nor the fallback address.
-    /// @param venue The venue address (propAMM or the fallback router address).
-    /// @param tokenIn The token being sold.
-    /// @param tokenOut The token being bought.
-    /// @param amountIn The exact amount of `tokenIn` to sell.
-    /// @param amountOutMin The minimum NET `tokenOut` the user must receive (after the fee).
-    /// @param recipient The address that receives the net `tokenOut`.
-    /// @param deadline Unix timestamp after which the swap is no longer valid.
-    /// @param fee The frontend fee (bps + recipient).
-    /// @return amountOut The net `tokenOut` delivered to `recipient`.
+    /// @inheritdoc IPropAMMRouter
+    /// @dev Like `swapViaVenueV1` plus the fee skim; the underlying
+    /// swap is routed to this contract, then fee + net are forwarded.
+    /// Reverts `UnknownVenue` if `venue` is neither a whitelisted propAMM
+    /// nor the fallback address.
     function swapViaVenueWithFeeV1(
         address venue,
         address tokenIn,
@@ -375,20 +358,10 @@ contract PropAMMRouter is
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
 
-    /// @notice Best-of-a-subset swap that skims a frontend fee from the output token.
-    /// @dev Implementation-only. Like `swapViaSelectedVenuesV1` plus the fee skim; requotes
+    /// @inheritdoc IPropAMMRouter
+    /// @devLike `swapViaSelectedVenuesV1` plus the fee skim; requotes
     /// only `venues`, grosses up the net min, routes the swap to this contract, then forwards
-    /// fee + net. Reverts `NoQuotesAvailable` if none of `venues` can be priced.
-    /// @param venues The venues to consider — a subset of the available venues.
-    /// @param tokenIn The token being sold.
-    /// @param tokenOut The token being bought.
-    /// @param amountIn The exact amount of `tokenIn` to sell.
-    /// @param amountOutMin The minimum NET `tokenOut` the user must receive (after the fee).
-    /// @param recipient The address that receives the net `tokenOut`.
-    /// @param deadline Unix timestamp after which the swap is no longer valid.
-    /// @param fee The frontend fee (bps + recipient).
-    /// @return amountOut The net `tokenOut` delivered to `recipient`.
-    /// @return executedVenue The venue that filled, or the fallback venue address.
+    /// fee + net.
     function swapViaSelectedVenuesWithFeeV1(
         address[] calldata venues,
         address tokenIn,
