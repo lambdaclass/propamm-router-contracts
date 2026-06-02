@@ -6,7 +6,7 @@ This document contains the rationale for some of the propAMM interface design de
 
 Our first version of the propAMM's interface did not contain any events. We added one to be emitted when the propAMM does a swap. Its signature is the following:
 
-```
+```solidity
 /// @notice Emitted once per successful swap after `tokenOut` is delivered to `recipient`.
 /// @param sender The address that invoked the swap entrypoint and supplied
 /// `amountIn` of `tokenIn`. Indexed so consumers can fetch a given account's
