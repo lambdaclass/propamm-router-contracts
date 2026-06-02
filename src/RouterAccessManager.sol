@@ -30,12 +30,22 @@ contract RouterAccessManager is AccessManager {
     /// is fail-open and should be deliberate, so it carries {RESUME_DELAY}.
     uint64 public constant RESUMER_ROLE = 3;
 
+    /// @notice Operational role for the venue whitelist (`addVenue` /
+    /// `removeVenue`). Separate from {UPGRADER_ROLE} so listing is run by a
+    /// different account on a shorter, operations-paced delay ({LISTING_DELAY}).
+    uint64 public constant LISTING_ROLE = 4;
+
     /// @notice Execution delay on {UPGRADER_ROLE}. Long, so queued upgrades and
     /// config changes are publicly visible before they take effect.
     uint32 public constant UPGRADE_DELAY = 7 days;
 
     /// @notice Execution delay on {RESUMER_ROLE}. Short but non-zero.
     uint32 public constant RESUME_DELAY = 2 hours;
+
+    /// @notice Execution delay on {LISTING_ROLE}. Shorter than {UPGRADE_DELAY}:
+    /// listing is operational and lower blast-radius — a bad venue just reverts
+    /// and the Uniswap fallback engages, so no funds are at risk.
+    uint32 public constant LISTING_DELAY = 1 days;
 
     /// @notice Delay applied to *re-gating* the router (future external
     /// `setTargetFunctionRole` / `setTargetAdminDelay`) once configured.
@@ -56,10 +66,14 @@ contract RouterAccessManager is AccessManager {
     /// @param upgrader Holder of {UPGRADER_ROLE}.
     /// @param guardian Holder of {GUARDIAN_ROLE} (instant pause).
     /// @param resumer Holder of {RESUMER_ROLE} (unpause).
-    constructor(address initialAdmin, address upgrader, address guardian, address resumer)
+    /// @param lister Holder of {LISTING_ROLE} (venue whitelist management).
+    constructor(address initialAdmin, address upgrader, address guardian, address resumer, address lister)
         AccessManager(initialAdmin)
     {
-        require(upgrader != address(0) && guardian != address(0) && resumer != address(0), ZeroAddress());
+        require(
+            upgrader != address(0) && guardian != address(0) && resumer != address(0) && lister != address(0),
+            ZeroAddress()
+        );
 
         // Grants need no router address, so they are codified at deploy time.
         // `_grantRole(role, account, grantDelay, executionDelay)`: grantDelay 0
@@ -67,12 +81,14 @@ contract RouterAccessManager is AccessManager {
         // gates the holder's calls.
         _grantRole(UPGRADER_ROLE, upgrader, 0, UPGRADE_DELAY);
         _grantRole(GUARDIAN_ROLE, guardian, 0, 0); // 0 execution delay => instant circuit breaker
-        _grantRole(RESUMER_ROLE, resumer, 0, RESUME_DELAY)
+        _grantRole(RESUMER_ROLE, resumer, 0, RESUME_DELAY);
+        _grantRole(LISTING_ROLE, lister, 0, LISTING_DELAY);
 
         // Labels are cosmetic (explorer/dashboard discoverability).
         emit RoleLabel(UPGRADER_ROLE, "UPGRADER");
         emit RoleLabel(GUARDIAN_ROLE, "GUARDIAN");
         emit RoleLabel(RESUMER_ROLE, "RESUMER");
+        emit RoleLabel(LISTING_ROLE, "LISTING");
     }
 
     /// @notice Wires the router's admin selectors to roles and locks in the
@@ -91,16 +107,22 @@ contract RouterAccessManager is AccessManager {
         if (router == address(0)) revert ZeroAddress();
         routerConfigured = true;
 
-        // UPGRADER_ROLE: upgrades + fallback config + rescue.
+        // UPGRADER_ROLE: upgrades + fallback config (incl. per-pair fees) + rescue.
         _setTargetFunctionRole(router, UUPSUpgradeable.upgradeToAndCall.selector, UPGRADER_ROLE);
         _setTargetFunctionRole(router, PropAMMRouter.setFallbackSwapRouter.selector, UPGRADER_ROLE);
         _setTargetFunctionRole(router, PropAMMRouter.setFallbackQuoter.selector, UPGRADER_ROLE);
         _setTargetFunctionRole(router, PropAMMRouter.setFallbackFee.selector, UPGRADER_ROLE);
+        _setTargetFunctionRole(router, PropAMMRouter.setPairFee.selector, UPGRADER_ROLE);
+        _setTargetFunctionRole(router, PropAMMRouter.setPairFees.selector, UPGRADER_ROLE);
         _setTargetFunctionRole(router, PropAMMRouter.rescueTokens.selector, UPGRADER_ROLE);
 
         // GUARDIAN_ROLE: instant pause. RESUMER_ROLE: deliberate unpause.
         _setTargetFunctionRole(router, PropAMMRouter.pause.selector, GUARDIAN_ROLE);
         _setTargetFunctionRole(router, PropAMMRouter.unpause.selector, RESUMER_ROLE);
+
+        // LISTING_ROLE: venue whitelist management (operations-paced).
+        _setTargetFunctionRole(router, PropAMMRouter.addVenue.selector, LISTING_ROLE);
+        _setTargetFunctionRole(router, PropAMMRouter.removeVenue.selector, LISTING_ROLE);
 
         // Future re-gating of the router now carries a delay (phases in after
         // minSetback(), 5 days, since it is an increase from 0).

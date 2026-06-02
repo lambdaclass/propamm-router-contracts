@@ -46,7 +46,7 @@ contract PropAMMRouter is
     uint24 public fallbackFee;
     /// @notice Per-pair Uniswap V3 fallback fee override, keyed by the sorted
     /// token pair (see `_pairKey`). A value of 0 means "unset" — the pair resolves
-    /// to the global `fallbackFee`. Owner-settable via `setPairFee` / `setPairFees`.
+    /// to the global `fallbackFee`. Settable (access-controlled) via `setPairFee` / `setPairFees`.
     mapping(bytes32 pairKey => uint24 fee) private _pairFee;
     /// @notice Whitelist of propAMM venues the router may route through. This is
     /// the authoritative check for whether an address may be used as a propAMM
@@ -57,8 +57,8 @@ contract PropAMMRouter is
     /// considered by `swapV1` / `quoteV1` without a contract upgrade. The Uniswap
     /// V3 fallback (`fallbackSwapRouter`) is the always-available safety net and is
     /// intentionally NOT a member — it is accepted independently of this set.
-    /// Seeded with the known propAMMs in `initialize` and owner-managed via
-    /// `addVenue` / `removeVenue`. Owner-controlled, so its size (and thus the
+    /// Seeded with the known propAMMs in `initialize` and managed (access-controlled)
+    /// via `addVenue` / `removeVenue`, so its size (and thus the
     /// `_pickBestVenue` loop bound) is trusted to stay small.
     /// @dev Declared last to keep the upgradeable storage layout append-only.
     EnumerableSet.AddressSet private _whitelistedVenues;
@@ -898,19 +898,19 @@ contract PropAMMRouter is
     }
 
     /// @notice Sets (or clears) the Uniswap V3 fallback fee tier for a specific pair.
-    /// @dev Owner-gated. Order-independent. Pass `fee == 0` to clear the override and
+    /// @dev Access-controlled via the AccessManager authority. Order-independent. Pass `fee == 0` to clear the override and
     /// revert the pair to the global `fallbackFee`. A tier with no pool simply makes
     /// the fallback quote revert and be skipped for that pair — it does not corrupt
     /// state.
     /// @param tokenA One token of the pair.
     /// @param tokenB The other token of the pair.
     /// @param fee Fee tier in hundredths of a bip (e.g. `100` for 0.01%), or 0 to clear.
-    function setPairFee(address tokenA, address tokenB, uint24 fee) external onlyOwner {
+    function setPairFee(address tokenA, address tokenB, uint24 fee) external restricted {
         _setPairFee(tokenA, tokenB, fee);
     }
 
     /// @notice Sets (or clears) per-pair fallback fees for several pairs in one call.
-    /// @dev Owner-gated. The three arrays are zipped index-wise and must be equal
+    /// @dev Access-controlled via the AccessManager authority. The three arrays are zipped index-wise and must be equal
     /// length. Each entry follows the same rules as `setPairFee` (0 clears) and emits
     /// its own `PairFeeUpdated`.
     /// @param tokenA Array whose i-th element is one token of pair `i`.
@@ -918,7 +918,7 @@ contract PropAMMRouter is
     /// @param fees Array whose i-th element is the tier for pair `i`, or 0 to clear.
     function setPairFees(address[] calldata tokenA, address[] calldata tokenB, uint24[] calldata fees)
         external
-        onlyOwner
+        restricted
     {
         require(tokenA.length == tokenB.length && tokenB.length == fees.length, ArrayLengthMismatch());
         for (uint256 i = 0; i < fees.length; i++) {
@@ -971,7 +971,7 @@ contract PropAMMRouter is
     /// @notice Returns every whitelisted propAMM venue.
     /// @dev Excludes the Uniswap fallback (not a set member). Order is not
     /// guaranteed — `removeVenue` swap-and-pops, so positions shift. Intended for
-    /// off-chain reads / `eth_call`; the set is owner-controlled and small, but
+    /// off-chain reads / `eth_call`; the set is access-controlled and small, but
     /// avoid calling this from another contract on a hot path.
     /// @return The list of whitelisted venue addresses.
     function getWhitelistedVenues() external view returns (address[] memory) {
@@ -996,7 +996,7 @@ contract PropAMMRouter is
     /// @notice Adds a propAMM venue to the whitelist, allowing the router to route
     /// (and quote) through it — including as an auto-selection candidate in
     /// `swapV1` / `quoteV1`, which iterate the whitelist.
-    /// @dev Owner-gated. Reverts `ZeroAddress` if `venue` is zero, or
+    /// @dev Access-controlled via the AccessManager authority. Reverts `ZeroAddress` if `venue` is zero, or
     /// `VenueAlreadyWhitelisted` if it is already listed. Other than the three
     /// built-in propAMMs (which use their bespoke interfaces), a venue is expected
     /// to implement the common `IPropAMM` interface. Listing an address that does
@@ -1005,18 +1005,18 @@ contract PropAMMRouter is
     /// and, on an explicit swap, the reverting `_dispatchVenue` rolls back and the
     /// Uniswap fallback engages — no funds are stranded.
     /// @param venue The venue address to whitelist.
-    function addVenue(address venue) external onlyOwner {
+    function addVenue(address venue) external restricted {
         require(venue != address(0), ZeroAddress());
         require(_addVenue(venue), VenueAlreadyWhitelisted(venue));
     }
 
     /// @notice Removes a propAMM venue from the whitelist, after which the router
     /// will neither quote nor route through it on any path.
-    /// @dev Owner-gated. Reverts `VenueNotWhitelisted` if `venue` is not listed.
+    /// @dev Access-controlled via the AccessManager authority. Reverts `VenueNotWhitelisted` if `venue` is not listed.
     /// Does not affect the Uniswap fallback, which remains the always-available
     /// safety net.
     /// @param venue The venue address to de-list.
-    function removeVenue(address venue) external onlyOwner {
+    function removeVenue(address venue) external restricted {
         require(_whitelistedVenues.remove(venue), VenueNotWhitelisted(venue));
         emit VenueRemoved(venue);
     }

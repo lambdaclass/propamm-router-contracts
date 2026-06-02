@@ -20,6 +20,7 @@ import {RouterAccessManager} from "../src/RouterAccessManager.sol";
 ///   ROUTER_GUARDIAN  holder of GUARDIAN_ROLE (instant pause).
 /// Optional env (with defaults):
 ///   ROUTER_RESUMER     holder of RESUMER_ROLE (unpause). Default: ROUTER_UPGRADER.
+///   ROUTER_LISTER      holder of LISTING_ROLE (venue whitelist). Default: ROUTER_UPGRADER.
 ///   GOV_ADMIN          governance multisig to receive ADMIN_ROLE. Default: unset (skip handoff).
 ///   ADMIN_EXEC_DELAY   execution delay granted to GOV_ADMIN, seconds. Default: 7 days.
 ///   RENOUNCE_BOOTSTRAP if true, ROUTER_ADMIN renounces ADMIN_ROLE after granting GOV_ADMIN. Default: false.
@@ -39,7 +40,8 @@ contract Deploy is Script {
             vm.envAddress("ROUTER_ADMIN"),
             upgrader,
             vm.envAddress("ROUTER_GUARDIAN"),
-            vm.envOr("ROUTER_RESUMER", upgrader)
+            vm.envOr("ROUTER_RESUMER", upgrader),
+            vm.envOr("ROUTER_LISTER", upgrader)
         );
 
         // 2. Router proxy, governed by the manager from initialization.

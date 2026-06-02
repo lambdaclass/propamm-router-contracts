@@ -13,9 +13,9 @@ Venues are identified **by address**: the three proprietary AMM routers (FermiSw
 - `quoteVenueV1(venue, tokenIn, tokenOut, amount)`: quotes a single venue by address. Reverts `UnknownVenue` for any address that is neither a proprietary AMM nor the SwapRouter02 fallback, and bubbles up any underlying venue revert.
 - `quoteSelectedVenuesV1(venues, tokenIn, tokenOut, amountIn)`: quotes only the caller-supplied `venues` subset and returns the best `(bestAmountOut, bestVenue)`. Venues that revert (including non-whitelisted addresses) are skipped; reverts `NoQuotesAvailable` if none of them can be priced.
 
-The Uniswap V3 fallback prices and swaps at a per-pair fee tier, resolved on every quote and swap: the owner-set override for that pair if one exists, otherwise the global `fallbackFee` (`3000`, i.e. the 0.30% tier, by default). Callers never pass a fee. An `UPGRADER_ROLE` holder sets overrides with `setPairFee(tokenA, tokenB, fee)` or `setPairFees(tokenA[], tokenB[], fee[])` (order-independent; `fee == 0` clears an override), and retunes the global default with `setFallbackFee` — all without a contract upgrade. This lets stablecoin pairs use their tight tier (e.g. USDC/USDT at `100`) while volatile pairs keep `3000`/`10000`. Query the effective tier with `resolvedFee(tokenIn, tokenOut)` and the raw override with `getPairFee(tokenA, tokenB)`.
+The Uniswap V3 fallback prices and swaps at a per-pair fee tier, resolved on every quote and swap: the per-pair override for that pair if one exists, otherwise the global `fallbackFee` (`3000`, i.e. the 0.30% tier, by default). Callers never pass a fee. An `UPGRADER_ROLE` holder sets overrides with `setPairFee(tokenA, tokenB, fee)` or `setPairFees(tokenA[], tokenB[], fee[])` (order-independent; `fee == 0` clears an override), and retunes the global default with `setFallbackFee` — all without a contract upgrade. This lets stablecoin pairs use their tight tier (e.g. USDC/USDT at `100`) while volatile pairs keep `3000`/`10000`. Query the effective tier with `resolvedFee(tokenIn, tokenOut)` and the raw override with `getPairFee(tokenA, tokenB)`.
 
-A from-scratch deploy is pre-seeded by `initialize` with the global `fallbackFee` (`3000`), the deep mainnet tiers — USDT/USDC at `100`, USDT/WETH and USDC/WETH at `500` — and the default propAMM venue whitelist (FermiSwap, Kipseli, Bebop), so no post-deploy config step is needed. This runs only in `initialize` (initializer-gated), so it does not re-apply when an existing proxy upgrades; those deployments restore the same config via `scripts/setupRouterVariables.s.sol`, which sets `fallbackFee`, the per-pair tiers, and re-adds the default venues. The owner can clear or retune any seeded tier afterward with `setPairFee`.
+A from-scratch deploy is pre-seeded by `initialize` with the global `fallbackFee` (`3000`), the deep mainnet tiers — USDT/USDC at `100`, USDT/WETH and USDC/WETH at `500` — and the default propAMM venue whitelist (FermiSwap, Kipseli, Bebop), so no post-deploy config step is needed. This runs only in `initialize` (initializer-gated), so it does not re-apply when an existing proxy upgrades; those deployments restore the same config via `scripts/setupRouterVariables.s.sol`, which sets `fallbackFee`, the per-pair tiers, and re-adds the default venues. An `UPGRADER_ROLE` holder can clear or retune any seeded tier afterward with `setPairFee`.
 
 ### Kipseli quote caveat
 
@@ -66,9 +66,10 @@ To deploy the PropAMMRouter contract, run the `scripts/Deploy.s.sol` script. It 
 
 The roles and their delays are contract constants:
 
-- `UPGRADER_ROLE` — UUPS upgrades, fallback config (`setFallbackSwapRouter` / `setFallbackQuoter` / `setFallbackFee`), and `rescueTokens`. `UPGRADE_DELAY` = 7 days, so queued changes are publicly visible before they apply.
+- `UPGRADER_ROLE` — UUPS upgrades, fallback config (`setFallbackSwapRouter` / `setFallbackQuoter` / `setFallbackFee`), per-pair fee tuning (`setPairFee` / `setPairFees`), and `rescueTokens`. `UPGRADE_DELAY` = 7 days, so queued changes are publicly visible before they apply.
 - `GUARDIAN_ROLE` — `pause()`. Zero delay: an instant circuit breaker for a security council.
 - `RESUMER_ROLE` — `unpause()`. `RESUME_DELAY` = 2 hours, kept separate from the guardian because resuming is fail-open and should be deliberate.
+- `LISTING_ROLE` — venue whitelist management (`addVenue` / `removeVenue`). `LISTING_DELAY` = 1 day — a separate, operations-paced account, since listing is lower blast-radius than an upgrade (a bad venue just reverts and the Uniswap fallback engages).
 
 Role grants happen in the manager's constructor; `configureRouter(proxy)` then wires the selectors and sets the re-gating delay (`ADMIN_DELAY` = 7 days). It is one-shot — it cannot be re-run to bypass `ADMIN_DELAY`; later changes go through the standard, delayed `AccessManager` interface. (To tune delays per network, change the constants in `RouterAccessManager` or promote them to immutable constructor args.)
 
@@ -78,7 +79,7 @@ The script only supplies the deployment-specific role holders and runs the optio
 - `ROUTER_UPGRADER` — holder of `UPGRADER_ROLE`.
 - `ROUTER_GUARDIAN` — holder of `GUARDIAN_ROLE`.
 
-Optional (with defaults): `ROUTER_RESUMER` (defaults to `ROUTER_UPGRADER`), `GOV_ADMIN` (governance multisig to receive `ADMIN_ROLE`), `ADMIN_EXEC_DELAY` (7 days), and `RENOUNCE_BOOTSTRAP` (when `true`, the bootstrap admin renounces `ADMIN_ROLE` after the handoff). If `GOV_ADMIN` is omitted, `ROUTER_ADMIN` remains a delay-0 master key — hand it off and renounce it for production.
+Optional (with defaults): `ROUTER_RESUMER` (defaults to `ROUTER_UPGRADER`), `ROUTER_LISTER` (defaults to `ROUTER_UPGRADER`), `GOV_ADMIN` (governance multisig to receive `ADMIN_ROLE`), `ADMIN_EXEC_DELAY` (7 days), and `RENOUNCE_BOOTSTRAP` (when `true`, the bootstrap admin renounces `ADMIN_ROLE` after the handoff). If `GOV_ADMIN` is omitted, `ROUTER_ADMIN` remains a delay-0 master key — hand it off and renounce it for production.
 
 **Example:**
 
