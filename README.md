@@ -13,7 +13,9 @@ Venues are identified **by address**: the three proprietary AMM routers (FermiSw
 - `quoteVenueV1(venue, tokenIn, tokenOut, amount)`: quotes a single venue by address. Reverts `UnknownVenue` for any address that is neither a proprietary AMM nor the SwapRouter02 fallback, and bubbles up any underlying venue revert.
 - `quoteSelectedVenuesV1(venues, tokenIn, tokenOut, amountIn)`: quotes only the caller-supplied `venues` subset and returns the best `(bestAmountOut, bestVenue)`. Venues that revert (including non-whitelisted addresses) are skipped; reverts `NoQuotesAvailable` if none of them can be priced.
 
-The Uniswap V3 fallback always prices and swaps at the `fallbackFee` pool tier (`3000`, i.e. the 0.30% tier, by default) — callers never pass a fee. For pairs whose deepest Uniswap V3 pool is not at the 0.30% tier (e.g. USDC/WETH on mainnet, which is `500`), an `UPGRADER_ROLE` holder retunes it with `setFallbackFee` (no contract upgrade required).
+The Uniswap V3 fallback prices and swaps at a per-pair fee tier, resolved on every quote and swap: the owner-set override for that pair if one exists, otherwise the global `fallbackFee` (`3000`, i.e. the 0.30% tier, by default). Callers never pass a fee. An `UPGRADER_ROLE` holder sets overrides with `setPairFee(tokenA, tokenB, fee)` or `setPairFees(tokenA[], tokenB[], fee[])` (order-independent; `fee == 0` clears an override), and retunes the global default with `setFallbackFee` — all without a contract upgrade. This lets stablecoin pairs use their tight tier (e.g. USDC/USDT at `100`) while volatile pairs keep `3000`/`10000`. Query the effective tier with `resolvedFee(tokenIn, tokenOut)` and the raw override with `getPairFee(tokenA, tokenB)`.
+
+A from-scratch deploy is pre-seeded by `initialize` with the global `fallbackFee` (`3000`), the deep mainnet tiers — USDT/USDC at `100`, USDT/WETH and USDC/WETH at `500` — and the default propAMM venue whitelist (FermiSwap, Kipseli, Bebop), so no post-deploy config step is needed. This runs only in `initialize` (initializer-gated), so it does not re-apply when an existing proxy upgrades; those deployments restore the same config via `scripts/setupRouterVariables.s.sol`, which sets `fallbackFee`, the per-pair tiers, and re-adds the default venues. The owner can clear or retune any seeded tier afterward with `setPairFee`.
 
 ### Kipseli quote caveat
 
@@ -25,6 +27,26 @@ As a consequence:
 
 - `quoteV1` and `quoteVenueV1` are not `view`. They must be called via `eth_call` (staticcall) from off-chain so the simulated swaps are rolled back automatically.
 - The Kipseli simulation pulls `tokenIn` from the router's own balance. When quoting against Kipseli (directly via `quoteVenueV1`, or implicitly through `quoteV1`), the RPC call must include a `stateDiff` override that gives the router a sufficient balance of `tokenIn`. Without the override, the Kipseli branch is silently skipped while the other branches still quote.
+
+### Frontend fees
+
+Three implementation-only entrypoints take a per-call, basis-point fee from the swap
+**output token** and forward it to a caller-supplied recipient. They are **not** part of
+`IPropAMMRouter`; encode them against the deployed `PropAMMRouter`.
+
+- `swapWithFeeV1(tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline, fee)`
+- `swapViaVenueWithFeeV1(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline, fee)`
+- `swapViaSelectedVenuesWithFeeV1(venues, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline, fee)`
+
+`fee` is a `FrontendFee { uint16 bps; address recipient }`:
+- `bps` is the fee in basis points, capped at `MAX_FEE_BPS` (100 = 1.00%).
+- `recipient` receives the fee in `tokenOut`; must be non-zero.
+
+`amountOutMin` is the **net** amount the user must receive **after** the fee — the router
+grosses it up internally, so the user always nets at least `amountOutMin`. The returned
+`amountOut` and the `Swapped` event's `amountOut` are the **net** delivered to `recipient`.
+A `FrontendFeeCharged` event is emitted whenever a non-zero fee is taken. Quote functions
+are unchanged and return **gross** output; a frontend nets out by subtracting its own bps.
 
 ## Prerequisites
 
@@ -152,6 +174,8 @@ The state initializes to unpaused on `initialize`.
 ### Upgrading the contract
 
 Upgrades are gated through the `RouterAccessManager`: `_authorizeUpgrade` is `restricted`, and the `upgradeToAndCall` selector is assigned to `UPGRADER_ROLE`, which carries an execution delay (default 7 days). Upgrades therefore can no longer be applied in a single transaction — they are **scheduled** on the manager and **executed** after the delay, by the account holding `UPGRADER_ROLE`.
+
+> **Config precondition:** The whole fresh-deploy configuration is seeded only in `initialize` — i.e. on a fresh deploy — and is never re-applied on upgrade. This bites a proxy that predates that config in two ways. (1) Unconfigured pairs resolve their Uniswap fallback tier to the global `fallbackFee`; an enum-era deployment carries `fallbackFee = 0` after the upgrade, so the fallback resolves to tier `0` (invalid on Uniswap V3) for every unconfigured pair and reverts. (2) An enum-era deployment also has an **empty venue whitelist**, so `swapV1` can only ever take the Uniswap fallback and never routes the propAMMs. **After upgrading such a proxy, run `scripts/setupRouterVariables.s.sol` as the owner** to restore the config: it sets `fallbackFee = 3000`, seeds the deep per-pair tiers, and re-adds the default venues (FermiSwap, Kipseli, Bebop), matching a fresh `initialize`. Until that runs, the Uniswap fallback is unusable, so consider `pause()`-ing the router across the upgrade + config window if swaps could arrive in between (see "Running the upgrade" below).
 
 ### Writing a new implementation
 
