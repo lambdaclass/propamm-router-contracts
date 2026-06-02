@@ -359,7 +359,7 @@ contract PropAMMRouter is
     }
 
     /// @inheritdoc IPropAMMRouter
-    /// @devLike `swapViaSelectedVenuesV1` plus the fee skim; requotes
+    /// @dev Like `swapViaSelectedVenuesV1` plus the fee skim; requotes
     /// only `venues`, grosses up the net min, routes the swap to this contract, then forwards
     /// fee + net.
     function swapViaSelectedVenuesWithFeeV1(
