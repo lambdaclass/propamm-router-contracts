@@ -103,7 +103,7 @@ contract PropAMMRouterFeeTest is Test {
         );
 
         assertEq(amountOut, expectedNet);
-        assertEq(executedVenue, address(swapRouter));
+        assertEq(executedVenue, address(swapRouter), "executed venue mismatch");
         assertEq(tokenOut.balanceOf(user), expectedNet);
         assertEq(tokenOut.balanceOf(feeRecipient), expectedFee);
     }
@@ -135,7 +135,7 @@ contract PropAMMRouterFeeTest is Test {
         uint256 netMin = 950e18;
         uint256 grossMin = Math.ceilDiv(netMin * 10_000, 10_000 - 50);
         vm.prank(user);
-        vm.expectRevert(abi.encodeWithSelector(PropAMMRouter.QuoteBelowMinimum.selector, grossMin, uint256(900e18)));
+        vm.expectRevert(abi.encodeWithSelector(PropAMMRouter.InsufficientOutput.selector, grossMin, uint256(900e18)));
         router.swapWithFeeV1(
             address(tokenIn), address(tokenOut), 1_000e18, netMin,
             user, block.timestamp + 1, IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})

@@ -278,8 +278,8 @@ contract PropAMMRouter is
         if (venue == address(0) || bestQuote < amountOutMin) {
             venue = fallbackSwapRouter;
         }
-
-        (uint256 delivered, address executedVenue) =
+        uint256 delivered;
+        (delivered, executedVenue) =
             _coreSwap(venue, tokenIn, tokenOut, amountIn, grossMin, address(this), deadline);
 
         amountOut = _skimAndDisburse(tokenOut, delivered, fee, recipient);
@@ -376,15 +376,15 @@ contract PropAMMRouter is
         require(block.timestamp <= deadline, Expired());
 
         uint256 grossMin = _grossUp(amountOutMin, fee.bps);
-        (uint256 bestQuote,  address venue) = _pickBestVenueFrom(venues, tokenIn, tokenOut, amountIn);
+        (uint256 bestQuote, address venue) = _pickBestVenueFrom(venues, tokenIn, tokenOut, amountIn);
 
         // If no quotes are available, or the best quote is below the minimum,
         // default to the Uniswap fallback venue instead of reverting (#9).
         if (venue == address(0) || bestQuote < amountOutMin) {
             venue = fallbackSwapRouter;
         }
-
-        (uint256 delivered, address executedVenue) =
+        uint256 delivered;
+        (delivered, executedVenue) =
             _coreSwap(venue, tokenIn, tokenOut, amountIn, grossMin, address(this), deadline);
 
         amountOut = _skimAndDisburse(tokenOut, delivered, fee, recipient);
