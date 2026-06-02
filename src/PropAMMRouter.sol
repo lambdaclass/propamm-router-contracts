@@ -619,7 +619,7 @@ contract PropAMMRouter is
             // (or an under-delivery caught below) rolls back this transfer via the
             // `_coreSwap` self-call `try/catch` and engages the Uniswap fallback.
             IERC20(tokenIn).safeTransfer(venue, amountIn);
-            IPropAMM(venue).swap(tokenIn, tokenOut, amountIn, amountOutMin, recipient);
+            IPropAMM(venue).swap(tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
         }
 
         amountOut = IERC20(tokenOut).balanceOf(recipient) - prevTokenOutBalance;

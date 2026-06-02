@@ -24,7 +24,7 @@ interface IPropAMM {
         address indexed tokenOut,
         uint256 amountIn,
         uint256 amountOut,
-        address recipient,
+        address recipient
     );
 
     /// @notice A token pair a propAMM supports.
@@ -42,7 +42,8 @@ interface IPropAMM {
     /// @param tokenOut The address of the token being bought.
     /// @return active True if a swap for the pair would succeed right now.
     function isActive(
-        TokenPair pair
+        address tokenIn,
+        address tokenOut
     ) external view returns (bool active);
 
     /// @notice Returns all token pairs the propAMM support, both active and inactive.
