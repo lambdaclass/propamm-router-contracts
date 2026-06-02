@@ -190,7 +190,7 @@ contract PropAMMRouterVenueWhitelistTest is Test {
     function test_quoteVenueV1_fallbackQuotableWithoutWhitelist() public {
         // The fallback prices without being on the whitelist (safety net).
         mockQuoter.setAmountOut(1000);
-        uint256 out = router.quoteVenueV1(address(mockRouter), address(tokenIn), address(tokenOut), 1 ether);
+        (uint256 out,) = router.quoteVenueV1(address(mockRouter), address(tokenIn), address(tokenOut), 1 ether);
         assertEq(out, 1000);
     }
 
@@ -223,7 +223,7 @@ contract PropAMMRouterVenueWhitelistTest is Test {
         tokenIn.mint(address(this), 1000);
         tokenIn.approve(address(router), 1000);
 
-        uint256 amountOut = router.swapViaVenueV1(
+        (uint256 amountOut, ) = router.swapViaVenueV1(
             genericVenue, address(tokenIn), address(tokenOut), 1000, 900, recipient, block.timestamp + 1
         );
 

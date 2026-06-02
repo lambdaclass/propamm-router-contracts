@@ -2,29 +2,42 @@
 pragma solidity ^0.8.35;
 
 /// @title IPropAMM
-/// @notice Interface a proprietary AMM (or a thin adapter wrapping one) must
-/// implement to be added to the `PropAMMRouter` whitelist. The router speaks
-/// ONLY this interface to whitelisted venues, so every venue-specific quirk
-/// lives behind an implementation of `IPropAMM` rather than in the router.
+/// @notice Interface a proprietary AMM must implement to be added to the
+/// `PropAMMRouter` whitelist.
 /// @dev The router uses a push-payment model: before calling `swap` it
-/// transfers `amountIn` of `tokenIn` to the venue, then `swap` is expected to
-/// consume that balance. This mirrors how the router already wraps the call in
-/// a self-call `try/catch`, so a reverting `swap` rolls back the transfer and
-/// the router's Uniswap fallback engages.
+/// transfers `amountIn` of `tokenIn` to the propAMM, then `swap` is expected to
+/// consume that balance.
 interface IPropAMM {
-    /// @notice A token pair a venue supports.
-    struct Pair {
+    /// @notice Emitted once per successful swap after `tokenOut` is delivered to `recipient`.
+    /// @param sender The address that invoked the swap entrypoint and supplied
+    /// `amountIn` of `tokenIn`. Indexed so consumers can fetch a given account's
+    /// recent swaps.
+    /// @param tokenIn The token sold.
+    /// @param tokenOut The token bought.
+    /// @param amountIn The exact amount of `tokenIn` pulled from `sender`.
+    /// @param amountOut The amount of `tokenOut` delivered to `recipient`,
+    /// measured as a balance delta.
+    /// @param recipient The address that received `tokenOut`.
+    event Swapped(
+        address indexed sender,
+        address indexed tokenIn,
+        address indexed tokenOut,
+        uint256 amountIn,
+        uint256 amountOut,
+        address recipient
+    );
+
+    /// @notice A token pair a propAMM supports.
+    struct TokenPair {
         address token0;
         address token1;
     }
 
-    /// @notice Returns true if the venue can swap `tokenIn` for `tokenOut` in
+    /// @notice Returns true if the propAMM can swap `tokenIn` for `tokenOut` in
     /// the current block.
-    /// @dev A `view` fast-path the router can use to skip dead venues before
-    /// paying for a state-changing `quote`. It is advisory: `quote`/`swap` are
-    /// still the source of truth and must revert when a swap would actually
-    /// fail. Reported per-pair so a venue can be live for some pairs and not
-    /// others.
+    /// @dev A `view` fast-path the router can use to skip inactive propAMMs before
+    /// paying for a full `quote`. Reported per-pair so a propAMM can be live for
+    /// some pairs and not others.
     /// @param tokenIn The address of the token being sold.
     /// @param tokenOut The address of the token being bought.
     /// @return active True if a swap for the pair would succeed right now.
@@ -33,18 +46,16 @@ interface IPropAMM {
         address tokenOut
     ) external view returns (bool active);
 
-    /// @notice Returns every token pair the venue currently has pools for.
+    /// @notice Returns all token pairs the propAMM support, both active and inactive.
     /// @dev Advisory, for off-chain discovery; the router does not call this on
     /// its swap path.
     /// @return pairs The supported pairs.
-    function getPairs() external view returns (Pair[] memory pairs);
+    function getPairs() external view returns (TokenPair[] memory pairs);
 
     /// @notice Quotes `amountIn` of `tokenIn` and returns the `tokenOut` amount
     /// a swap would deliver.
-    /// @dev Must revert if the venue is inactive for the pair (i.e. if a swap
-    /// would revert under current conditions). Must NOT require a `tokenIn`
-    /// balance or allowance from the caller — it only prices. Not `view`:
-    /// pricing may touch state (e.g. an external quoter that mutates).
+    /// @dev MUST revert if the propAMM is inactive for the pair.
+    /// MUST NOT require a `tokenIn` balance or allowance from the caller.
     /// @param tokenIn The address of the token being sold.
     /// @param tokenOut The address of the token being bought.
     /// @param amountIn The exact amount of `tokenIn` to quote against.
@@ -58,18 +69,24 @@ interface IPropAMM {
     /// @notice Swaps an exact `amountIn` of `tokenIn` for as much `tokenOut` as
     /// possible, delivering it to `recipient`.
     /// @dev Expects `amountIn` of `tokenIn` to have ALREADY been transferred to
-    /// the venue by the caller (push-payment). Must revert if it cannot deliver
-    /// at least `minAmountOut` of `tokenOut` to `recipient`.
+    /// the propAMM by the caller (push-payment).
+    /// SHALL revert if it cannot deliver at least `minAmountOut` of `tokenOut`
+    /// to `recipient`. The Router makes that check too.
     /// @param tokenIn The address of the token being sold.
     /// @param tokenOut The address of the token being bought.
     /// @param amountIn The exact amount of `tokenIn` to sell.
     /// @param minAmountOut The minimum acceptable amount of `tokenOut`.
     /// @param recipient The address that will receive `tokenOut`.
+    /// @param deadline Unix timestamp after which the swap is no longer valid.
+    /// This value can safely be ignored if coming from the Router, since it
+    /// already does the check.
+    /// @return amountOut The amount of `tokenOut` received by `recipient`.
     function swap(
         address tokenIn,
         address tokenOut,
         uint256 amountIn,
         uint256 minAmountOut,
-        address recipient
-    ) external;
+        address recipient,
+        uint256 deadline
+    ) external returns (uint256 amountOut);
 }
