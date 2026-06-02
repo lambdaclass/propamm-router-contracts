@@ -199,7 +199,7 @@ interface IPropAMMRouter {
         address tokenIn,
         address tokenOut,
         uint256 amount
-    ) external view returns (uint256 bestQuote, address venue);
+    ) external returns (uint256 bestQuote, address venue);
 
     /// @notice Quotes `amount` of `tokenIn` against a single venue — a whitelisted
     /// propAMM or the public-venue fallback.
@@ -216,11 +216,11 @@ interface IPropAMMRouter {
         address tokenIn,
         address tokenOut,
         uint256 amount
-    ) external view returns (uint256 amountOut);
+    ) external returns (uint256 amountOut);
 
     /// @notice Quotes `amountIn` of `tokenIn` across a caller-selected set of
-    /// venues and returns the best output and the venue that produced it.
-    /// Reverts `NoQuotesAvailable` if none of `venues` can be priced.
+    /// venues and returns the best output and the venue that produced it, or
+    /// the public-venue fallback if all considered venues reverted.
     /// @param venues The venues to consider — a subset of the available venues.
     /// @param tokenIn The token being sold.
     /// @param tokenOut The token being bought.

@@ -662,7 +662,6 @@ contract PropAMMRouter is
     /// and fallback) and reverts `NoQuotesAvailable` if nothing could be priced.
     function quoteV1(address tokenIn, address tokenOut, uint256 amount)
         public
-        view
         returns (uint256 bestQuote, address venue)
     {
         (bestQuote, venue) = _pickBestVenue(tokenIn, tokenOut, amount);
@@ -680,7 +679,6 @@ contract PropAMMRouter is
     /// simply skipped rather than surfaced.
     function quoteVenueV1(address venue, address tokenIn, address tokenOut, uint256 amount)
         public
-        view
         returns (uint256 amountOut)
     {
         // The fallback (Uniswap V3) is the always-available safety net and is not
@@ -712,7 +710,6 @@ contract PropAMMRouter is
     /// `quoteVenueV1` rejects with `UnknownVenue` — are skipped, not surfaced.
     function quoteSelectedVenuesV1(address[] calldata venues, address tokenIn, address tokenOut, uint256 amountIn)
         public
-        view
         returns (uint256 bestAmountOut, address bestVenue)
     {
         (bestAmountOut, bestVenue) = _pickBestVenueFrom(venues, tokenIn, tokenOut, amountIn);
@@ -727,7 +724,7 @@ contract PropAMMRouter is
     /// @param tokenOut The address of the token being bought.
     /// @param amount The exact amount of `tokenIn` to quote against.
     /// @return amountOut The amount of `tokenOut` the Uniswap V3 swap would produce.
-    function quoteUniswapV3(address tokenIn, address tokenOut, uint256 amount) external view returns (uint256 amountOut) {
+    function quoteUniswapV3(address tokenIn, address tokenOut, uint256 amount) external returns (uint256 amountOut) {
         return UniV3Router.quoteExactIn(tokenIn, tokenOut, _resolveFee(tokenIn, tokenOut), amount, fallbackQuoter);
     }
 
