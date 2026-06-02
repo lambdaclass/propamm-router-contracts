@@ -105,6 +105,7 @@ interface IPropAMMRouter {
     /// @param recipient The address that receives `tokenOut`.
     /// @param deadline Unix timestamp after which the swap is no longer valid.
     /// @return amountOut The amount of `tokenOut` received by `recipient`.
+    /// @return executedVenue The venue that filled, or the fallback venue address.
     function swapViaVenueV1(
         address venue,
         address tokenIn,
@@ -113,7 +114,7 @@ interface IPropAMMRouter {
         uint256 amountOutMin,
         address recipient,
         uint256 deadline
-    ) external returns (uint256 amountOut);
+    ) external returns (uint256 amountOut, address executedVenue);
 
     /// @notice Caller-named-venue swap that skims a frontend fee from the output token.
     /// @param venue The venue address (propAMM or the fallback router address).
@@ -210,12 +211,14 @@ interface IPropAMMRouter {
     /// @param tokenOut The token being bought.
     /// @param amount The amount of `tokenIn` to quote.
     /// @return amountOut The amount of `tokenOut` quoted by `venue`.
+    /// @return quotedVenue The asked venue if the quote succeeded, or the fallback
+    /// venue address in other case.
     function quoteVenueV1(
         address venue,
         address tokenIn,
         address tokenOut,
         uint256 amount
-    ) external returns (uint256 amountOut);
+    ) external returns (uint256 amountOut, address quotedVenue);
 
     /// @notice Quotes `amountIn` of `tokenIn` across a caller-selected set of
     /// venues and returns the best output and the venue that produced it, or

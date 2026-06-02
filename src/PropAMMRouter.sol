@@ -306,9 +306,8 @@ contract PropAMMRouter is
         uint256 amountOutMin,
         address recipient,
         uint256 deadline
-    ) public whenNotPaused nonReentrant returns (uint256 amountOut) {
+    ) public whenNotPaused nonReentrant returns (uint256 amountOut, address executedVenue) {
         require(_isVenue(venue), UnknownVenue());
-        address executedVenue;
         (amountOut, executedVenue) =
             _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
@@ -679,16 +678,17 @@ contract PropAMMRouter is
     /// simply skipped rather than surfaced.
     function quoteVenueV1(address venue, address tokenIn, address tokenOut, uint256 amount)
         public
-        returns (uint256 amountOut)
+        returns (uint256 amountOut, address quotedVenue)
     {
         // The fallback (Uniswap V3) is the always-available safety net and is not
         // part of the propAMM whitelist, so it is checked before the gate.
         if (venue == fallbackSwapRouter) {
-            return UniV3Router.quoteExactIn(tokenIn, tokenOut, _resolveFee(tokenIn, tokenOut), amount, fallbackQuoter);
+            return (UniV3Router.quoteExactIn(tokenIn, tokenOut, _resolveFee(tokenIn, tokenOut), amount, fallbackQuoter), fallbackSwapRouter);
         }
 
         require(_whitelistedVenues.contains(venue), UnknownVenue());
 
+        quotedVenue = venue;
         if (venue == FERMI_ROUTER) {
             int256 amountInt256 = amount.toInt256();
             (, amountOut) = IFermiSwapper(FERMI_ROUTER).quoteAmounts(tokenIn, tokenOut, amountInt256);
@@ -754,7 +754,7 @@ contract PropAMMRouter is
         uint256 venueCount = _whitelistedVenues.length();
         for (uint256 i = 0; i < venueCount; i++) {
             address candidate = _whitelistedVenues.at(i);
-            try this.quoteVenueV1(candidate, tokenIn, tokenOut, amount) returns (uint256 amountOut) {
+            try this.quoteVenueV1(candidate, tokenIn, tokenOut, amount) returns (uint256 amountOut, address quotedVenue) {
                 if (amountOut > bestQuote) {
                     bestQuote = amountOut;
                     venue = candidate;
@@ -796,7 +796,7 @@ contract PropAMMRouter is
         returns (uint256 bestQuote, address venue)
     {
         for (uint256 i = 0; i < venues.length; i++) {
-            try this.quoteVenueV1(venues[i], tokenIn, tokenOut, amount) returns (uint256 amountOut) {
+            try this.quoteVenueV1(venues[i], tokenIn, tokenOut, amount) returns (uint256 amountOut, address quotedVenue) {
                 if (amountOut > bestQuote) {
                     bestQuote = amountOut;
                     venue = venues[i];
