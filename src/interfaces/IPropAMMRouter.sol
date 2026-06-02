@@ -71,6 +71,8 @@ interface IPropAMMRouter {
     ) external returns (uint256 amountOut, address executedVenue);
 
     /// @notice Best-venue swap that skims a frontend fee from the output token.
+    /// @dev The caller must approve this contract for at least `amountIn` of
+    /// `tokenIn`. Reverts if the output is below `amountOutMin`.
     /// @param tokenIn The token being sold.
     /// @param tokenOut The token being bought.
     /// @param amountIn The exact amount of `tokenIn` to sell.
@@ -117,6 +119,8 @@ interface IPropAMMRouter {
     ) external returns (uint256 amountOut, address executedVenue);
 
     /// @notice Caller-named-venue swap that skims a frontend fee from the output token.
+    /// @dev The caller must approve this contract for at least `amountIn` of
+    /// `tokenIn`. Reverts if the output is below `amountOutMin`.
     /// @param venue The venue address (propAMM or the fallback router address).
     /// @param tokenIn The token being sold.
     /// @param tokenOut The token being bought.
@@ -166,6 +170,8 @@ interface IPropAMMRouter {
     ) external returns (uint256 amountOut, address executedVenue);
 
     /// @notice Best-of-a-subset swap that skims a frontend fee from the output token.
+    /// @dev The caller must approve this contract for at least `amountIn` of
+    /// `tokenIn`. Reverts if the output is below `amountOutMin`.
     /// @param venues The venues to consider — a subset of the available venues.
     /// @param tokenIn The token being sold.
     /// @param tokenOut The token being bought.
