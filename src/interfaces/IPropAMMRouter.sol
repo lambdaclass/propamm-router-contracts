@@ -4,7 +4,6 @@ pragma solidity ^0.8.35;
 /// @title IPropAMMRouter
 /// @notice Router for single-hop swaps across whitelisted proprietary venues,
 /// with a public-venue fallback used when the chosen propAMM cannot fill.
-/// @dev A venue is either a whitelisted propAMM address or the public-venue fallback.
 interface IPropAMMRouter {
     /// @notice Emitted once per successful swap after `tokenOut` is delivered to `recipient`.
     /// @param sender The address that invoked the swap entrypoint and supplied
