@@ -19,15 +19,6 @@ import {KIPSELI_PAMM, IKipseliPAMM} from "./interfaces/IKipseliPAMM.sol";
 import {KIPSELI_QUOTER, IKipseliQuoter} from "./interfaces/IKipseliQuoter.sol";
 import {UniV3Router} from "./libraries/UniV3Router.sol";
 
-/// @notice Fee parameters for the `*WithFeeV1` entrypoints. Bundled into a struct
-/// so each entrypoint stays within the EVM stack limit without enabling `via_ir`.
-/// @param bps Fee in basis points (1/10_000 of the output). Must be <= `MAX_FEE_BPS`.
-/// @param recipient Address that receives the fee in `tokenOut`. Must be non-zero.
-struct FrontendFee {
-    uint16 bps;
-    address recipient;
-}
-
 /// @title PropAMMRouter
 /// @notice Routes single-hop swaps to a propAMM and falls back through a fallback
 /// venue if the chosen venue reverts.
@@ -163,17 +154,6 @@ contract PropAMMRouter is
     /// @notice Emitted when the owner removes a propAMM venue from the whitelist.
     /// @param venue The venue address removed.
     event VenueRemoved(address indexed venue);
-    /// @notice Emitted when a frontend fee is skimmed from a `*WithFeeV1` swap output.
-    /// @param feeRecipient The address that received the fee.
-    /// @param tokenOut The output token the fee was taken in.
-    /// @param feeAmount The fee amount transferred to `feeRecipient`.
-    /// @param payer The account that invoked the swap and bore the fee.
-    event FrontendFeeCharged(
-        address indexed feeRecipient,
-        address indexed tokenOut,
-        uint256 feeAmount,
-        address indexed payer
-    );
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {

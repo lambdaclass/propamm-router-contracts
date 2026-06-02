@@ -28,6 +28,18 @@ interface IPropAMMRouter {
         address marketMaker
     );
 
+    /// @notice Emitted when a frontend fee is skimmed from a `*WithFeeV1` swap output.
+    /// @param feeRecipient The address that received the fee.
+    /// @param tokenOut The output token the fee was taken in.
+    /// @param feeAmount The fee amount transferred to `feeRecipient`.
+    /// @param payer The account that invoked the swap and bore the fee.
+    event FrontendFeeCharged(
+        address indexed feeRecipient,
+        address indexed tokenOut,
+        uint256 feeAmount,
+        address indexed payer
+    );
+
     /// @notice Fee parameters for the `*WithFeeV1` entrypoints.
     /// @param bps Fee in basis points (1/10_000 of the output). Routers implementations
     /// may put a cap for this value.
