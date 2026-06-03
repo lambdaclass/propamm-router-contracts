@@ -2,6 +2,7 @@
 pragma solidity ^0.8.35;
 
 import {IPropAMM} from "./IPropAMM.sol";
+import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
 /// @title IPropAMMExactOut
 /// @notice Optional extension of {IPropAMM} for proprietary AMMs that also
@@ -14,7 +15,19 @@ import {IPropAMM} from "./IPropAMM.sol";
 /// but because the input amount is not known up front it transfers
 /// `amountInMax` and the venue MUST refund the unspent remainder (see
 /// `swapExactOut`).
-interface IPropAMMExactOut is IPropAMM {
+///
+/// Because exact-output is optional, this interface also inherits {IERC165} so
+/// the router and off-chain integrators can detect support at runtime without a
+/// trial swap — e.g. `ERC165Checker.supportsInterface(venue,
+/// type(IPropAMMExactOut).interfaceId)`. A conforming venue MUST report `true`
+/// from `supportsInterface` for `type(IERC165).interfaceId`,
+/// `type(IPropAMM).interfaceId`, and `type(IPropAMMExactOut).interfaceId`.
+/// Note `type(IPropAMMExactOut).interfaceId` covers only the exact-output
+/// selectors declared here (Solidity excludes inherited functions), so it is
+/// distinct from `type(IPropAMM).interfaceId`. Plain exact-input venues that do
+/// not implement ERC165 are still supported: an `ERC165Checker` probe returns
+/// `false` for them rather than reverting.
+interface IPropAMMExactOut is IPropAMM, IERC165 {
     /// @notice Quotes the `tokenIn` amount required to receive an exact
     /// `amountOut` of `tokenOut`.
     /// @dev The exact-output mirror of {IPropAMM-quote}: it inverts the

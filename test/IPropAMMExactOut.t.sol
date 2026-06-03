@@ -2,6 +2,10 @@
 pragma solidity ^0.8.35;
 
 import {Test} from "forge-std/Test.sol";
+import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
+import {IPropAMM} from "../src/interfaces/IPropAMM.sol";
+import {IPropAMMExactOut} from "../src/interfaces/IPropAMMExactOut.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockPropAMMExactOut} from "./mocks/MockPropAMMExactOut.sol";
 
@@ -111,6 +115,38 @@ contract IPropAMMExactOutTest is Test {
         venue.setActive(false);
         vm.expectRevert(bytes("inactive"));
         venue.quoteExactOut(address(tokenIn), address(tokenOut), 100e18);
+    }
+
+    // --- ERC165 interface detection ----------------------------------------
+
+    function test_supportsInterface_advertisesExpectedIds() public view {
+        assertTrue(venue.supportsInterface(type(IERC165).interfaceId));
+        assertTrue(venue.supportsInterface(type(IPropAMM).interfaceId));
+        assertTrue(venue.supportsInterface(type(IPropAMMExactOut).interfaceId));
+    }
+
+    function test_supportsInterface_rejectsUnknownAndInvalidIds() public view {
+        // A random selector is not advertised.
+        assertFalse(venue.supportsInterface(0xdeadbeef));
+        // 0xffffffff is the ERC165 "invalid" sentinel and must be reported false.
+        assertFalse(venue.supportsInterface(0xffffffff));
+    }
+
+    function test_exactOutId_differsFromBaseId() public pure {
+        // The extension id covers only the exact-output selectors declared in
+        // IPropAMMExactOut, so it is distinct from the exact-input base id.
+        assertTrue(type(IPropAMMExactOut).interfaceId != type(IPropAMM).interfaceId);
+    }
+
+    function test_erc165Checker_detectsExactOutSupport() public view {
+        // The runtime detection path the router uses to opt into exact-output.
+        assertTrue(ERC165Checker.supportsInterface(address(venue), type(IPropAMMExactOut).interfaceId));
+    }
+
+    function test_erc165Checker_returnsFalseForNonErc165Venue() public view {
+        // A plain venue without ERC165 (here, a bare contract) is probed safely:
+        // the checker returns false rather than reverting.
+        assertFalse(ERC165Checker.supportsInterface(address(this), type(IPropAMMExactOut).interfaceId));
     }
 
     // --- inherited exact-input surface (smoke test) ------------------------

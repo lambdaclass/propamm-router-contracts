@@ -4,6 +4,7 @@ pragma solidity ^0.8.35;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IPropAMM} from "../../src/interfaces/IPropAMM.sol";
 import {IPropAMMExactOut} from "../../src/interfaces/IPropAMMExactOut.sol";
 
@@ -43,6 +44,13 @@ contract MockPropAMMExactOut is IPropAMMExactOut {
 
     function getPairs() external view returns (IPropAMM.TokenPair[] memory) {
         return _pairs;
+    }
+
+    /// @notice ERC165 detection: advertises ERC165 itself, the exact-input base
+    /// {IPropAMM}, and the exact-output extension {IPropAMMExactOut}.
+    function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
+        return interfaceId == type(IERC165).interfaceId || interfaceId == type(IPropAMM).interfaceId
+            || interfaceId == type(IPropAMMExactOut).interfaceId;
     }
 
     function quote(address, address, uint256 amountIn) external view returns (uint256 amountOut) {
