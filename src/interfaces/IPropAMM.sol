@@ -28,6 +28,7 @@ interface IPropAMM {
     );
 
     /// @notice A token pair a propAMM supports.
+    /// @dev Tokens are canonically ordered: `token0 < token1`.
     struct TokenPair {
         address token0;
         address token1;
