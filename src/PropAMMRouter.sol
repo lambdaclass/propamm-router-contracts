@@ -442,6 +442,10 @@ contract PropAMMRouter is
             IWETH(WETH).deposit{value: msg.value}();
             tokenIn_ = WETH;
         } else {
+            require(
+                msg.value == 0,
+                InvalidValue(0, msg.value)
+            );
             IERC20(tokenIn).safeTransferFrom(
                 msg.sender,
                 address(this),
@@ -1111,17 +1115,22 @@ contract PropAMMRouter is
         _unpause();
     }
 
-    /// @notice Rescues ERC-20 tokens stranded on the router.
+    /// @notice Rescues ERC-20 tokens or native ETH stranded on the router.
     /// @dev Owner-gated. The router holds no balance between swaps, so any
     /// standing balance is unintended (mis-sent funds, fee-on-transfer dust, or
     /// a partial-pull remainder). Not `nonReentrant`: it must stay callable and
     /// it moves no in-flight swap funds — swaps are atomic and `nonReentrant`.
-    /// @param token The ERC-20 to rescue.
+    /// @param token The ERC-20 to rescue, or `ETH_SENTINEL` to rescue native ETH.
     /// @param to The recipient of the rescued tokens.
     /// @param amount The amount to transfer.
     function rescueTokens(address token, address to, uint256 amount) external onlyOwner {
         require(to != address(0), ZeroAddress());
-        IERC20(token).safeTransfer(to, amount);
+        if (token == ETH_SENTINEL) {
+            (bool ok, ) = payable(to).call{value: amount}("");
+            require(ok, ETHTransferFailed());
+        } else {
+            IERC20(token).safeTransfer(to, amount);
+        }
         emit TokensRescued(token, to, amount);
     }
 }
