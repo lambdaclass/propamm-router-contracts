@@ -52,7 +52,7 @@ interface IPropAMMExactOut is IPropAMM, IERC165 {
     ///  - MUST consume at most `amountInMax` of `tokenIn`, and SHALL revert if
     ///    delivering `amountOut` would require more;
     ///  - MUST refund any unspent `tokenIn` (`amountInMax - amountIn`) to
-    ///    `msg.sender`, the caller that funded the swap.
+    ///    `refundRecipient`.
     /// SHALL revert if the pair is inactive. The `deadline` can safely be
     /// ignored when coming from the Router, since it already does the check.
     /// @param tokenIn The address of the token being sold.
@@ -61,6 +61,7 @@ interface IPropAMMExactOut is IPropAMM, IERC165 {
     /// @param amountInMax The maximum amount of `tokenIn` the caller will spend;
     /// also the amount the caller pushes to the propAMM up front.
     /// @param recipient The address that will receive `tokenOut`.
+    /// @param refundRecipient The address to refund the unspent `tokenIn` to.
     /// @param deadline Unix timestamp after which the swap is no longer valid.
     /// @return amountIn The amount of `tokenIn` actually consumed by the swap.
     function swapExactOut(
@@ -69,6 +70,7 @@ interface IPropAMMExactOut is IPropAMM, IERC165 {
         uint256 amountOut,
         uint256 amountInMax,
         address recipient,
+        address refundRecipient,
         uint256 deadline
     ) external returns (uint256 amountIn);
 }

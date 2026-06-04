@@ -87,6 +87,7 @@ contract MockPropAMMExactOut is IPropAMMExactOut {
         uint256 amountOut,
         uint256 amountInMax,
         address recipient,
+        address refundRecipient,
         uint256
     ) external returns (uint256 amountIn) {
         require(active, "inactive");
@@ -95,10 +96,10 @@ contract MockPropAMMExactOut is IPropAMMExactOut {
 
         // Deliver exactly amountOut from the venue's liquidity.
         IERC20(tokenOut).safeTransfer(recipient, amountOut);
-        // Refund the unspent input pushed up front to the funding caller.
+        // Refund the unspent input pushed up front to the refund recipient.
         uint256 refund = amountInMax - amountIn;
         if (refund > 0) {
-            IERC20(tokenIn).safeTransfer(msg.sender, refund);
+            IERC20(tokenIn).safeTransfer(refundRecipient, refund);
         }
         emit Swapped(msg.sender, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }

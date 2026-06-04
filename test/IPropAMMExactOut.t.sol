@@ -11,10 +11,10 @@ import {MockPropAMMExactOut} from "./mocks/MockPropAMMExactOut.sol";
 
 /// @notice Exercises a venue implementing {IPropAMMExactOut} to prove the
 /// exact-output contract is implementable as specified: exact delivery, an
-/// `amountInMax` ceiling, refund of the unspent input to `msg.sender`, and an
-/// exact-output quote consistent with execution. This test contract plays the
-/// role of the funding caller (the future router), so `msg.sender` inside the
-/// venue is `address(this)` and the refund lands back here.
+/// `amountInMax` ceiling, refund of the unspent input to `refundRecipient`,
+/// and an exact-output quote consistent with execution. This test contract
+/// plays the role of the funding caller (the future router) and names itself
+/// as `refundRecipient`, so the refund lands back here.
 contract IPropAMMExactOutTest is Test {
     MockPropAMMExactOut internal venue;
     MockERC20 internal tokenIn;
@@ -49,7 +49,7 @@ contract IPropAMMExactOutTest is Test {
         uint256 callerBalAfterPush = tokenIn.balanceOf(address(this));
 
         uint256 amountIn = venue.swapExactOut(
-            address(tokenIn), address(tokenOut), amountOut, amountInMax, recipient, _deadline()
+            address(tokenIn), address(tokenOut), amountOut, amountInMax, recipient, address(this), _deadline()
         );
 
         // Exactly amountOut delivered to recipient.
@@ -57,8 +57,24 @@ contract IPropAMMExactOutTest is Test {
         // Reported and actual input consumed equals the required amount.
         assertEq(amountIn, required);
         assertEq(tokenIn.balanceOf(address(venue)), required);
-        // Unspent input refunded to msg.sender (this caller).
+        // Unspent input refunded to refundRecipient (this caller).
         assertEq(tokenIn.balanceOf(address(this)), callerBalAfterPush + (amountInMax - required));
+    }
+
+    function test_swapExactOut_refundsToDistinctRefundRecipient() public {
+        uint256 amountOut = 100e18;
+        uint256 required = 200e18; // 100 * 2/1
+        uint256 amountInMax = 250e18; // 50 buffer over the required input
+        address refundRecipient = address(0xBEEF);
+
+        tokenIn.transfer(address(venue), amountInMax);
+
+        venue.swapExactOut(
+            address(tokenIn), address(tokenOut), amountOut, amountInMax, recipient, refundRecipient, _deadline()
+        );
+
+        // The refund goes to the named refundRecipient, not the caller.
+        assertEq(tokenIn.balanceOf(refundRecipient), amountInMax - required);
     }
 
     function test_swapExactOut_noRefundWhenExactlyFunded() public {
@@ -69,7 +85,7 @@ contract IPropAMMExactOutTest is Test {
         uint256 callerBalAfterPush = tokenIn.balanceOf(address(this));
 
         uint256 amountIn = venue.swapExactOut(
-            address(tokenIn), address(tokenOut), amountOut, required, recipient, _deadline()
+            address(tokenIn), address(tokenOut), amountOut, required, recipient, address(this), _deadline()
         );
 
         assertEq(amountIn, required);
@@ -85,7 +101,9 @@ contract IPropAMMExactOutTest is Test {
         tokenIn.transfer(address(venue), amountInMax);
 
         vm.expectRevert(bytes("exceeds amountInMax"));
-        venue.swapExactOut(address(tokenIn), address(tokenOut), amountOut, amountInMax, recipient, _deadline());
+        venue.swapExactOut(
+            address(tokenIn), address(tokenOut), amountOut, amountInMax, recipient, address(this), _deadline()
+        );
     }
 
     function test_swapExactOut_revertsWhenInactive() public {
@@ -93,7 +111,7 @@ contract IPropAMMExactOutTest is Test {
         tokenIn.transfer(address(venue), 250e18);
 
         vm.expectRevert(bytes("inactive"));
-        venue.swapExactOut(address(tokenIn), address(tokenOut), 100e18, 250e18, recipient, _deadline());
+        venue.swapExactOut(address(tokenIn), address(tokenOut), 100e18, 250e18, recipient, address(this), _deadline());
     }
 
     // --- quoteExactOut -----------------------------------------------------
