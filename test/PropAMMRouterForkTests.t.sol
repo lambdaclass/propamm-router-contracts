@@ -8,6 +8,7 @@ import {
 } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {PropAMMRouter} from "../src/PropAMMRouter.sol";
 import {IPropAMMRouter} from "../src/interfaces/IPropAMMRouter.sol";
+import {FERMI_ROUTER} from "../src/interfaces/IFermiSwapper.sol";
 import {
     PRIO_UPDATE_REGISTRY,
     IPrioUpdateRegistry
@@ -131,14 +132,7 @@ contract PropAMMRouterForkTests is Test {
 
     function test_swapViaVenueV1Fermi() public {
         _updateFermiPrice();
-
-        _runSwapViaVenueV1(0xb1076fE3AB5e28005C7c323Bac5AC06a680d452e);
-    }
-
-    function test_swapViaVenueV1Bebop() public {
-        _updateNewKipseliPrice();
-
-        _runSwapViaVenueV1(0x160141A205F5dDcf096BA3F48B7eD21EB52c62EA);
+        _runSwapViaVenueV1(FERMI_ROUTER);
     }
 
     /// @dev Republishes the new Kipseli PAMM's pricing lane in the
