@@ -22,6 +22,7 @@ contract PropAMMRouterForkTests is Test {
     /// the high-bit blacklist flag); allowance slot is 10.
     address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
     address constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+    address constant UNISWAP_ROUTER_02 = 0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45;
 
     uint256 constant USDC_BALANCES_SLOT = 9;
     uint256 constant USDC_ALLOWANCES_SLOT = 10;
@@ -76,6 +77,10 @@ contract PropAMMRouterForkTests is Test {
     function test_swapViaVenueV1Fermi() public {
         _updateFermiPrice();
         _runSwapViaVenueV1(FERMI_ROUTER);
+    }
+
+    function test_swapViaVenueV1Fallback() public {
+        _runSwapViaVenueV1(UNISWAP_ROUTER_02);
     }
 
     /// @dev Republishes the new Kipseli PAMM's pricing lane in the
