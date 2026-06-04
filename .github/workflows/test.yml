@@ -1,4 +1,4 @@
-name: Mainnet fork PropAMMRouter test
+name: PropAMMRouter test (mainnet fork)
 
 on:
   pull_request:
