@@ -11,7 +11,7 @@ import {FERMI_ROUTER} from "../src/interfaces/IFermiSwapper.sol";
 import {
     PRIO_UPDATE_REGISTRY,
     IPrioUpdateRegistry
-} from "../src/interfaces/IPrioUpdateRegistry.sol";
+} from "../test/interfaces/IPrioUpdateRegistry.sol";
 
 /// @title PropAMMRouterForkTests
 /// @notice Fork-test rig exercising the `IPropAMMRouter` interface against a
