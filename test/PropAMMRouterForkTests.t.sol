@@ -1,0 +1,269 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.35;
+
+import {Test} from "forge-std/Test.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {
+    ERC1967Proxy
+} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {PropAMMRouter} from "../src/PropAMMRouter.sol";
+import {IPropAMMRouter} from "../src/interfaces/IPropAMMRouter.sol";
+import {
+    PRIO_UPDATE_REGISTRY,
+    IPrioUpdateRegistry
+} from "../src/interfaces/IPrioUpdateRegistry.sol";
+
+/// @title PropAMMRouterForkTests
+/// @notice Fork-test rig exercising the `IPropAMMRouter` interface against a
+/// mainnet fork.
+contract PropAMMRouterForkTests is Test {
+    /// @dev Mainnet USDC (FiatTokenV2_2). Balance slot is 9 (packed with
+    /// the high-bit blacklist flag); allowance slot is 10.
+    address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
+    address constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+    /// @dev Uniswap V3 SwapRouter02 + QuoterV2 — same fallback wiring as
+    /// `scripts/Deploy.s.sol`. `SWAP_ROUTER_02` doubles as the venue address
+    /// the router reports (and that callers may name) for the public-venue
+    /// fallback.
+    address constant SWAP_ROUTER_02 =
+        0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45;
+    address constant QUOTER_V2 = 0x61fFE014bA17989E743c5F6cB21bF9697530B21e;
+
+    uint256 constant USDC_BALANCES_SLOT = 9;
+    uint256 constant USDC_ALLOWANCES_SLOT = 10;
+
+    uint256 constant AMOUNT_IN = 100e6; // 100 USDC
+
+
+    PropAMMRouter router;
+    address taker;
+
+    function setUp() public {
+        string memory rpc = vm.envString("ETH_RPC_URL");
+
+        vm.createSelectFork(rpc);
+        taker = makeAddr("taker");
+
+        PropAMMRouter impl = new PropAMMRouter();
+        bytes memory init = abi.encodeCall(
+            PropAMMRouter.initialize,
+            (SWAP_ROUTER_02, QUOTER_V2, address(this))
+        );
+        router = PropAMMRouter(
+            payable(address(new ERC1967Proxy(address(impl), init)))
+        );
+
+        // Fund the taker with 1M USDC (well above the worst-case test spend).
+        _fundTakerUSDC(1_000_000 * 1e6);
+        _setMaxAllowance(USDC, taker, address(router));
+        // Give the taker ETH for the tx-gas accounting that `vm.prank` will
+        // hand to the EVM — Foundry's default would otherwise leave it at 0.
+        vm.deal(taker, 10 ether);
+    }
+
+    /// @dev A newly deployed Kipseli PAMM, distinct from the built-in
+    /// `KIPSELI_PAMM` address. It is not one of the three built-ins the router
+    /// special-cases, so once whitelisted the router prices it through the
+    /// generic `IPropAMM.quote` path and dispatches it through the
+    /// `IPropAMM.swap` push-payment branch of `_dispatchVenue`.
+    address constant NEW_KIPSELI_PAMM =
+        0xcCdda3258aA079ce45E6aa6F35829a6612eb7C45;
+
+    /// @dev The new Kipseli PAMM prices each swap by reading a pricing lane from
+    /// the `PrioUpdateRegistry`. The lane is scoped to this `target` address (the
+    /// account that calls `getState`) at `NEW_KIPSELI_LANE_INDEX`.
+    address constant NEW_KIPSELI_PRICE_TARGET =
+        0xfE3d12b21d2602868223E83149bdBbFB5D11e185;
+    uint256 constant NEW_KIPSELI_LANE_INDEX = 0;
+
+    /// @dev The packed pricing slots from the mainnet updater tx
+    /// 0xf7be932bf666b0fb4d10bbd0cd844876e24f0e75dfd11772907dff94e90513e8:
+    /// `slots[0]` (zero) and `slots[1]` (the encoded price). The price is
+    /// replayed verbatim; the update timestamp is NOT — the fork pins to a
+    /// different block than that tx, so the tx's `0x6a205237` falls outside the
+    /// registry's freshness window and is rejected with `InvalidUpdateTimestamp`.
+    /// We stamp the write with the current fork block time instead (see
+    /// `_updateNewKipseliPrice`), which is always inside the window.
+    uint256 constant NEW_KIPSELI_PRICE_SLOT_1 =
+        0x0000000000000000000000000000000000000000000000000054000e5bf95d7b;
+
+    /// @dev Fermi's pricing lane in the `PrioUpdateRegistry`. The lane is scoped
+    /// to this `target` address (the account that calls `getState`) at
+    /// `FERMI_LANE_INDEX`. Unlike Kipseli's lane 0, Fermi's lane index is a full
+    /// 32-byte key.
+    address constant FERMI_PRICE_TARGET =
+        0xe514A3c48DA8B233f65b5d15BA1905d6d35BFE48;
+    uint256 constant FERMI_LANE_INDEX =
+        0x2eec03b8999af9793df60f1395a1b41c29e22b324ea3200ca21bc692979b9d46;
+
+    /// @dev The single packed price slot from the mainnet updater tx for Fermi
+    /// (`slots.length == 1`). Replayed verbatim; the update timestamp is set to
+    /// the current fork block time instead (see `_updateFermiPrice`), for the
+    /// same freshness-window reason as `NEW_KIPSELI_PRICE_SLOT_1`.
+    uint256 constant FERMI_PRICE_SLOT_0 =
+        0x0000000000000000000000000000000000000000000000000000002951c4a160;
+
+    /// @dev Whitelists the new Kipseli PAMM at runtime via `addVenue`, then swaps
+    /// through it with `swapViaVenueV1`.
+    ///
+    /// This Kipseli deployment prices each swap by reading a lane from the
+    /// `PrioUpdateRegistry` (`0xDa7A…8C5F`). On the fork that lane is stale, so
+    /// the read reverts and the swap would fall back to Uniswap. To exercise the
+    /// venue itself we first republish the lane by calling `updateState` with the
+    /// same target, lane, and price slots the real mainnet updater transaction
+    /// used (the timestamp is set to the current fork block time — see
+    /// `_updateNewKipseliPrice`). We authorize ourselves as that lane's updater
+    /// via `addUpdater` (pranked as the target), so the write passes the
+    /// registry's authorization check.
+    function test_swapViaVenueV1NewKipseli() public {
+        _updateNewKipseliPrice();
+
+        // The test contract is the router owner (see `setUp`), so it may
+        // whitelist the venue directly.
+        router.addVenue(NEW_KIPSELI_PAMM);
+        assertTrue(
+            router.isWhitelistedVenue(NEW_KIPSELI_PAMM),
+            "venue was not whitelisted"
+        );
+
+        _runSwapViaVenueV1(NEW_KIPSELI_PAMM);
+    }
+
+    function test_swapViaVenueV1Fermi() public {
+        _updateFermiPrice();
+
+        _runSwapViaVenueV1(0xb1076fE3AB5e28005C7c323Bac5AC06a680d452e);
+    }
+
+    function test_swapViaVenueV1Bebop() public {
+        _updateNewKipseliPrice();
+
+        _runSwapViaVenueV1(0x160141A205F5dDcf096BA3F48B7eD21EB52c62EA);
+    }
+
+    /// @dev Republishes the new Kipseli PAMM's pricing lane in the
+    /// `PrioUpdateRegistry`, mirroring the mainnet updater transaction so the
+    /// venue can quote and settle the swap. Authorizes this test contract as the
+    /// lane's updater first (pranked as the lane target, which manages its own
+    /// updater set), then writes the same target, lane, and price slots the real
+    /// transaction used. The update timestamp is set to the current fork block
+    /// time so it lands inside the registry's freshness window regardless of
+    /// which block the fork pins to.
+    function _updateNewKipseliPrice() internal {
+        IPrioUpdateRegistry registry = IPrioUpdateRegistry(PRIO_UPDATE_REGISTRY);
+
+        vm.prank(NEW_KIPSELI_PRICE_TARGET);
+        registry.addUpdater(address(this));
+
+        uint256[] memory slots = new uint256[](2);
+        slots[0] = 0;
+        slots[1] = NEW_KIPSELI_PRICE_SLOT_1;
+
+        registry.updateState(
+            NEW_KIPSELI_PRICE_TARGET,
+            NEW_KIPSELI_LANE_INDEX,
+            uint32(block.timestamp),
+            slots
+        );
+    }
+
+    /// @dev Republishes Fermi's pricing lane in the `PrioUpdateRegistry`,
+    /// mirroring the mainnet updater transaction so the venue can quote and
+    /// settle the swap. Same flow as `_updateNewKipseliPrice`: authorize this
+    /// test contract as the lane's updater (pranked as the lane target), then
+    /// write the target, lane, and single price slot the real transaction used.
+    /// The update timestamp is set to the current fork block time so it lands
+    /// inside the registry's freshness window regardless of the fork block.
+    function _updateFermiPrice() internal {
+        IPrioUpdateRegistry registry = IPrioUpdateRegistry(PRIO_UPDATE_REGISTRY);
+
+        vm.prank(FERMI_PRICE_TARGET);
+        registry.addUpdater(address(this));
+
+        uint256[] memory slots = new uint256[](1);
+        slots[0] = FERMI_PRICE_SLOT_0;
+
+        registry.updateState(
+            FERMI_PRICE_TARGET,
+            FERMI_LANE_INDEX,
+            uint32(block.timestamp),
+            slots
+        );
+    }
+
+
+    function _fundTakerUSDC(uint256 amount) internal {
+        bytes32 slot = keccak256(abi.encode(taker, USDC_BALANCES_SLOT));
+        // USDC packs the blacklisted flag in the top bit. Writing a plain
+        // uint256 with the high bit clear leaves the taker un-blacklisted and
+        // sets the balance to `amount`.
+        vm.store(USDC, slot, bytes32(amount));
+
+        // Sanity-check via the public balanceOf to catch storage-layout
+        // mistakes early.
+        assertEq(IERC20(USDC).balanceOf(taker), amount, "USDC fund failed");
+    }
+
+    function _setMaxAllowance(
+        address token,
+        address owner,
+        address spender
+    ) internal {
+        bytes32 inner = keccak256(abi.encode(owner, USDC_ALLOWANCES_SLOT));
+        bytes32 slot = keccak256(abi.encode(spender, inner));
+        vm.store(token, slot, bytes32(type(uint256).max));
+
+        assertEq(
+            IERC20(token).allowance(owner, spender),
+            type(uint256).max,
+            "allowance set failed"
+        );
+    }
+
+
+    /// @dev `swapViaVenueV1` counterpart of `_runSwapV1`. The caller pins the
+    /// venue, but the swap may still settle on the fallback if the venue reverts
+    /// at execution, so assert the executed venue is the pinned one or the
+    /// fallback, then check the recipient received WETH and the returned
+    /// `amountOut` matches the balance delta.
+    function _runSwapViaVenueV1(address venue) internal {
+        (uint256 amountOutMin,) =
+            router.quoteVenueV1(venue, USDC, WETH, AMOUNT_IN);
+        uint256 deadline = block.timestamp + 120;
+
+        uint256 wethBalanceBeforeSwap = IERC20(WETH).balanceOf(taker);
+
+        vm.prank(taker);
+        (uint256 amountOut, address executedVenue) = router.swapViaVenueV1(
+            venue,
+            USDC,
+            WETH,
+            AMOUNT_IN,
+            amountOutMin,
+            taker,
+            deadline
+        );
+
+        assertTrue(
+            executedVenue == venue,
+            "wrong execution venue for pinned swapViaVenueV1"
+        );
+        _assertReceived(amountOut, amountOutMin, wethBalanceBeforeSwap);
+    }
+
+
+    /// @dev Shared post-swap assertions: output meets the floor and equals the
+    /// recipient's measured WETH balance delta.
+    function _assertReceived(
+        uint256 amountOut,
+        uint256 amountOutMin,
+        uint256 wethBalanceBeforeSwap
+    ) internal view {
+        assertGe(amountOut, amountOutMin, "amountOut < amountOutMin");
+        assertEq(
+            amountOut,
+            IERC20(WETH).balanceOf(taker) - wethBalanceBeforeSwap,
+            "amountOut != delta"
+        );
+    }
+}
