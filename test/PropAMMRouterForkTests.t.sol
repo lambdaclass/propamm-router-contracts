@@ -28,6 +28,7 @@ contract PropAMMRouterForkTests is Test {
     uint256 constant USDC_ALLOWANCES_SLOT = 10;
 
     uint256 constant AMOUNT_IN = 100e6; // 100 USDC
+    // The address of the mainnet PropAMMRouter contract (demo environment)
     address constant MAINNET_PROPAMM_ROUTER_ADDRESS = 0x4DdF368080CD7946db5b459aD591c350158175e1;
 
     PropAMMRouter router;
@@ -39,6 +40,7 @@ contract PropAMMRouterForkTests is Test {
         vm.createSelectFork(rpc);
         taker = makeAddr("taker");
 
+        // Target the demo environment router
         router = PropAMMRouter(payable(address(MAINNET_PROPAMM_ROUTER_ADDRESS)));
 
         // Fund the taker with 1M USDC (well above the worst-case test spend).
