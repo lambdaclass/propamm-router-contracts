@@ -13,6 +13,7 @@ import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/acces
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {IPropAMMRouter} from "./interfaces/IPropAMMRouter.sol";
 import {IPropAMM} from "./interfaces/IPropAMM.sol";
+import {IWETH} from "./interfaces/IWETH.sol";
 import {FERMI_ROUTER, IFermiSwapper} from "./interfaces/IFermiSwapper.sol";
 import {BEBOP_ROUTER, IBebopRouter} from "./interfaces/IBebopRouter.sol";
 import {KIPSELI_PAMM, IKipseliPAMM} from "./interfaces/IKipseliPAMM.sol";
@@ -76,6 +77,10 @@ contract PropAMMRouter is
     uint16 public constant MAX_FEE_BPS = 100;
     /// @notice Basis-point denominator (100% = 10_000 bps).
     uint16 public constant BPS_DENOMINATOR = 10_000;
+    
+    /// @notice Sentinel passed as `tokenIn` or `tokenOut` to signal native ETH.
+    address public constant ETH_SENTINEL =
+        0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
     /// @notice Thrown when `_dispatchVenue` is called by anyone other than this
     /// contract itself, i.e. outside of the `try`-wrapped self-call made by
@@ -118,6 +123,15 @@ contract PropAMMRouter is
     error VenueAlreadyWhitelisted(address venue);
     /// @notice Thrown when `removeVenue` is given a venue not on the whitelist.
     error VenueNotWhitelisted(address venue);
+    /// @notice Thrown when the attached `msg.value` does not match what the
+    /// swap requires.
+    /// @param expected The required `msg.value`.
+    /// @param received The actual `msg.value` sent with the call.
+    error InvalidValue(uint256 expected, uint256 received);
+    /// @notice Thrown when forwarding native ETH to the swap `recipient` fails.
+    error ETHTransferFailed();
+    /// @notice Thrown when a non-WETH address sends ETH directly to the router.
+    error UnexpectedETHSender();
 
     // `Swapped` is declared in IPropAMMRouter (part of the published interface)
     // and inherited here. The operational events below are implementation
@@ -242,7 +256,7 @@ contract PropAMMRouter is
         uint256 amountOutMin,
         address recipient,
         uint256 deadline
-    ) external whenNotPaused nonReentrant returns (uint256 amountOut, address executedVenue) {
+    ) external payable whenNotPaused nonReentrant returns (uint256 amountOut, address executedVenue) {
         // Fail fast before the on-chain best-venue quoting; `_coreSwap` re-checks
         // for the shared path also reached by `swapViaVenueV1`.
         require(block.timestamp <= deadline, Expired());
@@ -266,7 +280,7 @@ contract PropAMMRouter is
         address recipient,
         uint256 deadline,
         FrontendFee calldata fee
-    ) external whenNotPaused nonReentrant returns (uint256 amountOut, address executedVenue) {
+    ) external payable whenNotPaused nonReentrant returns (uint256 amountOut, address executedVenue) {
         _validateFee(fee);
         require(block.timestamp <= deadline, Expired());
 
@@ -297,7 +311,7 @@ contract PropAMMRouter is
         uint256 amountOutMin,
         address recipient,
         uint256 deadline
-    ) public whenNotPaused nonReentrant returns (uint256 amountOut, address executedVenue) {
+    ) public payable whenNotPaused nonReentrant returns (uint256 amountOut, address executedVenue) {
         require(_isVenue(venue), UnknownVenue());
         (amountOut, executedVenue) =
             _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
@@ -318,7 +332,7 @@ contract PropAMMRouter is
         address recipient,
         uint256 deadline,
         FrontendFee calldata fee
-    ) external whenNotPaused nonReentrant returns (uint256 amountOut) {
+    ) external payable whenNotPaused nonReentrant returns (uint256 amountOut) {
         _validateFee(fee);
         require(_isVenue(venue), UnknownVenue());
 
@@ -343,7 +357,7 @@ contract PropAMMRouter is
         uint256 amountOutMin,
         address recipient,
         uint256 deadline
-    ) public whenNotPaused nonReentrant returns (uint256 amountOut, address executedVenue) {
+    ) public payable whenNotPaused nonReentrant returns (uint256 amountOut, address executedVenue) {
         // Fail fast before the on-chain requote; `_coreSwap` re-checks deadline.
         require(block.timestamp <= deadline, Expired());
 
@@ -371,7 +385,7 @@ contract PropAMMRouter is
         address recipient,
         uint256 deadline,
         FrontendFee calldata fee
-    ) external whenNotPaused nonReentrant returns (uint256 amountOut, address executedVenue) {
+    ) external payable whenNotPaused nonReentrant returns (uint256 amountOut, address executedVenue) {
         _validateFee(fee);
         require(block.timestamp <= deadline, Expired());
 
@@ -418,13 +432,35 @@ contract PropAMMRouter is
         uint256 deadline
     ) internal returns (uint256 amountOut, address executedVenue) {
         require(block.timestamp <= deadline, Expired());
-        IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
 
-        uint256 prevTokenOutBalance = IERC20(tokenOut).balanceOf(recipient);
+        address tokenIn_ = tokenIn;
+        if (tokenIn == ETH_SENTINEL) {
+            require(
+                msg.value == amountIn,
+                InvalidValue(amountIn, msg.value)
+            );
+            IWETH(WETH).deposit{value: msg.value}();
+            tokenIn_ = WETH;
+        } else {
+            IERC20(tokenIn).safeTransferFrom(
+                msg.sender,
+                address(this),
+                amountIn
+            );
+        }
 
+        address tokenOut_ = tokenOut;
+        address recipient_ = recipient;
+        if (tokenOut == ETH_SENTINEL) {
+            tokenOut_ = WETH;
+            recipient_ = address(this);
+        }
+
+        uint256 prevTokenOutBalance = IERC20(tokenOut_).balanceOf(recipient_);
+        
         if (venue != fallbackSwapRouter) {
             try this._dispatchVenue(
-                venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline, prevTokenOutBalance
+                venue, tokenIn_, tokenOut_, amountIn, amountOutMin, recipient_, deadline, prevTokenOutBalance
             ) returns (
                 uint256 amountOut_
             ) {
@@ -434,9 +470,16 @@ contract PropAMMRouter is
             }
         }
 
-        swapViaUniswapV3(tokenIn, tokenOut, amountIn, amountOutMin, recipient);
-        amountOut = IERC20(tokenOut).balanceOf(recipient) - prevTokenOutBalance;
+        swapViaUniswapV3(tokenIn_, tokenOut_, amountIn, amountOutMin, recipient_);
+        amountOut = IERC20(tokenOut_).balanceOf(recipient_) - prevTokenOutBalance;
         require(amountOut >= amountOutMin, InsufficientOutput(amountOutMin, amountOut));
+
+        if (tokenOut == ETH_SENTINEL) {
+            IWETH(WETH).withdraw(amountOut);
+            (bool ok, ) = recipient.call{value: amountOut}("");
+            require(ok, ETHTransferFailed());
+        }
+        
         return (amountOut, fallbackSwapRouter);
     }
 
@@ -628,6 +671,10 @@ contract PropAMMRouter is
         return amountOut;
     }
 
+    receive() external payable {
+        require(msg.sender == WETH, UnexpectedETHSender());
+    }
+    
     /// @inheritdoc IPropAMMRouter
     /// @dev Delegates to `_pickBestVenue` (which compares the proprietary AMMs
     /// and fallback) and reverts `NoQuotesAvailable` if nothing could be priced.
@@ -781,6 +828,13 @@ contract PropAMMRouter is
         internal
         returns (uint256 bestQuote, address venue)
     {
+        if (tokenIn == ETH_SENTINEL) {
+            tokenIn = WETH;
+        }
+        if (tokenOut == ETH_SENTINEL) {
+            tokenOut = WETH;
+        }
+        
         // A venue overtakes it only by quoting strictly more; if none do (or nothing can be priced at all),
         // `venue` stays `fallbackSwapRouter` and `_coreSwap` routes to fallback.
         venue = fallbackSwapRouter;
@@ -831,6 +885,13 @@ contract PropAMMRouter is
         internal
         returns (uint256 bestQuote, address venue)
     {
+        if (tokenIn == ETH_SENTINEL) {
+            tokenIn = WETH;
+        }
+        if (tokenOut == ETH_SENTINEL) {
+            tokenOut = WETH;
+        }
+        
         for (uint256 i = 0; i < venues.length; i++) {
             try this._dispatchQuoteVenue(venues[i], tokenIn, tokenOut, amount) returns (uint256 amountOut) {
                 if (amountOut > bestQuote) {

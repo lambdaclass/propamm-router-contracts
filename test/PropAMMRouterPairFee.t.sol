@@ -40,7 +40,7 @@ contract PropAMMRouterPairFeeTest is Test {
         bytes memory initData =
             abi.encodeCall(PropAMMRouter.initialize, (address(mockRouter), address(mockQuoter), owner));
         ERC1967Proxy proxy = new ERC1967Proxy(address(impl), initData);
-        router = PropAMMRouter(address(proxy));
+        router = PropAMMRouter(payable(address(proxy)));
     }
 
     function test_setUp_initialized() public view {
