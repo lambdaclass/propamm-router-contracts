@@ -22,13 +22,6 @@ contract PropAMMRouterForkTests is Test {
     /// the high-bit blacklist flag); allowance slot is 10.
     address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
     address constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
-    /// @dev Uniswap V3 SwapRouter02 + QuoterV2 — same fallback wiring as
-    /// `scripts/Deploy.s.sol`. `SWAP_ROUTER_02` doubles as the venue address
-    /// the router reports (and that callers may name) for the public-venue
-    /// fallback.
-    address constant SWAP_ROUTER_02 =
-        0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45;
-    address constant QUOTER_V2 = 0x61fFE014bA17989E743c5F6cB21bF9697530B21e;
 
     uint256 constant USDC_BALANCES_SLOT = 9;
     uint256 constant USDC_ALLOWANCES_SLOT = 10;
@@ -63,40 +56,6 @@ contract PropAMMRouterForkTests is Test {
     address constant NEW_KIPSELI_PAMM =
         0xcCdda3258aA079ce45E6aa6F35829a6612eb7C45;
 
-    /// @dev The new Kipseli PAMM prices each swap by reading a pricing lane from
-    /// the `PrioUpdateRegistry`. The lane is scoped to this `target` address (the
-    /// account that calls `getState`) at `NEW_KIPSELI_LANE_INDEX`.
-    address constant NEW_KIPSELI_PRICE_TARGET =
-        0xfE3d12b21d2602868223E83149bdBbFB5D11e185;
-    uint256 constant NEW_KIPSELI_LANE_INDEX = 0;
-
-    /// @dev The packed pricing slots from the mainnet updater tx
-    /// 0xf7be932bf666b0fb4d10bbd0cd844876e24f0e75dfd11772907dff94e90513e8:
-    /// `slots[0]` (zero) and `slots[1]` (the encoded price). The price is
-    /// replayed verbatim; the update timestamp is NOT — the fork pins to a
-    /// different block than that tx, so the tx's `0x6a205237` falls outside the
-    /// registry's freshness window and is rejected with `InvalidUpdateTimestamp`.
-    /// We stamp the write with the current fork block time instead (see
-    /// `_updateNewKipseliPrice`), which is always inside the window.
-    uint256 constant NEW_KIPSELI_PRICE_SLOT_1 =
-        0x0000000000000000000000000000000000000000000000000054000e5bf95d7b;
-
-    /// @dev Fermi's pricing lane in the `PrioUpdateRegistry`. The lane is scoped
-    /// to this `target` address (the account that calls `getState`) at
-    /// `FERMI_LANE_INDEX`. Unlike Kipseli's lane 0, Fermi's lane index is a full
-    /// 32-byte key.
-    address constant FERMI_PRICE_TARGET =
-        0xe514A3c48DA8B233f65b5d15BA1905d6d35BFE48;
-    uint256 constant FERMI_LANE_INDEX =
-        0x2eec03b8999af9793df60f1395a1b41c29e22b324ea3200ca21bc692979b9d46;
-
-    /// @dev The single packed price slot from the mainnet updater tx for Fermi
-    /// (`slots.length == 1`). Replayed verbatim; the update timestamp is set to
-    /// the current fork block time instead (see `_updateFermiPrice`), for the
-    /// same freshness-window reason as `NEW_KIPSELI_PRICE_SLOT_1`.
-    uint256 constant FERMI_PRICE_SLOT_0 =
-        0x0000000000000000000000000000000000000000000000000000002951c4a160;
-
     /// @dev Whitelists the new Kipseli PAMM at runtime via `addVenue`, then swaps
     /// through it with `swapViaVenueV1`.
     ///
@@ -128,10 +87,20 @@ contract PropAMMRouterForkTests is Test {
     /// time so it lands inside the registry's freshness window regardless of
     /// which block the fork pins to.
     function _updateNewKipseliPrice() internal {
+        // Target, lane, and price slot all taken from the mainnet updater tx
+        // 0xf7be932bf666b0fb4d10bbd0cd844876e24f0e75dfd11772907dff94e90513e8.
+        // Pricing lane scoped to this target (the account that calls `getState`)
+        // at lane 0.
+        address priceTarget = 0xfE3d12b21d2602868223E83149bdBbFB5D11e185;
+        uint256 laneIndex = 0;
+        // Encoded price `slots[1]` (`slots[0]` is zero); replayed verbatim, the
+        // timestamp is restamped to fork time in `_updateRegistryState`.
+        uint256 priceSlot1 = 0x0000000000000000000000000000000000000000000000000054000e5bf95d7b;
+
         uint256[] memory slots = new uint256[](2);
         slots[0] = 0;
-        slots[1] = NEW_KIPSELI_PRICE_SLOT_1;
-        _updateRegistryState(NEW_KIPSELI_PRICE_TARGET, NEW_KIPSELI_LANE_INDEX, slots);
+        slots[1] = priceSlot1;
+        _updateRegistryState(priceTarget, laneIndex, slots);
     }
 
     /// @dev Republishes Fermi's pricing lane in the `PrioUpdateRegistry`,
@@ -142,9 +111,19 @@ contract PropAMMRouterForkTests is Test {
     /// The update timestamp is set to the current fork block time so it lands
     /// inside the registry's freshness window regardless of the fork block.
     function _updateFermiPrice() internal {
+        // Target, lane, and price slot all taken from the mainnet updater tx
+        // 0x774c15474849b646ae2feab49379c7b178c1a32b4944e04aef842bb6823c6146
+        // Fermi's pricing lane scoped to this target; unlike Kipseli's lane 0,
+        // the lane index is a full 32-byte key.
+        address priceTarget = 0xe514A3c48DA8B233f65b5d15BA1905d6d35BFE48;
+        uint256 laneIndex = 0x2eec03b8999af9793df60f1395a1b41c29e22b324ea3200ca21bc692979b9d46;
+        // Single packed price slot; replayed verbatim, the timestamp is
+        // restamped to fork time in `_updateRegistryState`.
+        uint256 priceSlot0 = 0x0000000000000000000000000000000000000000000000000000002951c4a160;
+
         uint256[] memory slots = new uint256[](1);
-        slots[0] = FERMI_PRICE_SLOT_0;
-        _updateRegistryState(FERMI_PRICE_TARGET, FERMI_LANE_INDEX, slots);
+        slots[0] = priceSlot0;
+        _updateRegistryState(priceTarget, laneIndex, slots);
     }
 
     function _updateRegistryState(address target, uint256 laneIndex, uint256[] memory slots) internal {
