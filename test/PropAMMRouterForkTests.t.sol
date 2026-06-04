@@ -50,35 +50,27 @@ contract PropAMMRouterForkTests is Test {
     }
 
     /// @dev A newly deployed Kipseli PAMM, distinct from the built-in
-    /// `KIPSELI_PAMM` address. It is not one of the three built-ins the router
-    /// special-cases, so once whitelisted the router prices it through the
-    /// generic `IPropAMM.quote` path and dispatches it through the
-    /// `IPropAMM.swap` push-payment branch of `_dispatchVenue`.
+    /// `KIPSELI_PAMM` address.
     address constant NEW_KIPSELI_PAMM =
         0xcCdda3258aA079ce45E6aa6F35829a6612eb7C45;
 
-    /// @dev Whitelists the new Kipseli PAMM at runtime via `addVenue`, then swaps
-    /// through it with `swapViaVenueV1`.
-    ///
-    /// This Kipseli deployment prices each swap by reading a lane from the
-    /// `PrioUpdateRegistry` (`0xDa7A…8C5F`). On the fork that lane is stale, so
-    /// the read reverts and the swap would fall back to Uniswap. To exercise the
-    /// venue itself we first republish the lane by calling `updateState` with the
-    /// same target, lane, and price slots the real mainnet updater transaction
-    /// used (the timestamp is set to the current fork block time — see
-    /// `_updateNewKipseliPrice`). We authorize ourselves as that lane's updater
-    /// via `addUpdater` (pranked as the target), so the write passes the
-    /// registry's authorization check.
+    /// @dev Calls the `swapViaVenueV1` function passing Kipseli as venue,
+    /// and asserts the swap was actually executed by Kipseli (didn't fallback to Uniswap).
+    /// It updates the price before sending the swap transaction.
     function test_swapViaVenueV1NewKipseli() public {
         _updateNewKipseliPrice();
         _runSwapViaVenueV1(NEW_KIPSELI_PAMM);
     }
 
+    /// @dev Calls the `swapViaVenueV1` function passing Fermi as venue,
+    /// and asserts the swap was actually executed by Fermi (didn't fallback to Uniswap).
+    /// It updates the price before sending the swap transaction.
     function test_swapViaVenueV1Fermi() public {
         _updateFermiPrice();
         _runSwapViaVenueV1(FERMI_ROUTER);
     }
 
+    /// @dev Calls the `swapViaVenueV1` function passing Uniswap (fallback) as venue.
     function test_swapViaVenueV1Fallback() public {
         _runSwapViaVenueV1(UNISWAP_ROUTER_02);
     }
