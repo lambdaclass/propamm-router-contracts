@@ -464,6 +464,14 @@ contract PropAMMRouter is
             ) returns (
                 uint256 amountOut_
             ) {
+                if (tokenOut == ETH_SENTINEL) {
+                    IWETH(WETH).withdraw(amountOut_);
+                    if (recipient != address(this)) {
+                        (bool ok, ) = recipient.call{value: amountOut_}("");
+                        require(ok, ETHTransferFailed());
+                    }
+                }
+
                 return (amountOut_, venue);
             } catch {
                 // Fall through to the Uniswap V3 fallback below.
@@ -476,10 +484,12 @@ contract PropAMMRouter is
 
         if (tokenOut == ETH_SENTINEL) {
             IWETH(WETH).withdraw(amountOut);
-            (bool ok, ) = recipient.call{value: amountOut}("");
-            require(ok, ETHTransferFailed());
+            if (recipient != address(this)) {
+                (bool ok, ) = recipient.call{value: amountOut}("");
+                require(ok, ETHTransferFailed());
+            }
         }
-        
+
         return (amountOut, fallbackSwapRouter);
     }
 
@@ -552,11 +562,21 @@ contract PropAMMRouter is
         uint256 feeAmt = _feeAmount(delivered, fee.bps);
         net = delivered - feeAmt;
         if (feeAmt > 0) {
-            IERC20(tokenOut).safeTransfer(fee.recipient, feeAmt);
+            if (tokenOut == ETH_SENTINEL) {
+                (bool ok, ) = fee.recipient.call{value: feeAmt}("");
+                require(ok, ETHTransferFailed());
+            } else {
+                IERC20(tokenOut).safeTransfer(fee.recipient, feeAmt);
+            }
             emit FrontendFeeCharged(fee.recipient, tokenOut, feeAmt, msg.sender);
         }
         if (net > 0) {
-            IERC20(tokenOut).safeTransfer(recipient, net);
+            if (tokenOut == ETH_SENTINEL) {
+                (bool ok, ) = recipient.call{value: net}("");
+                require(ok, ETHTransferFailed());
+            } else {
+                IERC20(tokenOut).safeTransfer(recipient, net);
+            }
         }
     }
 
