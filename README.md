@@ -2,6 +2,15 @@
 
 Single-hop router that quotes and executes swaps against a proprietary AMM (FermiSwap, Kipseli, or Bebop) or directly against Uniswap V3, and falls back to Uniswap V3 when the chosen proprietary venue cannot fill the swap.
 
+## Deployed Contracts
+
+The Prop AMM router contract is deployed on mainnet at `0x4ddf368080cd7946db5b459ad591c350158175e1`.
+
+The PropAMMs the router interacts with are deployed at:
+- Bebop: `0x160141a205f5ddcf096ba3f48b7ed21eb52c62ea`
+- Fermi: `0xb1076fe3ab5e28005c7c323bac5ac06a680d452e`
+- Kipseli: `0x71e790dd841c8A9061487cb3E78C288E75cE0B3d`
+
 ## Overview
 
 Venues are identified **by address**: the three proprietary AMM routers (FermiSwap, Kipseli, Bebop) plus the Uniswap V3 fallback, denoted by the SwapRouter02 address wired in at deployment. The router exposes the following external functions (see `src/interfaces/IPropAMMRouter.sol` for the full NatSpec and the [rationale](https://github.com/lambdaclass/propamm-router-contracts/blob/main/docs/rationale.md) document with some design decisions):

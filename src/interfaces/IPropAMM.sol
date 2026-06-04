@@ -28,6 +28,7 @@ interface IPropAMM {
     );
 
     /// @notice A token pair a propAMM supports.
+    /// @dev Tokens are canonically ordered: `token0 < token1`.
     struct TokenPair {
         address token0;
         address token1;
@@ -46,8 +47,9 @@ interface IPropAMM {
         address tokenOut
     ) external view returns (bool active);
 
-    /// @notice Returns all token pairs the propAMM support, both active and inactive.
-    /// @dev Advisory, for off-chain discovery; the router does not call this on
+    /// @notice Returns all token pairs the propAMM supports, both active and inactive.
+    /// @dev Each pair MUST appear exactly once, with `token0 < token1`.
+    /// Advisory, for off-chain discovery; the router does not call this on
     /// its swap path.
     /// @return pairs The supported pairs.
     function getPairs() external view returns (TokenPair[] memory pairs);

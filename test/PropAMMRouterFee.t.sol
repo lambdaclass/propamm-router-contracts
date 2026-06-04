@@ -29,7 +29,7 @@ contract PropAMMRouterFeeTest is Test {
         bytes memory data = abi.encodeCall(
             PropAMMRouter.initialize, (address(swapRouter), address(quoter), owner)
         );
-        return PropAMMRouter(address(new ERC1967Proxy(address(impl), data)));
+        return PropAMMRouter(payable(address(new ERC1967Proxy(address(impl), data))));
     }
 
     function setUp() public {
