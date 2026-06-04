@@ -72,15 +72,14 @@ contract PropAMMRouter is
     address private constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
     address private constant USDT = 0xdAC17F958D2ee523a2206206994597C13D831ec7;
     address private constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+    /// @notice Sentinel passed as `tokenIn` or `tokenOut` to signal native ETH.
+    address public constant ETH_SENTINEL =
+        0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
     /// @notice Hard cap on a frontend fee, in basis points (1.00%).
     uint16 public constant MAX_FEE_BPS = 100;
     /// @notice Basis-point denominator (100% = 10_000 bps).
     uint16 public constant BPS_DENOMINATOR = 10_000;
-
-    /// @notice Sentinel passed as `tokenIn` or `tokenOut` to signal native ETH.
-    address public constant ETH_SENTINEL =
-        0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
     /// @notice Thrown when `_dispatchVenue` is called by anyone other than this
     /// contract itself, i.e. outside of the `try`-wrapped self-call made by
@@ -132,6 +131,9 @@ contract PropAMMRouter is
     error ETHTransferFailed();
     /// @notice Thrown when a non-WETH address sends ETH directly to the router.
     error UnexpectedETHSender();
+    /// @notice Thrown when a swap's input and output resolve to the same token
+    /// (including `ETH_SENTINEL` against `WETH`), which no venue can fill.
+    error IdenticalTokens();
 
     // `Swapped` is declared in IPropAMMRouter (part of the published interface)
     // and inherited here. The operational events below are implementation
@@ -459,6 +461,8 @@ contract PropAMMRouter is
             tokenOut_ = WETH;
             recipient_ = address(this);
         }
+
+        require(tokenIn_ != tokenOut_, IdenticalTokens());
 
         uint256 prevTokenOutBalance = IERC20(tokenOut_).balanceOf(recipient_);
 
