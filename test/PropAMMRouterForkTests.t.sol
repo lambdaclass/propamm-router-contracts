@@ -6,7 +6,6 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {
     ERC1967Proxy
 } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import {PropAMMRouter} from "../src/PropAMMRouter.sol";
 import {IPropAMMRouter} from "../src/interfaces/IPropAMMRouter.sol";
 import {FERMI_ROUTER} from "../src/interfaces/IFermiSwapper.sol";
 import {
@@ -31,7 +30,7 @@ contract PropAMMRouterForkTests is Test {
     // The address of the mainnet PropAMMRouter contract (demo environment)
     address constant MAINNET_PROPAMM_ROUTER_ADDRESS = 0x4DdF368080CD7946db5b459aD591c350158175e1;
 
-    PropAMMRouter router;
+    IPropAMMRouter router;
     address taker;
 
     function setUp() public {
@@ -41,7 +40,7 @@ contract PropAMMRouterForkTests is Test {
         taker = makeAddr("taker");
 
         // Target the demo environment router
-        router = PropAMMRouter(payable(address(MAINNET_PROPAMM_ROUTER_ADDRESS)));
+        router = IPropAMMRouter(MAINNET_PROPAMM_ROUTER_ADDRESS);
 
         // Fund the taker with 1M USDC (well above the worst-case test spend).
         _fundTakerUSDC(1_000_000 * 1e6);
@@ -139,7 +138,6 @@ contract PropAMMRouterForkTests is Test {
         );
     }
 
-
     function _fundTakerUSDC(uint256 amount) internal {
         bytes32 slot = keccak256(abi.encode(taker, USDC_BALANCES_SLOT));
         // USDC packs the blacklisted flag in the top bit. Writing a plain
@@ -168,11 +166,9 @@ contract PropAMMRouterForkTests is Test {
         );
     }
 
-    /// @dev `swapViaVenueV1` counterpart of `_runSwapV1`. The caller pins the
-    /// venue, but the swap may still settle on the fallback if the venue reverts
-    /// at execution, so assert the executed venue is the pinned one or the
-    /// fallback, then check the recipient received WETH and the returned
-    /// `amountOut` matches the balance delta.
+    /// @dev Calls the `swapViaVenueV1` function, passing the given venue.
+    /// It asserts the swap executed via the given venue, and `amountOut` is
+    /// at least `amountOutMin`.
     function _runSwapViaVenueV1(address venue) internal {
         (uint256 amountOutMin,) =
             router.quoteVenueV1(venue, USDC, WETH, AMOUNT_IN);
@@ -195,16 +191,6 @@ contract PropAMMRouterForkTests is Test {
             executedVenue == venue,
             "wrong execution venue for pinned swapViaVenueV1"
         );
-        _assertReceived(amountOut, amountOutMin, wethBalanceBeforeSwap);
-    }
-
-    /// @dev Shared post-swap assertions: output meets the floor and equals the
-    /// recipient's measured WETH balance delta.
-    function _assertReceived(
-        uint256 amountOut,
-        uint256 amountOutMin,
-        uint256 wethBalanceBeforeSwap
-    ) internal view {
         assertGe(amountOut, amountOutMin, "amountOut < amountOutMin");
         assertEq(
             amountOut,
