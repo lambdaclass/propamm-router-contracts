@@ -68,7 +68,7 @@ interface IPropAMMRouter {
         uint256 amountOutMin,
         address recipient,
         uint256 deadline
-    ) external returns (uint256 amountOut, address executedVenue);
+    ) external payable returns (uint256 amountOut, address executedVenue);
 
     /// @notice Best-venue swap that skims a frontend fee from the output token.
     /// @dev The caller must approve this contract for at least `amountIn` of
@@ -90,7 +90,7 @@ interface IPropAMMRouter {
         address recipient,
         uint256 deadline,
         FrontendFee calldata fee
-    ) external returns (uint256 amountOut, address executedVenue);
+    ) external payable returns (uint256 amountOut, address executedVenue);
 
     /// @notice Swaps an exact `amountIn` of `tokenIn` through a caller-specified
     /// venue, falling back to the public venue if it fails.
@@ -116,7 +116,7 @@ interface IPropAMMRouter {
         uint256 amountOutMin,
         address recipient,
         uint256 deadline
-    ) external returns (uint256 amountOut, address executedVenue);
+    ) external payable returns (uint256 amountOut, address executedVenue);
 
     /// @notice Caller-named-venue swap that skims a frontend fee from the output token.
     /// @dev The caller must approve this contract for at least `amountIn` of
@@ -139,7 +139,7 @@ interface IPropAMMRouter {
         address recipient,
         uint256 deadline,
         FrontendFee calldata fee
-    ) external returns (uint256 amountOut);
+    ) external payable returns (uint256 amountOut);
 
     /// @notice Swaps an exact `amountIn` of `tokenIn` routing through the
     /// best-quoting venue among a caller-selected set, instead of all available
@@ -167,7 +167,7 @@ interface IPropAMMRouter {
         uint256 amountOutMin,
         address recipient,
         uint256 deadline
-    ) external returns (uint256 amountOut, address executedVenue);
+    ) external payable returns (uint256 amountOut, address executedVenue);
 
     /// @notice Best-of-a-subset swap that skims a frontend fee from the output token.
     /// @dev The caller must approve this contract for at least `amountIn` of
@@ -191,7 +191,7 @@ interface IPropAMMRouter {
         address recipient,
         uint256 deadline,
         FrontendFee calldata fee
-    ) external returns (uint256 amountOut, address executedVenue);
+    ) external payable returns (uint256 amountOut, address executedVenue);
 
     /// @notice Quotes `amount` of `tokenIn` across every venue and returns the
     /// best output and the venue that produced it.

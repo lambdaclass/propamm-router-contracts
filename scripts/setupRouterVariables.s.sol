@@ -67,7 +67,7 @@ contract SetupRouterVariables is Script {
     }
 
     function run() public {
-        address proxy = vm.envAddress("ROUTER_PROXY");
+        address payable proxy = payable(vm.envAddress("ROUTER_PROXY"));
         (address[] memory tokenA, address[] memory tokenB, uint24[] memory fees) = seedData();
         address[] memory venueList = venues();
 
