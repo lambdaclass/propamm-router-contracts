@@ -45,11 +45,6 @@ contract PropAMMRouterForkTests is Test {
         vm.createSelectFork(rpc);
         taker = makeAddr("taker");
 
-        PropAMMRouter impl = new PropAMMRouter();
-        bytes memory init = abi.encodeCall(
-            PropAMMRouter.initialize,
-            (SWAP_ROUTER_02, QUOTER_V2, address(this))
-        );
         router = PropAMMRouter(payable(address(MAINNET_PROPAMM_ROUTER_ADDRESS)));
 
         // Fund the taker with 1M USDC (well above the worst-case test spend).
@@ -116,15 +111,6 @@ contract PropAMMRouterForkTests is Test {
     /// registry's authorization check.
     function test_swapViaVenueV1NewKipseli() public {
         _updateNewKipseliPrice();
-
-        // The test contract is the router owner (see `setUp`), so it may
-        // whitelist the venue directly.
-        router.addVenue(NEW_KIPSELI_PAMM);
-        assertTrue(
-            router.isWhitelistedVenue(NEW_KIPSELI_PAMM),
-            "venue was not whitelisted"
-        );
-
         _runSwapViaVenueV1(NEW_KIPSELI_PAMM);
     }
 
@@ -142,21 +128,10 @@ contract PropAMMRouterForkTests is Test {
     /// time so it lands inside the registry's freshness window regardless of
     /// which block the fork pins to.
     function _updateNewKipseliPrice() internal {
-        IPrioUpdateRegistry registry = IPrioUpdateRegistry(PRIO_UPDATE_REGISTRY);
-
-        vm.prank(NEW_KIPSELI_PRICE_TARGET);
-        registry.addUpdater(address(this));
-
         uint256[] memory slots = new uint256[](2);
         slots[0] = 0;
         slots[1] = NEW_KIPSELI_PRICE_SLOT_1;
-
-        registry.updateState(
-            NEW_KIPSELI_PRICE_TARGET,
-            NEW_KIPSELI_LANE_INDEX,
-            uint32(block.timestamp),
-            slots
-        );
+        _updateRegistryState(NEW_KIPSELI_PRICE_TARGET, NEW_KIPSELI_LANE_INDEX, slots);
     }
 
     /// @dev Republishes Fermi's pricing lane in the `PrioUpdateRegistry`,
@@ -167,17 +142,20 @@ contract PropAMMRouterForkTests is Test {
     /// The update timestamp is set to the current fork block time so it lands
     /// inside the registry's freshness window regardless of the fork block.
     function _updateFermiPrice() internal {
-        IPrioUpdateRegistry registry = IPrioUpdateRegistry(PRIO_UPDATE_REGISTRY);
-
-        vm.prank(FERMI_PRICE_TARGET);
-        registry.addUpdater(address(this));
-
         uint256[] memory slots = new uint256[](1);
         slots[0] = FERMI_PRICE_SLOT_0;
+        _updateRegistryState(FERMI_PRICE_TARGET, FERMI_LANE_INDEX, slots);
+    }
+
+    function _updateRegistryState(address target, uint256 laneIndex, uint256[] memory slots) internal {
+        IPrioUpdateRegistry registry = IPrioUpdateRegistry(PRIO_UPDATE_REGISTRY);
+
+        vm.prank(target);
+        registry.addUpdater(address(this));
 
         registry.updateState(
-            FERMI_PRICE_TARGET,
-            FERMI_LANE_INDEX,
+            target,
+            laneIndex,
             uint32(block.timestamp),
             slots
         );
