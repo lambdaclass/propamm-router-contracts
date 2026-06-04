@@ -34,7 +34,7 @@ contract PropAMMRouterForkTests is Test {
     uint256 constant USDC_ALLOWANCES_SLOT = 10;
 
     uint256 constant AMOUNT_IN = 100e6; // 100 USDC
-
+    address constant MAINNET_PROPAMM_ROUTER_ADDRESS = 0x4DdF368080CD7946db5b459aD591c350158175e1;
 
     PropAMMRouter router;
     address taker;
@@ -50,9 +50,7 @@ contract PropAMMRouterForkTests is Test {
             PropAMMRouter.initialize,
             (SWAP_ROUTER_02, QUOTER_V2, address(this))
         );
-        router = PropAMMRouter(
-            payable(address(new ERC1967Proxy(address(impl), init)))
-        );
+        router = PropAMMRouter(payable(address(MAINNET_PROPAMM_ROUTER_ADDRESS)));
 
         // Fund the taker with 1M USDC (well above the worst-case test spend).
         _fundTakerUSDC(1_000_000 * 1e6);
@@ -214,7 +212,6 @@ contract PropAMMRouterForkTests is Test {
         );
     }
 
-
     /// @dev `swapViaVenueV1` counterpart of `_runSwapV1`. The caller pins the
     /// venue, but the swap may still settle on the fallback if the venue reverts
     /// at execution, so assert the executed venue is the pinned one or the
@@ -244,7 +241,6 @@ contract PropAMMRouterForkTests is Test {
         );
         _assertReceived(amountOut, amountOutMin, wethBalanceBeforeSwap);
     }
-
 
     /// @dev Shared post-swap assertions: output meets the floor and equals the
     /// recipient's measured WETH balance delta.
