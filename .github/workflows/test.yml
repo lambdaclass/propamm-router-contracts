@@ -1,0 +1,20 @@
+name: Mainnet fork PropAMMRouter test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Run test
+        env:
+          ETH_RPC_URL: https://ethereum-rpc.publicnode.com
+        run: forge test --match-contract PropAMMRouterForkTests
