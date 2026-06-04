@@ -77,7 +77,7 @@ contract PropAMMRouter is
     uint16 public constant MAX_FEE_BPS = 100;
     /// @notice Basis-point denominator (100% = 10_000 bps).
     uint16 public constant BPS_DENOMINATOR = 10_000;
-    
+
     /// @notice Sentinel passed as `tokenIn` or `tokenOut` to signal native ETH.
     address public constant ETH_SENTINEL =
         0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
@@ -268,7 +268,7 @@ contract PropAMMRouter is
     }
 
     /// @inheritdoc IPropAMMRouter
-    /// @dev Validates `fee`, grosses up the net `amountOutMin` so the user still nets 
+    /// @dev Validates `fee`, grosses up the net `amountOutMin` so the user still nets
     /// at least their minimum, routes the swap to this contract, then forwards the fee
     /// and the net. Emits `Swapped` with the net amount and the real `recipient`.
     /// `whenNotPaused`/`nonReentrant` like `swapV1`.
@@ -461,7 +461,7 @@ contract PropAMMRouter is
         }
 
         uint256 prevTokenOutBalance = IERC20(tokenOut_).balanceOf(recipient_);
-        
+
         if (venue != fallbackSwapRouter) {
             try this._dispatchVenue(
                 venue, tokenIn_, tokenOut_, amountIn, amountOutMin, recipient_, deadline, prevTokenOutBalance
@@ -698,7 +698,7 @@ contract PropAMMRouter is
     receive() external payable {
         require(msg.sender == WETH, UnexpectedETHSender());
     }
-    
+
     /// @inheritdoc IPropAMMRouter
     /// @dev Delegates to `_pickBestVenue` (which compares the proprietary AMMs
     /// and fallback) and reverts `NoQuotesAvailable` if nothing could be priced.
@@ -706,6 +706,13 @@ contract PropAMMRouter is
         public
         returns (uint256 bestQuote, address venue)
     {
+        if (tokenIn == ETH_SENTINEL) {
+            tokenIn = WETH;
+        }
+        if (tokenOut == ETH_SENTINEL) {
+            tokenOut = WETH;
+        }
+
         (bestQuote, venue) = _pickBestVenue(tokenIn, tokenOut, amount);
         require(bestQuote > 0, NoQuotesAvailable());
     }
@@ -727,6 +734,13 @@ contract PropAMMRouter is
         returns (uint256 amountOut, address quotedVenue)
     {
         require(_isVenue(venue), UnknownVenue());
+
+        if (tokenIn == ETH_SENTINEL) {
+            tokenIn = WETH;
+        }
+        if (tokenOut == ETH_SENTINEL) {
+            tokenOut = WETH;
+        }
 
         // Asking for the fallback directly: quote it and report it. It is the
         // fallback, so there is no further fallback.
@@ -798,6 +812,13 @@ contract PropAMMRouter is
         public
         returns (uint256 bestAmountOut, address bestVenue)
     {
+        if (tokenIn == ETH_SENTINEL) {
+            tokenIn = WETH;
+        }
+        if (tokenOut == ETH_SENTINEL) {
+            tokenOut = WETH;
+        }
+
         (bestAmountOut, bestVenue) = _pickBestVenueFrom(venues, tokenIn, tokenOut, amountIn);
         if (bestVenue == address(0)) {
             // None of the considered venues could be priced; fall back to the
@@ -852,13 +873,6 @@ contract PropAMMRouter is
         internal
         returns (uint256 bestQuote, address venue)
     {
-        if (tokenIn == ETH_SENTINEL) {
-            tokenIn = WETH;
-        }
-        if (tokenOut == ETH_SENTINEL) {
-            tokenOut = WETH;
-        }
-        
         // A venue overtakes it only by quoting strictly more; if none do (or nothing can be priced at all),
         // `venue` stays `fallbackSwapRouter` and `_coreSwap` routes to fallback.
         venue = fallbackSwapRouter;
@@ -909,13 +923,6 @@ contract PropAMMRouter is
         internal
         returns (uint256 bestQuote, address venue)
     {
-        if (tokenIn == ETH_SENTINEL) {
-            tokenIn = WETH;
-        }
-        if (tokenOut == ETH_SENTINEL) {
-            tokenOut = WETH;
-        }
-        
         for (uint256 i = 0; i < venues.length; i++) {
             try this._dispatchQuoteVenue(venues[i], tokenIn, tokenOut, amount) returns (uint256 amountOut) {
                 if (amountOut > bestQuote) {
