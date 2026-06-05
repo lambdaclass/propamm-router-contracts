@@ -68,6 +68,10 @@ contract PropAMMRouter is
     /// @dev Declared last to keep the upgradeable storage layout append-only.
     EnumerableSet.AddressSet private _whitelistedVenues;
 
+    //------------//
+    // Initialize //
+    //------------//
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
@@ -129,16 +133,9 @@ contract PropAMMRouter is
         _addVenue(0x71e790dd841c8A9061487cb3E78C288E75cE0B3d); // Kipseli
     }
 
-    /// @dev Shared whitelist-insertion core for the public `addVenue` and the
-    /// seeding paths (`_seedDefaultVenues`). Adds `venue` if absent and emits
-    /// `VenueWhitelisted` only when the set actually changed; idempotent, so the
-    /// seeding paths never revert on a venue that is already listed. Callers that
-    /// must reject a redundant add (the public `addVenue`) check the return value.
-    /// @return added True if `venue` was newly inserted, false if already present.
-    function _addVenue(address venue) private returns (bool added) {
-        added = _whitelistedVenues.add(venue);
-        if (added) emit VenueWhitelisted(venue);
-    }
+    //------//
+    // Swap //
+    //------//
 
     /// @inheritdoc IPropAMMRouter
     /// @dev Picks the best-quoting venue via `_pickBestVenue`, then executes
@@ -383,33 +380,6 @@ contract PropAMMRouter is
         return (amountOut, fallbackSwapRouter);
     }
 
-    /// @notice Logs a completed swap.
-    /// @dev Wraps the `Swapped` emit so the calling entrypoint does not carry
-    /// the event's arguments live on its (already param-heavy) stack at the
-    /// emit site — avoids a stack-too-deep without enabling `viaIR`. Called
-    /// from the public swap entrypoints after `_coreSwap` returns. `msg.sender`
-    /// is read here and equals the entrypoint's caller, since internal calls
-    /// preserve the message context.
-    /// @param marketMaker The venue that filled, or `fallbackSwapRouter`. Placed
-    /// first (not in `Swapped`'s field order) so the deepest `_coreSwap` local
-    /// (`venue`) is read at the shallowest stack reach — another stack-too-deep
-    /// guard. The helper maps params to the event's field order internally.
-    /// @param tokenIn The token sold.
-    /// @param tokenOut The token bought.
-    /// @param amountIn The exact amount of `tokenIn` pulled from the caller.
-    /// @param amountOut The amount of `tokenOut` delivered to `recipient`.
-    /// @param recipient The address that received `tokenOut`.
-    function _emitSwapped(
-        address marketMaker,
-        address tokenIn,
-        address tokenOut,
-        uint256 amountIn,
-        uint256 amountOut,
-        address recipient
-    ) private {
-        emit Swapped(msg.sender, tokenIn, tokenOut, amountIn, amountOut, recipient, marketMaker);
-    }
-
     /// @notice Executes a swap on a venue with funds already held by this contract.
     /// @dev Reverts `UnknownVenue` for non-whitelisted addresses, or
     /// bubbles up the underlying propAMM router's revert.
@@ -490,7 +460,7 @@ contract PropAMMRouter is
     /// by this contract.
     /// @dev Assumes the router already holds `amountIn` of `tokenIn` — pulled
     /// once by `_coreSwap` before the try/catch. Uses the per-pair resolved fee
-    /// tier (`_resolveFee`: the pair override if set, otherwise the global
+    /// tier (`resolvedFee`: the pair override if set, otherwise the global
     /// `fallbackFee`). `UniV3Router.swapExactIn` only approves `fallbackSwapRouter`
     /// and executes the swap; it does not pull from `msg.sender`.
     /// @param tokenIn The address of the token being sold.
@@ -507,14 +477,45 @@ contract PropAMMRouter is
         address recipient
     ) private returns (uint256 amountOut) {
         amountOut = UniV3Router.swapExactIn(
-            tokenIn, tokenOut, _resolveFee(tokenIn, tokenOut), amountIn, amountOutMin, recipient, fallbackSwapRouter
+            tokenIn, tokenOut, resolvedFee(tokenIn, tokenOut), amountIn, amountOutMin, recipient, fallbackSwapRouter
         );
         return amountOut;
+    }
+
+    /// @notice Logs a completed swap.
+    /// @dev Wraps the `Swapped` emit so the calling entrypoint does not carry
+    /// the event's arguments live on its (already param-heavy) stack at the
+    /// emit site — avoids a stack-too-deep without enabling `viaIR`. Called
+    /// from the public swap entrypoints after `_coreSwap` returns. `msg.sender`
+    /// is read here and equals the entrypoint's caller, since internal calls
+    /// preserve the message context.
+    /// @param marketMaker The venue that filled, or `fallbackSwapRouter`. Placed
+    /// first (not in `Swapped`'s field order) so the deepest `_coreSwap` local
+    /// (`venue`) is read at the shallowest stack reach — another stack-too-deep
+    /// guard. The helper maps params to the event's field order internally.
+    /// @param tokenIn The token sold.
+    /// @param tokenOut The token bought.
+    /// @param amountIn The exact amount of `tokenIn` pulled from the caller.
+    /// @param amountOut The amount of `tokenOut` delivered to `recipient`.
+    /// @param recipient The address that received `tokenOut`.
+    function _emitSwapped(
+        address marketMaker,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOut,
+        address recipient
+    ) private {
+        emit Swapped(msg.sender, tokenIn, tokenOut, amountIn, amountOut, recipient, marketMaker);
     }
 
     receive() external payable {
         require(msg.sender == WETH, UnexpectedETHSender());
     }
+
+    //-------//
+    // Quote //
+    //-------//
 
     /// @inheritdoc IPropAMMRouter
     /// @dev Delegates to `_pickBestVenue` (which compares the proprietary AMMs
@@ -665,7 +666,7 @@ contract PropAMMRouter is
     /// @param amount The exact amount of `tokenIn` to quote against.
     /// @return The amount of `tokenOut` the Uniswap V3 swap would produce.
     function _quoteFallback(address tokenIn, address tokenOut, uint256 amount) private returns (uint256) {
-        return UniV3Router.quoteExactIn(tokenIn, tokenOut, _resolveFee(tokenIn, tokenOut), amount, fallbackQuoter);
+        return UniV3Router.quoteExactIn(tokenIn, tokenOut, resolvedFee(tokenIn, tokenOut), amount, fallbackQuoter);
     }
 
     /// @notice Finds the venue offering the best `tokenOut` for `amount` of
@@ -747,39 +748,32 @@ contract PropAMMRouter is
         }
     }
 
-    /// @notice Returns whether `venue` is a venue a caller may name explicitly in
-    /// `quoteVenueV1` / `swapViaVenueV1`: a whitelisted propAMM, or the Uniswap
-    /// fallback (which is always accepted, independent of the whitelist).
-    function _isVenue(address venue) private view returns (bool) {
-        if (venue == address(0)) return false;
-        return _whitelistedVenues.contains(venue) || venue == fallbackSwapRouter;
+    //---------------------//
+    // Fallback Management //
+    //---------------------//
+
+    /// @notice Repoints the address used by the fallback route.
+    /// @dev Access-controlled via the AccessManager authority. Lets a new SwapRouter deployment be adopted without a
+    /// contract upgrade. Reverts `ZeroAddress` if zero — this address also
+    /// identifies the fallback venue (`_isVenue`, `_pickBestVenue`, `_coreSwap`),
+    /// so a zero value would corrupt venue identity. Note that `executedVenue`
+    /// values observed off-chain are only meaningful relative to the router's
+    /// configuration at the time of the swap.
+    /// @param newRouter Address of thew new router.
+    function setFallbackSwapRouter(address newRouter) external restricted {
+        require(newRouter != address(0), ZeroAddress());
+        emit FallbackSwapRouterUpdated(fallbackSwapRouter, newRouter);
+        fallbackSwapRouter = newRouter;
     }
 
-    /// @dev Canonical key for a token pair, order-independent. Uniswap V3 pools
-    /// are symmetric (one pool, `token0 < token1`, serves both directions), so
-    /// {A,B} and {B,A} share one entry.
-    function _pairKey(address tokenA, address tokenB) private pure returns (bytes32) {
-        (address a, address b) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
-        return keccak256(abi.encodePacked(a, b));
+    /// @notice Repoints the fallback quoter used to price the fallback route.
+    /// @dev Access-controlled via the AccessManager authority. Reverts `ZeroAddress` if zero.
+    /// @param newQuoter Address of the new fallback quoter.
+    function setFallbackQuoter(address newQuoter) external restricted {
+        require(newQuoter != address(0), ZeroAddress());
+        emit FallbackQuoterUpdated(fallbackQuoter, newQuoter);
+        fallbackQuoter = newQuoter;
     }
-
-    /// @notice Resolves the Uniswap V3 fallback fee for a pair: the per-pair
-    /// override if set, otherwise the global `fallbackFee`.
-    /// @param tokenIn The token being sold.
-    /// @param tokenOut The token being bought.
-    /// @return fee The effective fee tier in hundredths of a bip.
-    function _resolveFee(address tokenIn, address tokenOut) private view returns (uint24 fee) {
-        fee = _pairFee[_pairKey(tokenIn, tokenOut)];
-        if (fee == 0) fee = fallbackFee;
-    }
-
-    /// @dev Gates UUPS upgrades through the `AccessManager`. The `restricted`
-    /// modifier keys off the *entering* selector, which for an upgrade is
-    /// `upgradeToAndCall(address,bytes)`; assign the upgrade role and its
-    /// execution delay to that selector on the manager. Using `restricted` on an
-    /// internal function is the documented UUPS+AccessManaged pattern precisely
-    /// because the gate resolves against that entrypoint selector.
-    function _authorizeUpgrade(address) internal override restricted {}
 
     /// @notice Sets the fallback fee used by the fallback route.
     /// @dev Access-controlled via the AccessManager authority. Lets the deepest pool for the traded pairs be selected
@@ -789,6 +783,14 @@ contract PropAMMRouter is
         require(fee != 0 && fee < 1_000_000, InvalidFallbackFee(fee));
         emit FallbackFeeUpdated(fallbackFee, fee);
         fallbackFee = fee;
+    }
+
+    /// @dev Canonical key for a token pair, order-independent. Uniswap V3 pools
+    /// are symmetric (one pool, `token0 < token1`, serves both directions), so
+    /// {A,B} and {B,A} share one entry.
+    function _pairKey(address tokenA, address tokenB) private pure returns (bytes32) {
+        (address a, address b) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
+        return keccak256(abi.encodePacked(a, b));
     }
 
     /// @notice Returns the raw per-pair fee override for a pair (0 if unset).
@@ -802,8 +804,9 @@ contract PropAMMRouter is
     /// for a pair: the per-pair override if set, otherwise the global `fallbackFee`.
     /// @param tokenIn The token being sold.
     /// @param tokenOut The token being bought.
-    function resolvedFee(address tokenIn, address tokenOut) external view returns (uint24) {
-        return _resolveFee(tokenIn, tokenOut);
+    function resolvedFee(address tokenIn, address tokenOut) public view returns (uint24 fee) {
+        fee = _pairFee[_pairKey(tokenIn, tokenOut)];
+        if (fee == 0) fee = fallbackFee;
     }
 
     /// @notice Sets (or clears) the Uniswap V3 fallback fee tier for a specific pair.
@@ -845,27 +848,59 @@ contract PropAMMRouter is
         _pairFee[key] = fee;
     }
 
-    /// @notice Repoints the address used by the fallback route.
-    /// @dev Access-controlled via the AccessManager authority. Lets a new SwapRouter deployment be adopted without a
-    /// contract upgrade. Reverts `ZeroAddress` if zero — this address also
-    /// identifies the fallback venue (`_isVenue`, `_pickBestVenue`, `_coreSwap`),
-    /// so a zero value would corrupt venue identity. Note that `executedVenue`
-    /// values observed off-chain are only meaningful relative to the router's
-    /// configuration at the time of the swap.
-    /// @param newRouter Address of thew new router.
-    function setFallbackSwapRouter(address newRouter) external restricted {
-        require(newRouter != address(0), ZeroAddress());
-        emit FallbackSwapRouterUpdated(fallbackSwapRouter, newRouter);
-        fallbackSwapRouter = newRouter;
+    //----------------------//
+    // Whitelist Management //
+    //----------------------//
+
+    /// @notice Adds a propAMM venue to the whitelist, allowing the router to route
+    /// (and quote) through it — including as an auto-selection candidate in
+    /// `swapV1` / `quoteV1`, which iterate the whitelist.
+    /// @dev Access-controlled via the AccessManager authority. Reverts `ZeroAddress` if `venue` is zero, or
+    /// `VenueAlreadyWhitelisted` if it is already listed. Other than the three
+    /// built-in propAMMs (which use their bespoke interfaces), a venue is expected
+    /// to implement the common `IPropAMM` interface. Listing an address that does
+    /// not (an EOA, the wrong contract, a not-yet-deployed adapter) is not a
+    /// foot-gun: its `quote`/`swap` calls revert, so it is skipped by selection
+    /// and, on an explicit swap, the reverting `_dispatchVenue` rolls back and the
+    /// Uniswap fallback engages — no funds are stranded.
+    /// @param venue The venue address to whitelist.
+    function addVenue(address venue) external restricted {
+        _addVenue(venue);
     }
 
-    /// @notice Repoints the fallback quoter used to price the fallback route.
-    /// @dev Access-controlled via the AccessManager authority. Reverts `ZeroAddress` if zero.
-    /// @param newQuoter Address of the new fallback quoter.
-    function setFallbackQuoter(address newQuoter) external restricted {
-        require(newQuoter != address(0), ZeroAddress());
-        emit FallbackQuoterUpdated(fallbackQuoter, newQuoter);
-        fallbackQuoter = newQuoter;
+    /// @dev Shared whitelist-insertion core for the public `addVenue` and the
+    /// seeding paths (`_seedDefaultVenues`). Adds `venue` if absent and emits
+    /// `VenueWhitelisted` only when the set actually changed; idempotent, so the
+    /// seeding paths never revert on a venue that is already listed. Callers that
+    /// must reject a redundant add (the public `addVenue`) check the return value.
+    function _addVenue(address venue) private {
+        require(venue != address(0), ZeroAddress());
+        bool added = _whitelistedVenues.add(venue);
+
+        if (added) {
+            emit VenueWhitelisted(venue);
+        } else {
+            revert VenueAlreadyWhitelisted(venue);
+        }
+    }
+
+    /// @notice Removes a propAMM venue from the whitelist, after which the router
+    /// will neither quote nor route through it on any path.
+    /// @dev Access-controlled via the AccessManager authority. Reverts `VenueNotWhitelisted` if `venue` is not listed.
+    /// Does not affect the Uniswap fallback, which remains the always-available
+    /// safety net.
+    /// @param venue The venue address to de-list.
+    function removeVenue(address venue) external restricted {
+        require(_whitelistedVenues.remove(venue), VenueNotWhitelisted(venue));
+        emit VenueRemoved(venue);
+    }
+
+    /// @notice Returns whether `venue` is a venue a caller may name explicitly in
+    /// `quoteVenueV1` / `swapViaVenueV1`: a whitelisted propAMM, or the Uniswap
+    /// fallback (which is always accepted, independent of the whitelist).
+    function _isVenue(address venue) private view returns (bool) {
+        if (venue == address(0)) return false;
+        return isWhitelistedVenue(venue) || venue == fallbackSwapRouter;
     }
 
     /// @notice Returns whether `venue` is a whitelisted propAMM.
@@ -873,7 +908,7 @@ contract PropAMMRouter is
     /// (`fallbackSwapRouter`) is usable as a venue without being whitelisted, so
     /// this returns false for it — use it to inspect the propAMM set specifically.
     /// @param venue The address to check.
-    function isWhitelistedVenue(address venue) external view returns (bool) {
+    function isWhitelistedVenue(address venue) public view returns (bool) {
         return _whitelistedVenues.contains(venue);
     }
 
@@ -902,50 +937,9 @@ contract PropAMMRouter is
         return _whitelistedVenues.at(index);
     }
 
-    /// @notice Adds a propAMM venue to the whitelist, allowing the router to route
-    /// (and quote) through it — including as an auto-selection candidate in
-    /// `swapV1` / `quoteV1`, which iterate the whitelist.
-    /// @dev Access-controlled via the AccessManager authority. Reverts `ZeroAddress` if `venue` is zero, or
-    /// `VenueAlreadyWhitelisted` if it is already listed. Other than the three
-    /// built-in propAMMs (which use their bespoke interfaces), a venue is expected
-    /// to implement the common `IPropAMM` interface. Listing an address that does
-    /// not (an EOA, the wrong contract, a not-yet-deployed adapter) is not a
-    /// foot-gun: its `quote`/`swap` calls revert, so it is skipped by selection
-    /// and, on an explicit swap, the reverting `_dispatchVenue` rolls back and the
-    /// Uniswap fallback engages — no funds are stranded.
-    /// @param venue The venue address to whitelist.
-    function addVenue(address venue) external restricted {
-        require(venue != address(0), ZeroAddress());
-        require(_addVenue(venue), VenueAlreadyWhitelisted(venue));
-    }
-
-    /// @notice Removes a propAMM venue from the whitelist, after which the router
-    /// will neither quote nor route through it on any path.
-    /// @dev Access-controlled via the AccessManager authority. Reverts `VenueNotWhitelisted` if `venue` is not listed.
-    /// Does not affect the Uniswap fallback, which remains the always-available
-    /// safety net.
-    /// @param venue The venue address to de-list.
-    function removeVenue(address venue) external restricted {
-        require(_whitelistedVenues.remove(venue), VenueNotWhitelisted(venue));
-        emit VenueRemoved(venue);
-    }
-
-    /// @notice Pauses swaps, blocking new swaps until `unpause` is called.
-    /// @dev Access-controlled via the AccessManager authority. Intended for an
-    /// instant (zero-delay) guardian role: pausing is fail-safe — it can only
-    /// restrict — so it must be able to fire immediately as a circuit breaker.
-    /// Quote functions remain callable while paused.
-    function pause() external restricted {
-        _pause();
-    }
-
-    /// @notice Unpauses swaps.
-    /// @dev Access-controlled via the AccessManager authority. Kept separate from
-    /// the guardian's instant pause: resuming is fail-open, so it is intended for
-    /// a deliberate role carrying its own (non-zero) execution delay.
-    function unpause() external restricted {
-        _unpause();
-    }
+    //---------------------//
+    // Contract Management //
+    //---------------------//
 
     /// @notice Rescues ERC-20 tokens or native ETH stranded on the router.
     /// @dev Access-controlled via the AccessManager authority. The router holds no balance between swaps, so any
@@ -965,4 +959,29 @@ contract PropAMMRouter is
         }
         emit TokensRescued(token, to, amount);
     }
+
+    /// @notice Pauses swaps, blocking new swaps until `unpause` is called.
+    /// @dev Access-controlled via the AccessManager authority. Intended for an
+    /// instant (zero-delay) guardian role: pausing is fail-safe — it can only
+    /// restrict — so it must be able to fire immediately as a circuit breaker.
+    /// Quote functions remain callable while paused.
+    function pause() external restricted {
+        _pause();
+    }
+
+    /// @notice Unpauses swaps.
+    /// @dev Access-controlled via the AccessManager authority. Kept separate from
+    /// the guardian's instant pause: resuming is fail-open, so it is intended for
+    /// a deliberate role carrying its own (non-zero) execution delay.
+    function unpause() external restricted {
+        _unpause();
+    }
+
+    /// @dev Gates UUPS upgrades through the `AccessManager`. The `restricted`
+    /// modifier keys off the *entering* selector, which for an upgrade is
+    /// `upgradeToAndCall(address,bytes)`; assign the upgrade role and its
+    /// execution delay to that selector on the manager. Using `restricted` on an
+    /// internal function is the documented UUPS+AccessManaged pattern precisely
+    /// because the gate resolves against that entrypoint selector.
+    function _authorizeUpgrade(address) internal override restricted {}
 }
