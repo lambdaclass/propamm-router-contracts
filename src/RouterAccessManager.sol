@@ -40,7 +40,7 @@ contract RouterAccessManager is AccessManager {
     uint32 public constant UPGRADE_DELAY = 7 days;
 
     /// @notice Execution delay on {RESUMER_ROLE}. Short but non-zero.
-    uint32 public constant RESUME_DELAY = 2 hours;
+    uint32 public constant RESUME_DELAY = 1 days;
 
     /// @notice Execution delay on {LISTING_ROLE}. Shorter than {UPGRADE_DELAY}:
     /// listing is operational and lower blast-radius — a bad venue just reverts
