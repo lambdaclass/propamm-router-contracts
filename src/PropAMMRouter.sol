@@ -227,7 +227,7 @@ contract PropAMMRouter is
     function _seedDefaultVenues() private {
         _addVenue(FERMI_ROUTER);
         _addVenue(BEBOP_ROUTER);
-        _addVenue(0x71e790dd841c8a9061487cb3e78c288e75ce0b3d) // Kipseli
+        _addVenue(0x71e790dd841c8A9061487cb3E78C288E75cE0B3d); // Kipseli
     }
 
     /// @dev Shared whitelist-insertion core for the public `addVenue` and the
