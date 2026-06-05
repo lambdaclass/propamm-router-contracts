@@ -86,7 +86,8 @@ contract PropAMMRouter is
     /// the fallback swap off-chain. Reverts `ZeroAddress` if zero.
     /// @param authority_ The `AccessManager` instance that governs every
     /// `restricted` administrative entrypoint: `_authorizeUpgrade` (UUPS
-    /// upgrades), the fallback setters, `pause`/`unpause`, and `rescueTokens`.
+    /// upgrades), the fallback and pair-fee setters, the venue whitelist
+    /// (`addVenue` / `removeVenue`), `pause`/`unpause`, and `rescueTokens`.
     /// Which role may call each selector, the per-role execution delays, and the
     /// instant guardian pause are all configured on the manager itself — not
     /// here — so the router stays policy-agnostic. Reverts `ZeroAddress` if zero;
@@ -222,9 +223,10 @@ contract PropAMMRouter is
 
     /// @inheritdoc IPropAMMRouter
     /// @dev Requotes ONLY the caller-supplied `venues` on-chain via
-    /// `_pickBestVenueFrom`, and if any venue returns a quote that is at least
-    /// `amountOutMin`, then attempts to swap via that venue. Otherwise, it defaults
-    /// to swapping via Uniswap V3
+    /// `_pickBestVenueFrom` and attempts to swap via the best-quoting one;
+    /// quotes are advisory, so `amountOutMin` is enforced at execution by
+    /// `_coreSwap`. When no venue can be priced (or the attempted venue fails
+    /// to fill), `_coreSwap` falls back to swapping via Uniswap V3.
     function swapViaSelectedVenuesV1(
         address[] calldata venues,
         address tokenIn,
@@ -268,8 +270,8 @@ contract PropAMMRouter is
 
     /// @notice Pulls funds once and executes a swap, attempting `venue` first
     /// and recovering via the fallback if it fails.
-    /// @dev Shared core for `swapV1` and `swapViaVenueV1`; unguarded so the two
-    /// public entrypoints can each apply `whenNotPaused`/`nonReentrant` without
+    /// @dev Shared core for all the public swap entrypoints; unguarded so each
+    /// of them can apply `whenNotPaused`/`nonReentrant` without
     /// re-entering the guard through one another. The `Swapped` event is emitted
     /// by the calling entrypoint (not here) so the fee entrypoints can log the
     /// net amount and real recipient.
@@ -495,16 +497,16 @@ contract PropAMMRouter is
 
     /// @inheritdoc IPropAMMRouter
     /// @dev Gates on `_isVenue` (a whitelisted propAMM or the fallback),
-    /// reverting `UnknownVenue` otherwise. Asking for the fallback prices the
-    /// Uniswap V3 route directly. Asking for a propAMM prices it through
-    /// `_dispatchQuoteVenue`; if that venue cannot be priced (its quoter reverts,
-    /// or it does not implement the expected interface), the call does NOT
-    /// surface the revert — it gracefully falls back to the public venue,
-    /// returning the Uniswap quote and `fallbackSwapRouter` as `quotedVenue`. It
-    /// only reverts when the public venue itself cannot be priced either. The
-    /// selection helpers (`_pickBestVenue`, `_pickBestVenueFrom`) deliberately
-    /// bypass this graceful fallback by calling `_dispatchQuoteVenue` directly, so
-    /// a failing venue is skipped rather than silently re-quoted as the fallback.
+    /// reverting `UnknownVenue` otherwise. Prices `venue` through
+    /// `_dispatchQuoteVenue` (which resolves the fallback address to the Uniswap
+    /// V3 route); if the venue cannot be priced (its quoter reverts, or it does
+    /// not implement the expected interface), the call does NOT surface the
+    /// revert — it gracefully falls back to the public venue, returning the
+    /// Uniswap quote and `fallbackSwapRouter` as `quotedVenue`. It only reverts
+    /// when the public venue itself cannot be priced either. The selection
+    /// helpers (`_pickBestVenue`, `_pickBestVenueFrom`) deliberately bypass this
+    /// graceful fallback by calling `_dispatchQuoteVenue` directly, so a failing
+    /// venue is skipped rather than silently re-quoted as the fallback.
     function quoteVenueV1(address venue, address tokenIn, address tokenOut, uint256 amount)
         public
         returns (uint256 amountOut, address quotedVenue)
@@ -518,8 +520,8 @@ contract PropAMMRouter is
             tokenOut = WETH;
         }
 
-        // Asking for a propAMM: quote it, and if it cannot be priced gracefully
-        // fall back to the public venue, reporting `fallbackSwapRouter`.
+        // Quote the venue (the fallback included), and if it cannot be priced
+        // gracefully fall back to the public venue, reporting `fallbackSwapRouter`.
         try this._dispatchQuoteVenue(venue, tokenIn, tokenOut, amount) returns (uint256 out) {
             return (out, venue);
         } catch {
@@ -563,9 +565,9 @@ contract PropAMMRouter is
     /// it cannot be priced.
     /// @dev Self-only. Declared `external` (despite the leading underscore) so
     /// the selection helpers and `quoteVenueV1` can reach it through `this.` and
-    /// wrap it in a `try/catch` — internal calls cannot be caught. The three
-    /// built-in propAMMs are priced through their bespoke quoters; every other
-    /// whitelisted venue through the common `IPropAMM.quote`. Reverts
+    /// wrap it in a `try/catch` — internal calls cannot be caught. The two
+    /// built-in propAMMs (Fermi, Bebop) are priced through their bespoke
+    /// quoters; every other whitelisted venue through the common `IPropAMM.quote`. Reverts
     /// `UnknownVenue` for a non-whitelisted, non-fallback `venue`, and bubbles up
     /// any revert from the underlying quoter so callers can skip it. Unlike
     /// `quoteVenueV1`, it does NOT gracefully fall back to the public venue.
@@ -601,8 +603,9 @@ contract PropAMMRouter is
 
     /// @notice Quotes the Uniswap V3 fallback for the pair at its resolved fee
     /// tier (the per-pair override if set, otherwise the global `fallbackFee`).
-    /// @dev External so `_pickBestVenue` and `quoteV1` can wrap it in a
-    /// `try/catch` (an internal library call can't be caught).
+    /// @dev Public so `_pickBestVenue` and `quoteSelectedVenuesV1` can wrap it
+    /// in a `try/catch` through an external self-call (an internal library call
+    /// can't be caught).
     /// @param tokenIn The address of the token being sold.
     /// @param tokenOut The address of the token being bought.
     /// @param amount The exact amount of `tokenIn` to quote against.
@@ -614,7 +617,8 @@ contract PropAMMRouter is
     /// @notice Finds the venue offering the best `tokenOut` for `amount` of
     /// `tokenIn` across the whitelisted propAMMs and the fallback.
     /// @dev Iterates the live venue whitelist (`_whitelistedVenues`), so venues
-    /// added or removed by the owner are reflected without a contract upgrade.
+    /// added or removed via `addVenue` / `removeVenue` are reflected without a
+    /// contract upgrade.
     /// Each venue is queried in its own `try/catch` so a reverting venue —
     /// including one listed ahead of its interface — is simply skipped. Returns
     /// `(0, fallbackSwapRouter)` when nothing can be priced — callers that need a
@@ -798,8 +802,9 @@ contract PropAMMRouter is
     /// (and quote) through it — including as an auto-selection candidate in
     /// `swapV1` / `quoteV1`, which iterate the whitelist.
     /// @dev Access-controlled via the AccessManager authority. Reverts `ZeroAddress` if `venue` is zero, or
-    /// `VenueAlreadyWhitelisted` if it is already listed. Other than the three
-    /// built-in propAMMs (which use their bespoke interfaces), a venue is expected
+    /// `VenueAlreadyWhitelisted` if it is already listed. Other than the two
+    /// built-in propAMMs (Fermi and Bebop, which use their bespoke interfaces),
+    /// a venue is expected
     /// to implement the common `IPropAMM` interface. Listing an address that does
     /// not (an EOA, the wrong contract, a not-yet-deployed adapter) is not a
     /// foot-gun: its `quote`/`swap` calls revert, so it is skipped by selection
@@ -811,10 +816,9 @@ contract PropAMMRouter is
     }
 
     /// @dev Shared whitelist-insertion core for the public `addVenue` and the
-    /// seeding paths (`_seedDefaultVenues`). Adds `venue` if absent and emits
-    /// `VenueWhitelisted` only when the set actually changed; idempotent, so the
-    /// seeding paths never revert on a venue that is already listed. Callers that
-    /// must reject a redundant add (the public `addVenue`) check the return value.
+    /// venue seeding in `initialize`. Reverts `ZeroAddress` if `venue` is zero
+    /// and `VenueAlreadyWhitelisted` if it is already listed; emits
+    /// `VenueWhitelisted` on success.
     function _addVenue(address venue) private {
         require(venue != address(0), ZeroAddress());
         bool added = _whitelistedVenues.add(venue);
