@@ -9,7 +9,9 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import {AccessManagedUpgradeable} from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
+import {
+    AccessManagedUpgradeable
+} from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {IPropAMMRouter} from "./interfaces/IPropAMMRouter.sol";
 import {IPropAMM} from "./interfaces/IPropAMM.sol";
@@ -35,7 +37,7 @@ contract PropAMMRouter is
     using SafeCast for uint256;
     using EnumerableSet for EnumerableSet.AddressSet;
 
-    /// @notice Fallback venue address. 
+    /// @notice Fallback venue address.
     /// Settable (access-controlled) via `setFallbackSwapRouter`.
     address public fallbackSwapRouter;
     /// @notice Fallback venue address used to price the fallback route.
@@ -71,8 +73,7 @@ contract PropAMMRouter is
     address private constant USDT = 0xdAC17F958D2ee523a2206206994597C13D831ec7;
     address private constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
     /// @notice Sentinel passed as `tokenIn` or `tokenOut` to signal native ETH.
-    address public constant ETH_SENTINEL =
-        0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+    address public constant ETH_SENTINEL = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
     /// @notice Hard cap on a frontend fee, in basis points (1.00%).
     uint16 public constant MAX_FEE_BPS = 100;
@@ -259,8 +260,7 @@ contract PropAMMRouter is
         require(block.timestamp <= deadline, Expired());
         (uint256 bestQuote, address venue) = _pickBestVenue(tokenIn, tokenOut, amountIn);
         require(bestQuote >= amountOutMin, QuoteBelowMinimum(amountOutMin, bestQuote));
-        (amountOut, executedVenue) =
-            _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
+        (amountOut, executedVenue) = _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
 
@@ -290,8 +290,7 @@ contract PropAMMRouter is
             venue = fallbackSwapRouter;
         }
         uint256 delivered;
-        (delivered, executedVenue) =
-            _coreSwap(venue, tokenIn, tokenOut, amountIn, grossMin, address(this), deadline);
+        (delivered, executedVenue) = _coreSwap(venue, tokenIn, tokenOut, amountIn, grossMin, address(this), deadline);
 
         amountOut = _skimAndDisburse(tokenOut, delivered, fee, recipient);
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
@@ -310,8 +309,7 @@ contract PropAMMRouter is
         uint256 deadline
     ) public payable whenNotPaused nonReentrant returns (uint256 amountOut, address executedVenue) {
         require(_isVenue(venue), UnknownVenue());
-        (amountOut, executedVenue) =
-            _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
+        (amountOut, executedVenue) = _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
 
@@ -364,8 +362,7 @@ contract PropAMMRouter is
         if (venue == address(0) || bestQuote < amountOutMin) {
             venue = fallbackSwapRouter;
         }
-        (amountOut, executedVenue) =
-            _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
+        (amountOut, executedVenue) = _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
 
@@ -395,8 +392,7 @@ contract PropAMMRouter is
             venue = fallbackSwapRouter;
         }
         uint256 delivered;
-        (delivered, executedVenue) =
-            _coreSwap(venue, tokenIn, tokenOut, amountIn, grossMin, address(this), deadline);
+        (delivered, executedVenue) = _coreSwap(venue, tokenIn, tokenOut, amountIn, grossMin, address(this), deadline);
 
         amountOut = _skimAndDisburse(tokenOut, delivered, fee, recipient);
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
@@ -432,22 +428,12 @@ contract PropAMMRouter is
 
         address tokenIn_ = tokenIn;
         if (tokenIn == ETH_SENTINEL) {
-            require(
-                msg.value == amountIn,
-                InvalidValue(amountIn, msg.value)
-            );
+            require(msg.value == amountIn, InvalidValue(amountIn, msg.value));
             IWETH(WETH).deposit{value: msg.value}();
             tokenIn_ = WETH;
         } else {
-            require(
-                msg.value == 0,
-                InvalidValue(0, msg.value)
-            );
-            IERC20(tokenIn).safeTransferFrom(
-                msg.sender,
-                address(this),
-                amountIn
-            );
+            require(msg.value == 0, InvalidValue(0, msg.value));
+            IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
         }
 
         address tokenOut_ = tokenOut;
@@ -470,7 +456,7 @@ contract PropAMMRouter is
                 if (tokenOut == ETH_SENTINEL) {
                     IWETH(WETH).withdraw(amountOut_);
                     if (recipient != address(this)) {
-                        (bool ok, ) = recipient.call{value: amountOut_}("");
+                        (bool ok,) = recipient.call{value: amountOut_}("");
                         require(ok, ETHTransferFailed());
                     }
                 }
@@ -488,7 +474,7 @@ contract PropAMMRouter is
         if (tokenOut == ETH_SENTINEL) {
             IWETH(WETH).withdraw(amountOut);
             if (recipient != address(this)) {
-                (bool ok, ) = recipient.call{value: amountOut}("");
+                (bool ok,) = recipient.call{value: amountOut}("");
                 require(ok, ETHTransferFailed());
             }
         }
@@ -556,17 +542,15 @@ contract PropAMMRouter is
     /// @param fee The fee parameters.
     /// @param recipient The end recipient of the net output.
     /// @return net The amount forwarded to `recipient`.
-    function _skimAndDisburse(
-        address tokenOut,
-        uint256 delivered,
-        FrontendFee calldata fee,
-        address recipient
-    ) private returns (uint256 net) {
+    function _skimAndDisburse(address tokenOut, uint256 delivered, FrontendFee calldata fee, address recipient)
+        private
+        returns (uint256 net)
+    {
         uint256 feeAmt = _feeAmount(delivered, fee.bps);
         net = delivered - feeAmt;
         if (feeAmt > 0) {
             if (tokenOut == ETH_SENTINEL) {
-                (bool ok, ) = fee.recipient.call{value: feeAmt}("");
+                (bool ok,) = fee.recipient.call{value: feeAmt}("");
                 require(ok, ETHTransferFailed());
             } else {
                 IERC20(tokenOut).safeTransfer(fee.recipient, feeAmt);
@@ -575,7 +559,7 @@ contract PropAMMRouter is
         }
         if (net > 0) {
             if (tokenOut == ETH_SENTINEL) {
-                (bool ok, ) = recipient.call{value: net}("");
+                (bool ok,) = recipient.call{value: net}("");
                 require(ok, ETHTransferFailed());
             } else {
                 IERC20(tokenOut).safeTransfer(recipient, net);
@@ -1131,7 +1115,7 @@ contract PropAMMRouter is
     function rescueTokens(address token, address to, uint256 amount) external restricted {
         require(to != address(0), ZeroAddress());
         if (token == ETH_SENTINEL) {
-            (bool ok, ) = payable(to).call{value: amount}("");
+            (bool ok,) = payable(to).call{value: amount}("");
             require(ok, ETHTransferFailed());
         } else {
             IERC20(token).safeTransfer(to, amount);

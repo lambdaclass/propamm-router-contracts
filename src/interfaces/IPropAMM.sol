@@ -42,10 +42,7 @@ interface IPropAMM {
     /// @param tokenIn The address of the token being sold.
     /// @param tokenOut The address of the token being bought.
     /// @return active True if a swap for the pair would succeed right now.
-    function isActive(
-        address tokenIn,
-        address tokenOut
-    ) external view returns (bool active);
+    function isActive(address tokenIn, address tokenOut) external view returns (bool active);
 
     /// @notice Returns all token pairs the propAMM supports, both active and inactive.
     /// @dev Each pair MUST appear exactly once, with `token0 < token1`.
@@ -62,11 +59,7 @@ interface IPropAMM {
     /// @param tokenOut The address of the token being bought.
     /// @param amountIn The exact amount of `tokenIn` to quote against.
     /// @return amountOut The amount of `tokenOut` the swap would deliver.
-    function quote(
-        address tokenIn,
-        address tokenOut,
-        uint256 amountIn
-    ) external returns (uint256 amountOut);
+    function quote(address tokenIn, address tokenOut, uint256 amountIn) external returns (uint256 amountOut);
 
     /// @notice Swaps an exact `amountIn` of `tokenIn` for as much `tokenOut` as
     /// possible, delivering it to `recipient`.

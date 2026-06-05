@@ -13,9 +13,8 @@ interface IFermiSwapper {
         address recipient
     ) external returns (uint256, uint256);
 
-    function quoteAmounts(
-        address tokenIn,
-        address tokenOut,
-        int256 amountSpecified
-    ) external view returns (uint256 amountIn, uint256 amountOut);
+    function quoteAmounts(address tokenIn, address tokenOut, int256 amountSpecified)
+        external
+        view
+        returns (uint256 amountIn, uint256 amountOut);
 }
