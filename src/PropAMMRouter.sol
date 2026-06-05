@@ -153,11 +153,9 @@ contract PropAMMRouter is
         address recipient,
         uint256 deadline
     ) external payable whenNotPaused nonReentrant returns (uint256 amountOut, address executedVenue) {
-        // Fail fast before the on-chain best-venue quoting; `_coreSwap` re-checks
-        // for the shared path also reached by `swapViaVenueV1`.
-        require(block.timestamp <= deadline, Expired());
         (uint256 bestQuote, address venue) = _pickBestVenue(tokenIn, tokenOut, amountIn);
         require(bestQuote >= amountOutMin, QuoteBelowMinimum(amountOutMin, bestQuote));
+
         (amountOut, executedVenue) = _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
@@ -177,16 +175,10 @@ contract PropAMMRouter is
         FrontendFee calldata fee
     ) external payable whenNotPaused nonReentrant returns (uint256 amountOut, address executedVenue) {
         FrontendFees._validateFee(fee);
-        require(block.timestamp <= deadline, Expired());
 
         uint256 grossMin = FrontendFees._grossUp(amountOutMin, fee.bps);
         (uint256 bestQuote, address venue) = _pickBestVenue(tokenIn, tokenOut, amountIn);
 
-        // If no quotes are available, or the best quote is below the minimum,
-        // default to the Uniswap fallback venue instead of reverting (#9).
-        if (venue == address(0) || bestQuote < amountOutMin) {
-            venue = fallbackSwapRouter;
-        }
         uint256 delivered;
         (delivered, executedVenue) = _coreSwap(venue, tokenIn, tokenOut, amountIn, grossMin, address(this), deadline);
 
@@ -207,6 +199,7 @@ contract PropAMMRouter is
         uint256 deadline
     ) public payable whenNotPaused nonReentrant returns (uint256 amountOut, address executedVenue) {
         require(_isVenue(venue), UnknownVenue());
+
         (amountOut, executedVenue) = _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
@@ -251,15 +244,8 @@ contract PropAMMRouter is
         address recipient,
         uint256 deadline
     ) public payable whenNotPaused nonReentrant returns (uint256 amountOut, address executedVenue) {
-        // Fail fast before the on-chain requote; `_coreSwap` re-checks deadline.
-        require(block.timestamp <= deadline, Expired());
-
         (uint256 bestQuote, address venue) = _pickBestVenueFrom(venues, tokenIn, tokenOut, amountIn);
-        // If no quotes are available, or the best quote is below the minimum,
-        // default to the Uniswap fallback venue instead of reverting (#9).
-        if (venue == address(0) || bestQuote < amountOutMin) {
-            venue = fallbackSwapRouter;
-        }
+
         (amountOut, executedVenue) = _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
@@ -279,16 +265,10 @@ contract PropAMMRouter is
         FrontendFee calldata fee
     ) external payable whenNotPaused nonReentrant returns (uint256 amountOut, address executedVenue) {
         FrontendFees._validateFee(fee);
-        require(block.timestamp <= deadline, Expired());
 
         uint256 grossMin = FrontendFees._grossUp(amountOutMin, fee.bps);
         (uint256 bestQuote, address venue) = _pickBestVenueFrom(venues, tokenIn, tokenOut, amountIn);
 
-        // If no quotes are available, or the best quote is below the minimum,
-        // default to the Uniswap fallback venue instead of reverting (#9).
-        if (venue == address(0) || bestQuote < amountOutMin) {
-            venue = fallbackSwapRouter;
-        }
         uint256 delivered;
         (delivered, executedVenue) = _coreSwap(venue, tokenIn, tokenOut, amountIn, grossMin, address(this), deadline);
 
@@ -326,6 +306,7 @@ contract PropAMMRouter is
 
         address tokenIn_ = tokenIn;
         if (tokenIn == ETH_SENTINEL) {
+            // If tokenIn is ETH, we wrap it and use WETH as the tokenIn for swap
             require(msg.value == amountIn, InvalidValue(amountIn, msg.value));
             IWETH(WETH).deposit{value: msg.value}();
             tokenIn_ = WETH;
@@ -352,11 +333,7 @@ contract PropAMMRouter is
                 uint256 amountOut_
             ) {
                 if (tokenOut == ETH_SENTINEL) {
-                    IWETH(WETH).withdraw(amountOut_);
-                    if (recipient != address(this)) {
-                        (bool ok,) = recipient.call{value: amountOut_}("");
-                        require(ok, ETHTransferFailed());
-                    }
+                    _sendWrappedETH(recipient, amountOut_);
                 }
 
                 return (amountOut_, venue);
@@ -365,16 +342,20 @@ contract PropAMMRouter is
             }
         }
 
-        swapViaUniswapV3(tokenIn_, tokenOut_, amountIn, amountOutMin, recipient_);
+        UniV3Router.swapExactIn(
+            tokenIn_,
+            tokenOut_,
+            resolvedFee(tokenIn_, tokenOut_),
+            amountIn,
+            amountOutMin,
+            recipient_,
+            fallbackSwapRouter
+        );
         amountOut = IERC20(tokenOut_).balanceOf(recipient_) - prevTokenOutBalance;
         require(amountOut >= amountOutMin, InsufficientOutput(amountOutMin, amountOut));
 
         if (tokenOut == ETH_SENTINEL) {
-            IWETH(WETH).withdraw(amountOut);
-            if (recipient != address(this)) {
-                (bool ok,) = recipient.call{value: amountOut}("");
-                require(ok, ETHTransferFailed());
-            }
+            _sendWrappedETH(recipient, amountOut);
         }
 
         return (amountOut, fallbackSwapRouter);
@@ -411,7 +392,7 @@ contract PropAMMRouter is
         // `_coreSwap` only reaches here for a non-fallback venue; it must be a
         // whitelisted propAMM. A de-listed venue reverts so the catch arm in
         // `_coreSwap` engages the Uniswap fallback.
-        require(_whitelistedVenues.contains(venue), UnknownVenue());
+        require(isWhitelistedVenue(venue), UnkownVenue());
 
         if (venue == FERMI_ROUTER) {
             IERC20(tokenIn).forceApprove(FERMI_ROUTER, amountIn);
@@ -422,6 +403,7 @@ contract PropAMMRouter is
             IERC20(tokenIn).forceApprove(FERMI_ROUTER, 0);
         } else if (venue == BEBOP_ROUTER) {
             uint256 balanceTokenOutBefore = IERC20(tokenOut).balanceOf(address(this));
+
             IERC20(tokenIn).forceApprove(BEBOP_ROUTER, amountIn);
             IBebopRouter(BEBOP_ROUTER).swap(tokenIn, tokenOut, amountIn, amountOutMin, deadline);
 
@@ -449,37 +431,21 @@ contract PropAMMRouter is
         }
 
         amountOut = IERC20(tokenOut).balanceOf(recipient) - prevTokenOutBalance;
-        if (amountOut < amountOutMin) {
-            revert InsufficientOutput(amountOutMin, amountOut);
-        }
+        require(amountOut >= amountOutMin, InsufficientOutput(amountOutMin, amountOut));
 
         return amountOut;
     }
 
-    /// @notice Executes the fallback swap on Uniswap V3 with funds already held
-    /// by this contract.
-    /// @dev Assumes the router already holds `amountIn` of `tokenIn` — pulled
-    /// once by `_coreSwap` before the try/catch. Uses the per-pair resolved fee
-    /// tier (`resolvedFee`: the pair override if set, otherwise the global
-    /// `fallbackFee`). `UniV3Router.swapExactIn` only approves `fallbackSwapRouter`
-    /// and executes the swap; it does not pull from `msg.sender`.
-    /// @param tokenIn The address of the token being sold.
-    /// @param tokenOut The address of the token being bought.
-    /// @param amountIn The exact amount of `tokenIn` to sell.
-    /// @param amountOutMin The minimum acceptable amount of `tokenOut`.
-    /// @param recipient The address that will receive `tokenOut`.
-    /// @return amountOut The amount of `tokenOut` received by `recipient`.
-    function swapViaUniswapV3(
-        address tokenIn,
-        address tokenOut,
-        uint256 amountIn,
-        uint256 amountOutMin,
-        address recipient
-    ) private returns (uint256 amountOut) {
-        amountOut = UniV3Router.swapExactIn(
-            tokenIn, tokenOut, resolvedFee(tokenIn, tokenOut), amountIn, amountOutMin, recipient, fallbackSwapRouter
-        );
-        return amountOut;
+    /// @notice Unwrap `amount` WETH into ETH and send it to `to`.
+    /// @dev Reverts `ETHTransferFailed` if the transfer failed.
+    /// @param to Account that will receive the ETH.
+    /// @param amount Amount of WETH to unwrap and send.
+    function _sendWrappedETH(address to, uint256 amount) private {
+        IWETH(WETH).withdraw(amount);
+        if (to != address(this)) {
+            (bool ok,) = to.call{value: amount}("");
+            require(ok, ETHTransferFailed());
+        }
     }
 
     /// @notice Logs a completed swap.
@@ -509,6 +475,8 @@ contract PropAMMRouter is
         emit Swapped(msg.sender, tokenIn, tokenOut, amountIn, amountOut, recipient, marketMaker);
     }
 
+    // We don't accept plain transfers from accounts. They should use `swap*` instead.
+    // receive() is needed though, to receive the withdrawal ETH from WETH.
     receive() external payable {
         require(msg.sender == WETH, UnexpectedETHSender());
     }
