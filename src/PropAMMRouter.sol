@@ -392,7 +392,7 @@ contract PropAMMRouter is
         // `_coreSwap` only reaches here for a non-fallback venue; it must be a
         // whitelisted propAMM. A de-listed venue reverts so the catch arm in
         // `_coreSwap` engages the Uniswap fallback.
-        require(isWhitelistedVenue(venue), UnkownVenue());
+        require(isWhitelistedVenue(venue), UnknownVenue());
 
         if (venue == FERMI_ROUTER) {
             IERC20(tokenIn).forceApprove(FERMI_ROUTER, amountIn);
@@ -528,58 +528,12 @@ contract PropAMMRouter is
             tokenOut = WETH;
         }
 
-        // Asking for the fallback directly: quote it and report it. It is the
-        // fallback, so there is no further fallback.
-        if (venue == fallbackSwapRouter) {
-            return (_quoteFallback(tokenIn, tokenOut, amount), fallbackSwapRouter);
-        }
-
         // Asking for a propAMM: quote it, and if it cannot be priced gracefully
         // fall back to the public venue, reporting `fallbackSwapRouter`.
         try this._dispatchQuoteVenue(venue, tokenIn, tokenOut, amount) returns (uint256 out) {
             return (out, venue);
         } catch {
-            return (_quoteFallback(tokenIn, tokenOut, amount), fallbackSwapRouter);
-        }
-    }
-
-    /// @notice Strict single-venue quote: prices exactly `venue` and reverts if
-    /// it cannot be priced.
-    /// @dev Self-only. Declared `external` (despite the leading underscore) so
-    /// the selection helpers and `quoteVenueV1` can reach it through `this.` and
-    /// wrap it in a `try/catch` — internal calls cannot be caught. The three
-    /// built-in propAMMs are priced through their bespoke quoters; every other
-    /// whitelisted venue through the common `IPropAMM.quote`. Reverts
-    /// `UnknownVenue` for a non-whitelisted, non-fallback `venue`, and bubbles up
-    /// any revert from the underlying quoter so callers can skip it. Unlike
-    /// `quoteVenueV1`, it does NOT gracefully fall back to the public venue.
-    /// @param venue The venue to price — a whitelisted propAMM or the fallback.
-    /// @param tokenIn The token being sold.
-    /// @param tokenOut The token being bought.
-    /// @param amount The amount of `tokenIn` to quote.
-    /// @return amountOut The amount of `tokenOut` quoted by `venue`.
-    function _dispatchQuoteVenue(address venue, address tokenIn, address tokenOut, uint256 amount)
-        external
-        returns (uint256 amountOut)
-    {
-        require(msg.sender == address(this), OnlySelf());
-
-        // The fallback (Uniswap V3) is the always-available safety net and is not
-        // part of the propAMM whitelist, so it is checked before the gate.
-        if (venue == fallbackSwapRouter) {
-            return _quoteFallback(tokenIn, tokenOut, amount);
-        }
-
-        require(_whitelistedVenues.contains(venue), UnknownVenue());
-
-        if (venue == FERMI_ROUTER) {
-            int256 amountInt256 = amount.toInt256();
-            (, amountOut) = IFermiSwapper(FERMI_ROUTER).quoteAmounts(tokenIn, tokenOut, amountInt256);
-        } else if (venue == BEBOP_ROUTER) {
-            amountOut = IBebopRouter(BEBOP_ROUTER).quote(tokenIn, tokenOut, amount);
-        } else {
-            // Any other whitelisted venue speaks the common `IPropAMM` interface.
-            amountOut = IPropAMM(venue).quote(tokenIn, tokenOut, amount);
+            return (quoteUniswapV3(tokenIn, tokenOut, amount), fallbackSwapRouter);
         }
     }
 
@@ -615,6 +569,46 @@ contract PropAMMRouter is
         }
     }
 
+    /// @notice Strict single-venue quote: prices exactly `venue` and reverts if
+    /// it cannot be priced.
+    /// @dev Self-only. Declared `external` (despite the leading underscore) so
+    /// the selection helpers and `quoteVenueV1` can reach it through `this.` and
+    /// wrap it in a `try/catch` — internal calls cannot be caught. The three
+    /// built-in propAMMs are priced through their bespoke quoters; every other
+    /// whitelisted venue through the common `IPropAMM.quote`. Reverts
+    /// `UnknownVenue` for a non-whitelisted, non-fallback `venue`, and bubbles up
+    /// any revert from the underlying quoter so callers can skip it. Unlike
+    /// `quoteVenueV1`, it does NOT gracefully fall back to the public venue.
+    /// @param venue The venue to price — a whitelisted propAMM or the fallback.
+    /// @param tokenIn The token being sold.
+    /// @param tokenOut The token being bought.
+    /// @param amount The amount of `tokenIn` to quote.
+    /// @return amountOut The amount of `tokenOut` quoted by `venue`.
+    function _dispatchQuoteVenue(address venue, address tokenIn, address tokenOut, uint256 amount)
+        external
+        returns (uint256 amountOut)
+    {
+        require(msg.sender == address(this), OnlySelf());
+
+        // The fallback (Uniswap V3) is the always-available safety net and is not
+        // part of the propAMM whitelist, so it is checked before the gate.
+        if (venue == fallbackSwapRouter) {
+            return quoteUniswapV3(tokenIn, tokenOut, amount);
+        }
+
+        require(_whitelistedVenues.contains(venue), UnknownVenue());
+
+        if (venue == FERMI_ROUTER) {
+            int256 amountInt256 = amount.toInt256();
+            (, amountOut) = IFermiSwapper(FERMI_ROUTER).quoteAmounts(tokenIn, tokenOut, amountInt256);
+        } else if (venue == BEBOP_ROUTER) {
+            amountOut = IBebopRouter(BEBOP_ROUTER).quote(tokenIn, tokenOut, amount);
+        } else {
+            // Any other whitelisted venue speaks the common `IPropAMM` interface.
+            amountOut = IPropAMM(venue).quote(tokenIn, tokenOut, amount);
+        }
+    }
+
     /// @notice Quotes the Uniswap V3 fallback for the pair at its resolved fee
     /// tier (the per-pair override if set, otherwise the global `fallbackFee`).
     /// @dev External so `_pickBestVenue` and `quoteV1` can wrap it in a
@@ -623,17 +617,7 @@ contract PropAMMRouter is
     /// @param tokenOut The address of the token being bought.
     /// @param amount The exact amount of `tokenIn` to quote against.
     /// @return amountOut The amount of `tokenOut` the Uniswap V3 swap would produce.
-    function quoteUniswapV3(address tokenIn, address tokenOut, uint256 amount) external returns (uint256 amountOut) {
-        return _quoteFallback(tokenIn, tokenOut, amount);
-    }
-
-    /// @notice Shared Uniswap V3 fallback quote at the pair's resolved fee tier.
-    /// @dev Used by `quoteUniswapV3`, `quoteVenueV1`, and `_dispatchQuoteVenue`.
-    /// @param tokenIn The address of the token being sold.
-    /// @param tokenOut The address of the token being bought.
-    /// @param amount The exact amount of `tokenIn` to quote against.
-    /// @return The amount of `tokenOut` the Uniswap V3 swap would produce.
-    function _quoteFallback(address tokenIn, address tokenOut, uint256 amount) private returns (uint256) {
+    function quoteUniswapV3(address tokenIn, address tokenOut, uint256 amount) public returns (uint256 amountOut) {
         return UniV3Router.quoteExactIn(tokenIn, tokenOut, resolvedFee(tokenIn, tokenOut), amount, fallbackQuoter);
     }
 
@@ -660,9 +644,9 @@ contract PropAMMRouter is
         // `venue` stays `fallbackSwapRouter` and `_coreSwap` routes to fallback.
         venue = fallbackSwapRouter;
 
-        uint256 venueCount = _whitelistedVenues.length();
+        uint256 venueCount = whitelistedVenueCount();
         for (uint256 i = 0; i < venueCount; i++) {
-            address candidate = _whitelistedVenues.at(i);
+            address candidate = whitelistedVenueAt(i);
             try this._dispatchQuoteVenue(candidate, tokenIn, tokenOut, amount) returns (uint256 amountOut) {
                 if (amountOut > bestQuote) {
                     bestQuote = amountOut;
@@ -867,7 +851,6 @@ contract PropAMMRouter is
     /// `quoteVenueV1` / `swapViaVenueV1`: a whitelisted propAMM, or the Uniswap
     /// fallback (which is always accepted, independent of the whitelist).
     function _isVenue(address venue) private view returns (bool) {
-        if (venue == address(0)) return false;
         return isWhitelistedVenue(venue) || venue == fallbackSwapRouter;
     }
 
@@ -893,7 +876,7 @@ contract PropAMMRouter is
     /// @notice Returns the number of whitelisted propAMM venues.
     /// @dev Pair with `whitelistedVenueAt` to enumerate on-chain without
     /// materializing the whole array.
-    function whitelistedVenueCount() external view returns (uint256) {
+    function whitelistedVenueCount() public view returns (uint256) {
         return _whitelistedVenues.length();
     }
 
@@ -901,7 +884,7 @@ contract PropAMMRouter is
     /// @dev Reverts if `index >= whitelistedVenueCount()`. Order is not stable
     /// across `removeVenue` calls (swap-and-pop), so treat indices as ephemeral.
     /// @param index Position in `[0, whitelistedVenueCount())`.
-    function whitelistedVenueAt(uint256 index) external view returns (address) {
+    function whitelistedVenueAt(uint256 index) public view returns (address) {
         return _whitelistedVenues.at(index);
     }
 
