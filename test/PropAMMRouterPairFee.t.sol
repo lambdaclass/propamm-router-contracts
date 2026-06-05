@@ -3,6 +3,8 @@ pragma solidity ^0.8.35;
 
 import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
+import {IAccessManaged} from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import {PropAMMRouter} from "../src/PropAMMRouter.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockSwapRouter02} from "./mocks/MockSwapRouter02.sol";
@@ -11,6 +13,7 @@ import {SetupRouterVariables} from "../scripts/setupRouterVariables.s.sol";
 
 contract PropAMMRouterPairFeeTest is Test {
     PropAMMRouter internal router;
+    AccessManager internal manager;
     MockSwapRouter02 internal mockRouter;
     MockQuoterV2 internal mockQuoter;
     MockERC20 internal tokenIn;
@@ -36,15 +39,20 @@ contract PropAMMRouterPairFeeTest is Test {
         tokenIn = new MockERC20("TokenIn", "TIN");
         tokenOut = new MockERC20("TokenOut", "TOUT");
 
+        // Plain AccessManager with `owner` as delay-0 admin: unmapped selectors
+        // default to ADMIN_ROLE, so `owner` can call every `restricted` function
+        // directly while anyone else gets AccessManagedUnauthorized.
+        manager = new AccessManager(owner);
+
         PropAMMRouter impl = new PropAMMRouter();
         bytes memory initData =
-            abi.encodeCall(PropAMMRouter.initialize, (address(mockRouter), address(mockQuoter), owner));
+            abi.encodeCall(PropAMMRouter.initialize, (address(mockRouter), address(mockQuoter), address(manager)));
         ERC1967Proxy proxy = new ERC1967Proxy(address(impl), initData);
         router = PropAMMRouter(payable(address(proxy)));
     }
 
     function test_setUp_initialized() public view {
-        assertEq(router.owner(), owner);
+        assertEq(router.authority(), address(manager));
         assertEq(router.fallbackFee(), 3000);
         assertEq(router.fallbackSwapRouter(), address(mockRouter));
         assertEq(router.fallbackQuoter(), address(mockQuoter));
@@ -119,9 +127,9 @@ contract PropAMMRouterPairFeeTest is Test {
         router.setPairFee(address(tokenIn), address(tokenOut), 100);
     }
 
-    function test_setPairFee_onlyOwner() public {
+    function test_setPairFee_onlyAuthorized() public {
         vm.prank(stranger);
-        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", stranger));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, stranger));
         router.setPairFee(address(tokenIn), address(tokenOut), 100);
     }
 
@@ -187,12 +195,12 @@ contract PropAMMRouterPairFeeTest is Test {
         router.setPairFees(a, b, f);
     }
 
-    function test_setPairFees_onlyOwner() public {
+    function test_setPairFees_onlyAuthorized() public {
         address[] memory a = new address[](0);
         address[] memory b = new address[](0);
         uint24[] memory f = new uint24[](0);
         vm.prank(stranger);
-        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", stranger));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, stranger));
         router.setPairFees(a, b, f);
     }
 

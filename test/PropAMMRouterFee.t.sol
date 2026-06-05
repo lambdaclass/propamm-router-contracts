@@ -3,6 +3,7 @@ pragma solidity ^0.8.35;
 
 import {Test, Vm} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IPropAMMRouter} from "../src/interfaces/IPropAMMRouter.sol";
 import {PropAMMRouter} from "../src/PropAMMRouter.sol";
@@ -15,6 +16,7 @@ import {MockBebop} from "./mocks/MockBebop.sol";
 
 contract PropAMMRouterFeeTest is Test {
     PropAMMRouter router;
+    AccessManager manager;
     MockV3SwapRouter swapRouter;
     MockQuoterV2 quoter;
     MockERC20 tokenIn;
@@ -25,8 +27,13 @@ contract PropAMMRouterFeeTest is Test {
     address feeRecipient = makeAddr("feeRecipient");
 
     function _deployRouter() internal returns (PropAMMRouter) {
+        // Plain AccessManager with `owner` as delay-0 admin: unmapped selectors
+        // default to ADMIN_ROLE, so `owner` can call every `restricted` function
+        // (e.g. pause) directly.
+        manager = new AccessManager(owner);
         PropAMMRouter impl = new PropAMMRouter();
-        bytes memory data = abi.encodeCall(PropAMMRouter.initialize, (address(swapRouter), address(quoter), owner));
+        bytes memory data =
+            abi.encodeCall(PropAMMRouter.initialize, (address(swapRouter), address(quoter), address(manager)));
         return PropAMMRouter(payable(address(new ERC1967Proxy(address(impl), data))));
     }
 

@@ -73,7 +73,7 @@ contract UpgradeConfigForkTest is Test {
         // Upgraded but not yet configured: fallbackFee is 0 and the Uniswap
         // fallback reverts (invalid tier 0) for any pair. The venue whitelist is
         // also empty — _seedDefaultVenues is initializer-gated and never re-ran.
-        assertEq(router.owner(), OWNER, "owner preserved across upgrade");
+        assertEq(router.authority(), OWNER, "owner preserved across upgrade");
         assertEq(router.fallbackFee(), 0, "fallbackFee 0 right after bare upgrade");
         assertEq(router.whitelistedVenueCount(), 0, "no venues right after bare upgrade");
         vm.expectRevert();

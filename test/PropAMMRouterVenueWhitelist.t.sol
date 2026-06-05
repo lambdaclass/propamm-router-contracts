@@ -3,6 +3,8 @@ pragma solidity ^0.8.35;
 
 import {Test, stdError} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
+import {IAccessManaged} from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import {PropAMMRouter} from "../src/PropAMMRouter.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockSwapRouter02} from "./mocks/MockSwapRouter02.sol";
@@ -12,6 +14,7 @@ import {BEBOP_ROUTER} from "../src/interfaces/IBebopRouter.sol";
 
 contract PropAMMRouterVenueWhitelistTest is Test {
     PropAMMRouter internal router;
+    AccessManager internal manager;
     MockSwapRouter02 internal mockRouter;
     MockQuoterV2 internal mockQuoter;
     MockERC20 internal tokenIn;
@@ -40,9 +43,14 @@ contract PropAMMRouterVenueWhitelistTest is Test {
         tokenIn = new MockERC20("TokenIn", "TIN");
         tokenOut = new MockERC20("TokenOut", "TOUT");
 
+        // Plain AccessManager with `owner` as delay-0 admin: unmapped selectors
+        // default to ADMIN_ROLE, so `owner` can call every `restricted` function
+        // directly while anyone else gets AccessManagedUnauthorized.
+        manager = new AccessManager(owner);
+
         PropAMMRouter impl = new PropAMMRouter();
         bytes memory initData =
-            abi.encodeCall(PropAMMRouter.initialize, (address(mockRouter), address(mockQuoter), owner));
+            abi.encodeCall(PropAMMRouter.initialize, (address(mockRouter), address(mockQuoter), address(manager)));
         ERC1967Proxy proxy = new ERC1967Proxy(address(impl), initData);
         router = PropAMMRouter(payable(address(proxy)));
     }
@@ -125,9 +133,9 @@ contract PropAMMRouterVenueWhitelistTest is Test {
         router.addVenue(genericVenue);
     }
 
-    function test_addVenue_onlyOwner() public {
+    function test_addVenue_onlyAuthorized() public {
         vm.prank(stranger);
-        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", stranger));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, stranger));
         router.addVenue(genericVenue);
     }
 
@@ -154,9 +162,9 @@ contract PropAMMRouterVenueWhitelistTest is Test {
         router.removeVenue(FERMI_ROUTER);
     }
 
-    function test_removeVenue_onlyOwner() public {
+    function test_removeVenue_onlyAuthorized() public {
         vm.prank(stranger);
-        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", stranger));
+        vm.expectRevert(abi.encodeWithSelector(IAccessManaged.AccessManagedUnauthorized.selector, stranger));
         router.removeVenue(FERMI_ROUTER);
     }
 
