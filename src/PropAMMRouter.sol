@@ -103,7 +103,10 @@ contract PropAMMRouter is
         fallbackFee = 3000;
 
         _seedDefaultPairFees();
-        _seedDefaultVenues();
+
+        _addVenue(FERMI_ROUTER);
+        _addVenue(BEBOP_ROUTER);
+        _addVenue(0x71e790dd841c8A9061487cb3E78C288E75cE0B3d); // Kipseli
 
         __AccessManaged_init(authority_);
         __Pausable_init();
@@ -119,18 +122,6 @@ contract PropAMMRouter is
         _setPairFee(USDT, USDC, 100); // stablecoin pair — deepest at 0.01%
         _setPairFee(USDT, WETH, 500); // ETH/stable — deepest at 0.05%
         _setPairFee(USDC, WETH, 500); // ETH/stable — deepest at 0.05%
-    }
-
-    /// @notice Seeds the whitelist with the propAMMs the router ships with so a
-    /// from-scratch deploy can route to them without a separate owner-run step.
-    /// @dev Routes through `_addVenue` (the same core the public `addVenue` uses),
-    /// so it is safe to run against an already-seeded proxy: an entry that is
-    /// already listed is left untouched and emits nothing, while a newly added
-    /// entry emits `VenueWhitelisted`.
-    function _seedDefaultVenues() private {
-        _addVenue(FERMI_ROUTER);
-        _addVenue(BEBOP_ROUTER);
-        _addVenue(0x71e790dd841c8A9061487cb3E78C288E75cE0B3d); // Kipseli
     }
 
     //------//
