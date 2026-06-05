@@ -43,14 +43,14 @@ library UniV3Router {
         amountOut = IV3SwapRouter(swapRouter)
             .exactInputSingle(
                 IV3SwapRouter.ExactInputSingleParams({
-                    tokenIn: tokenIn,
-                    tokenOut: tokenOut,
-                    fee: fee,
-                    recipient: recipient,
-                    amountIn: amountIn,
-                    amountOutMinimum: amountOutMinimum,
-                    sqrtPriceLimitX96: 0
-                })
+                tokenIn: tokenIn,
+                tokenOut: tokenOut,
+                fee: fee,
+                recipient: recipient,
+                amountIn: amountIn,
+                amountOutMinimum: amountOutMinimum,
+                sqrtPriceLimitX96: 0
+            })
             );
 
         // Prevent later transfers if token was partially pulled
@@ -87,14 +87,14 @@ library UniV3Router {
         amountIn = IV3SwapRouter(swapRouter)
             .exactOutputSingle(
                 IV3SwapRouter.ExactOutputSingleParams({
-                    tokenIn: tokenIn,
-                    tokenOut: tokenOut,
-                    fee: fee,
-                    recipient: recipient,
-                    amountOut: amountOut,
-                    amountInMaximum: amountInMaximum,
-                    sqrtPriceLimitX96: 0
-                })
+                tokenIn: tokenIn,
+                tokenOut: tokenOut,
+                fee: fee,
+                recipient: recipient,
+                amountOut: amountOut,
+                amountInMaximum: amountInMaximum,
+                sqrtPriceLimitX96: 0
+            })
             );
 
         IERC20(tokenIn).forceApprove(address(swapRouter), 0);
@@ -122,8 +122,8 @@ library UniV3Router {
         (amountOut,,,) = IQuoterV2(quoter)
             .quoteExactInputSingle(
                 IQuoterV2.QuoteExactInputSingleParams({
-                    tokenIn: tokenIn, tokenOut: tokenOut, amountIn: amountIn, fee: fee, sqrtPriceLimitX96: 0
-                })
+                tokenIn: tokenIn, tokenOut: tokenOut, amountIn: amountIn, fee: fee, sqrtPriceLimitX96: 0
+            })
             );
     }
 
@@ -145,8 +145,8 @@ library UniV3Router {
         (amountIn,,,) = IQuoterV2(quoter)
             .quoteExactOutputSingle(
                 IQuoterV2.QuoteExactOutputSingleParams({
-                    tokenIn: tokenIn, tokenOut: tokenOut, amount: amountOut, fee: fee, sqrtPriceLimitX96: 0
-                })
+                tokenIn: tokenIn, tokenOut: tokenOut, amount: amountOut, fee: fee, sqrtPriceLimitX96: 0
+            })
             );
     }
 }
