@@ -16,8 +16,6 @@ import {IPropAMM} from "./interfaces/IPropAMM.sol";
 import {IWETH} from "./interfaces/IWETH.sol";
 import {FERMI_ROUTER, IFermiSwapper} from "./interfaces/IFermiSwapper.sol";
 import {BEBOP_ROUTER, IBebopRouter} from "./interfaces/IBebopRouter.sol";
-import {KIPSELI_PAMM, IKipseliPAMM} from "./interfaces/IKipseliPAMM.sol";
-import {KIPSELI_QUOTER, IKipseliQuoter} from "./interfaces/IKipseliQuoter.sol";
 import {UniV3Router} from "./libraries/UniV3Router.sol";
 
 /// @title PropAMMRouter
@@ -228,8 +226,8 @@ contract PropAMMRouter is
     /// entry emits `VenueWhitelisted`.
     function _seedDefaultVenues() private {
         _addVenue(FERMI_ROUTER);
-        _addVenue(KIPSELI_PAMM);
         _addVenue(BEBOP_ROUTER);
+        _addVenue(0x71e790dd841c8a9061487cb3e78c288e75ce0b3d) // Kipseli
     }
 
     /// @dev Shared whitelist-insertion core for the public `addVenue` and the
@@ -628,15 +626,6 @@ contract PropAMMRouter is
 
             // Prevent later transfers if token was partially pulled
             IERC20(tokenIn).forceApprove(FERMI_ROUTER, 0);
-        } else if (venue == KIPSELI_PAMM) {
-            IERC20(tokenIn).safeTransfer(KIPSELI_PAMM, amountIn);
-            uint256 amountOut_ = IKipseliPAMM(KIPSELI_PAMM).swap(tokenIn, amountIn, tokenOut, recipient);
-
-            // Kipseli signals failure by returning 0 and keeping `tokenIn`; revert
-            // to roll back its transfer and let the catch arm engage the fallback.
-            if (amountOut_ == 0) {
-                revert();
-            }
         } else if (venue == BEBOP_ROUTER) {
             uint256 balanceTokenOutBefore = IERC20(tokenOut).balanceOf(address(this));
             IERC20(tokenIn).forceApprove(BEBOP_ROUTER, amountIn);
@@ -793,9 +782,6 @@ contract PropAMMRouter is
         if (venue == FERMI_ROUTER) {
             int256 amountInt256 = amount.toInt256();
             (, amountOut) = IFermiSwapper(FERMI_ROUTER).quoteAmounts(tokenIn, tokenOut, amountInt256);
-        } else if (venue == KIPSELI_PAMM) {
-            amountOut = IKipseliQuoter(KIPSELI_QUOTER)
-                .preSwapQuote(tokenIn, amount, tokenOut, block.timestamp * 1000, address(0));
         } else if (venue == BEBOP_ROUTER) {
             amountOut = IBebopRouter(BEBOP_ROUTER).quote(tokenIn, tokenOut, amount);
         } else {
