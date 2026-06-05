@@ -58,14 +58,10 @@ contract MockPropAMMExactOut is IPropAMMExactOut {
         amountOut = amountIn * priceDen / priceNum;
     }
 
-    function swap(
-        address tokenIn,
-        address tokenOut,
-        uint256 amountIn,
-        uint256 minAmountOut,
-        address recipient,
-        uint256
-    ) external returns (uint256 amountOut) {
+    function swap(address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut, address recipient, uint256)
+        external
+        returns (uint256 amountOut)
+    {
         require(active, "inactive");
         amountOut = amountIn * priceDen / priceNum;
         require(amountOut >= minAmountOut, "slippage");

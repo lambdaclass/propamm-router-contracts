@@ -38,11 +38,7 @@ interface IPropAMMExactOut is IPropAMM, IERC165 {
     /// @param tokenOut The address of the token being bought.
     /// @param amountOut The exact amount of `tokenOut` to receive.
     /// @return amountIn The amount of `tokenIn` the swap would require.
-    function quoteExactOut(
-        address tokenIn,
-        address tokenOut,
-        uint256 amountOut
-    ) external returns (uint256 amountIn);
+    function quoteExactOut(address tokenIn, address tokenOut, uint256 amountOut) external returns (uint256 amountIn);
 
     /// @notice Swaps as little `tokenIn` as needed to deliver an exact
     /// `amountOut` of `tokenOut` to `recipient`, spending at most `amountInMax`.

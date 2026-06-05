@@ -26,9 +26,7 @@ contract PropAMMRouterFeeTest is Test {
 
     function _deployRouter() internal returns (PropAMMRouter) {
         PropAMMRouter impl = new PropAMMRouter();
-        bytes memory data = abi.encodeCall(
-            PropAMMRouter.initialize, (address(swapRouter), address(quoter), owner)
-        );
+        bytes memory data = abi.encodeCall(PropAMMRouter.initialize, (address(swapRouter), address(quoter), owner));
         return PropAMMRouter(payable(address(new ERC1967Proxy(address(impl), data))));
     }
 
@@ -59,8 +57,13 @@ contract PropAMMRouterFeeTest is Test {
 
         vm.prank(user);
         (uint256 amountOut, address executedVenue) = router.swapWithFeeV1(
-            address(tokenIn), address(tokenOut), 1_000e18, expectedNet,
-            user, block.timestamp + 1, IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
+            address(tokenIn),
+            address(tokenOut),
+            1_000e18,
+            expectedNet,
+            user,
+            block.timestamp + 1,
+            IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
         );
 
         assertEq(amountOut, expectedNet);
@@ -78,8 +81,13 @@ contract PropAMMRouterFeeTest is Test {
         vm.prank(user);
         uint256 amountOut = router.swapViaVenueWithFeeV1(
             address(swapRouter), // the fallback venue address is a valid venue
-            address(tokenIn), address(tokenOut), 1_000e18, expectedNet,
-            user, block.timestamp + 1, IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
+            address(tokenIn),
+            address(tokenOut),
+            1_000e18,
+            expectedNet,
+            user,
+            block.timestamp + 1,
+            IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
         );
 
         assertEq(amountOut, expectedNet);
@@ -98,8 +106,14 @@ contract PropAMMRouterFeeTest is Test {
 
         vm.prank(user);
         (uint256 amountOut, address executedVenue) = router.swapViaSelectedVenuesWithFeeV1(
-            venues, address(tokenIn), address(tokenOut), 1_000e18, expectedNet,
-            user, block.timestamp + 1, IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
+            venues,
+            address(tokenIn),
+            address(tokenOut),
+            1_000e18,
+            expectedNet,
+            user,
+            block.timestamp + 1,
+            IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
         );
 
         assertEq(amountOut, expectedNet);
@@ -113,8 +127,13 @@ contract PropAMMRouterFeeTest is Test {
         vm.prank(user);
         vm.expectRevert(abi.encodeWithSelector(PropAMMRouter.FeeBpsTooHigh.selector, uint16(101), uint16(100)));
         router.swapWithFeeV1(
-            address(tokenIn), address(tokenOut), 1_000e18, 0,
-            user, block.timestamp + 1, IPropAMMRouter.FrontendFee({bps: 101, recipient: feeRecipient})
+            address(tokenIn),
+            address(tokenOut),
+            1_000e18,
+            0,
+            user,
+            block.timestamp + 1,
+            IPropAMMRouter.FrontendFee({bps: 101, recipient: feeRecipient})
         );
     }
 
@@ -123,8 +142,13 @@ contract PropAMMRouterFeeTest is Test {
         vm.prank(user);
         vm.expectRevert(PropAMMRouter.ZeroAddress.selector);
         router.swapWithFeeV1(
-            address(tokenIn), address(tokenOut), 1_000e18, 0,
-            user, block.timestamp + 1, IPropAMMRouter.FrontendFee({bps: 50, recipient: address(0)})
+            address(tokenIn),
+            address(tokenOut),
+            1_000e18,
+            0,
+            user,
+            block.timestamp + 1,
+            IPropAMMRouter.FrontendFee({bps: 50, recipient: address(0)})
         );
     }
 
@@ -137,8 +161,13 @@ contract PropAMMRouterFeeTest is Test {
         vm.prank(user);
         vm.expectRevert(abi.encodeWithSelector(PropAMMRouter.InsufficientOutput.selector, grossMin, uint256(900e18)));
         router.swapWithFeeV1(
-            address(tokenIn), address(tokenOut), 1_000e18, netMin,
-            user, block.timestamp + 1, IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
+            address(tokenIn),
+            address(tokenOut),
+            1_000e18,
+            netMin,
+            user,
+            block.timestamp + 1,
+            IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
         );
     }
 
@@ -147,8 +176,13 @@ contract PropAMMRouterFeeTest is Test {
         vm.recordLogs();
         vm.prank(user);
         (uint256 amountOut,) = router.swapWithFeeV1(
-            address(tokenIn), address(tokenOut), 1_000e18, 1_000e18,
-            user, block.timestamp + 1, IPropAMMRouter.FrontendFee({bps: 0, recipient: feeRecipient})
+            address(tokenIn),
+            address(tokenOut),
+            1_000e18,
+            1_000e18,
+            user,
+            block.timestamp + 1,
+            IPropAMMRouter.FrontendFee({bps: 0, recipient: feeRecipient})
         );
         Vm.Log[] memory logs = vm.getRecordedLogs();
         for (uint256 i = 0; i < logs.length; i++) {
@@ -167,8 +201,13 @@ contract PropAMMRouterFeeTest is Test {
         _prepare(10, 101);
         vm.prank(user);
         (uint256 amountOut,) = router.swapWithFeeV1(
-            address(tokenIn), address(tokenOut), 10, 100,
-            user, block.timestamp + 1, IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
+            address(tokenIn),
+            address(tokenOut),
+            10,
+            100,
+            user,
+            block.timestamp + 1,
+            IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
         );
         assertEq(amountOut, 101); // fee = 101*50/10_000 = 0 (floored)
         assertEq(tokenOut.balanceOf(feeRecipient), 0);
@@ -181,8 +220,13 @@ contract PropAMMRouterFeeTest is Test {
         vm.prank(user);
         vm.expectRevert(); // PausableUpgradeable.EnforcedPause
         router.swapWithFeeV1(
-            address(tokenIn), address(tokenOut), 1_000e18, 0,
-            user, block.timestamp + 1, IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
+            address(tokenIn),
+            address(tokenOut),
+            1_000e18,
+            0,
+            user,
+            block.timestamp + 1,
+            IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
         );
     }
 
@@ -191,8 +235,13 @@ contract PropAMMRouterFeeTest is Test {
         vm.prank(user);
         vm.expectRevert(PropAMMRouter.Expired.selector);
         router.swapWithFeeV1(
-            address(tokenIn), address(tokenOut), 1_000e18, 0,
-            user, block.timestamp - 1, IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
+            address(tokenIn),
+            address(tokenOut),
+            1_000e18,
+            0,
+            user,
+            block.timestamp - 1,
+            IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
         );
     }
 
@@ -217,8 +266,13 @@ contract PropAMMRouterFeeTest is Test {
 
         vm.prank(user);
         (uint256 amountOut,) = router.swapWithFeeV1(
-            address(tokenIn), address(fotOut), 1_000e18, 0,
-            user, block.timestamp + 1, IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
+            address(tokenIn),
+            address(fotOut),
+            1_000e18,
+            0,
+            user,
+            block.timestamp + 1,
+            IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
         );
 
         assertEq(amountOut, net);
@@ -240,8 +294,13 @@ contract PropAMMRouterFeeTest is Test {
 
         vm.prank(user);
         (uint256 amountOut,) = router.swapWithFeeV1(
-            address(tokenIn), address(tokenOut), 1e18, netMin,
-            user, block.timestamp + 1, IPropAMMRouter.FrontendFee({bps: bps, recipient: feeRecipient})
+            address(tokenIn),
+            address(tokenOut),
+            1e18,
+            netMin,
+            user,
+            block.timestamp + 1,
+            IPropAMMRouter.FrontendFee({bps: bps, recipient: feeRecipient})
         );
 
         uint256 expectedFee = delivered * bps / 10_000;
@@ -266,8 +325,14 @@ contract PropAMMRouterFeeTest is Test {
 
         vm.prank(user);
         uint256 amountOut = router.swapViaVenueWithFeeV1(
-            BEBOP_ROUTER, address(tokenIn), address(tokenOut), 1_000e18, net,
-            user, block.timestamp + 1, IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
+            BEBOP_ROUTER,
+            address(tokenIn),
+            address(tokenOut),
+            1_000e18,
+            net,
+            user,
+            block.timestamp + 1,
+            IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
         );
 
         assertEq(amountOut, net);

@@ -18,7 +18,7 @@ contract PropAMMRouterVenueWhitelistTest is Test {
     MockERC20 internal tokenOut;
 
     address constant KIPSELI_PAMM = 0x71e790dd841c8A9061487cb3E78C288E75cE0B3d;
-    
+
     address internal owner = address(this);
     address internal stranger = address(0xBEEF);
     address internal recipient = address(0xCAFE);
@@ -224,7 +224,7 @@ contract PropAMMRouterVenueWhitelistTest is Test {
         tokenIn.mint(address(this), 1000);
         tokenIn.approve(address(router), 1000);
 
-        (uint256 amountOut, ) = router.swapViaVenueV1(
+        (uint256 amountOut,) = router.swapViaVenueV1(
             genericVenue, address(tokenIn), address(tokenOut), 1000, 900, recipient, block.timestamp + 1
         );
 

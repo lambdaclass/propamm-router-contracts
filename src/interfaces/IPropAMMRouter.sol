@@ -33,10 +33,7 @@ interface IPropAMMRouter {
     /// @param feeAmount The fee amount transferred to `feeRecipient`.
     /// @param payer The account that invoked the swap and bore the fee.
     event FrontendFeeCharged(
-        address indexed feeRecipient,
-        address indexed tokenOut,
-        uint256 feeAmount,
-        address indexed payer
+        address indexed feeRecipient, address indexed tokenOut, uint256 feeAmount, address indexed payer
     );
 
     /// @notice Fee parameters for the `*WithFeeV1` entrypoints.
@@ -201,11 +198,9 @@ interface IPropAMMRouter {
     /// @return bestQuote The best `tokenOut` amount across all venues.
     /// @return venue The proprietary venue that produced `bestQuote`, or
     /// the fallback venue address if the fallback won.
-    function quoteV1(
-        address tokenIn,
-        address tokenOut,
-        uint256 amount
-    ) external returns (uint256 bestQuote, address venue);
+    function quoteV1(address tokenIn, address tokenOut, uint256 amount)
+        external
+        returns (uint256 bestQuote, address venue);
 
     /// @notice Quotes `amount` of `tokenIn` against a single venue — a whitelisted
     /// propAMM or the public-venue fallback. If the venue quote fails, it falls back
@@ -220,12 +215,9 @@ interface IPropAMMRouter {
     /// @return amountOut The amount of `tokenOut` quoted by `venue`.
     /// @return quotedVenue The asked venue if the quote succeeded, or the fallback
     /// venue address in other case.
-    function quoteVenueV1(
-        address venue,
-        address tokenIn,
-        address tokenOut,
-        uint256 amount
-    ) external returns (uint256 amountOut, address quotedVenue);
+    function quoteVenueV1(address venue, address tokenIn, address tokenOut, uint256 amount)
+        external
+        returns (uint256 amountOut, address quotedVenue);
 
     /// @notice Quotes `amountIn` of `tokenIn` across a caller-selected set of
     /// venues and returns the best output and the venue that produced it, or
@@ -236,10 +228,7 @@ interface IPropAMMRouter {
     /// @param amountIn The amount of `tokenIn` to quote.
     /// @return bestAmountOut The best `tokenOut` amount across `venues`.
     /// @return bestVenue The venue that produced `bestAmountOut`.
-    function quoteSelectedVenuesV1(
-        address[] calldata venues,
-        address tokenIn,
-        address tokenOut,
-        uint256 amountIn
-    ) external returns (uint256 bestAmountOut, address bestVenue);
+    function quoteSelectedVenuesV1(address[] calldata venues, address tokenIn, address tokenOut, uint256 amountIn)
+        external
+        returns (uint256 bestAmountOut, address bestVenue);
 }

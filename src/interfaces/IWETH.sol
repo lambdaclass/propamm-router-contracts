@@ -7,5 +7,5 @@ interface IWETH {
 
     /// @notice Unwrap WETH back to ETH
     /// @param wad The amount of WETH to unwrap
-    function withdraw(uint wad) external;
+    function withdraw(uint256 wad) external;
 }

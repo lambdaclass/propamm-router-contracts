@@ -6,9 +6,7 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 contract MockFeeOnTransferERC20 is ERC20 {
     uint256 public immutable transferFeeBps;
 
-    constructor(string memory name_, string memory symbol_, uint256 transferFeeBps_)
-        ERC20(name_, symbol_)
-    {
+    constructor(string memory name_, string memory symbol_, uint256 transferFeeBps_) ERC20(name_, symbol_) {
         transferFeeBps = transferFeeBps_;
     }
 

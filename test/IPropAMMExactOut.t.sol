@@ -172,9 +172,7 @@ contract IPropAMMExactOutTest is Test {
     function test_swap_exactIn_deliversProportionalOutput() public {
         uint256 amountIn = 200e18;
         tokenIn.transfer(address(venue), amountIn);
-        uint256 amountOut = venue.swap(
-            address(tokenIn), address(tokenOut), amountIn, 0, recipient, _deadline()
-        );
+        uint256 amountOut = venue.swap(address(tokenIn), address(tokenOut), amountIn, 0, recipient, _deadline());
         assertEq(amountOut, 100e18);
         assertEq(tokenOut.balanceOf(recipient), 100e18);
     }
