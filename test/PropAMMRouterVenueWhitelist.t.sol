@@ -8,7 +8,6 @@ import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockSwapRouter02} from "./mocks/MockSwapRouter02.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
 import {FERMI_ROUTER} from "../src/interfaces/IFermiSwapper.sol";
-import {KIPSELI_PAMM} from "../src/interfaces/IKipseliPAMM.sol";
 import {BEBOP_ROUTER} from "../src/interfaces/IBebopRouter.sol";
 
 contract PropAMMRouterVenueWhitelistTest is Test {
@@ -18,6 +17,8 @@ contract PropAMMRouterVenueWhitelistTest is Test {
     MockERC20 internal tokenIn;
     MockERC20 internal tokenOut;
 
+    address constant KIPSELI_PAMM = 0x71e790dd841c8A9061487cb3E78C288E75cE0B3d;
+    
     address internal owner = address(this);
     address internal stranger = address(0xBEEF);
     address internal recipient = address(0xCAFE);

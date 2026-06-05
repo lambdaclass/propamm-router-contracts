@@ -4,7 +4,6 @@ pragma solidity ^0.8.35;
 import "forge-std/Script.sol";
 import {PropAMMRouter} from "../src/PropAMMRouter.sol";
 import {FERMI_ROUTER} from "../src/interfaces/IFermiSwapper.sol";
-import {KIPSELI_PAMM} from "../src/interfaces/IKipseliPAMM.sol";
 import {BEBOP_ROUTER} from "../src/interfaces/IBebopRouter.sol";
 
 /// @notice Restores the fresh-deploy configuration on an already-deployed proxy:
@@ -62,7 +61,7 @@ contract SetupRouterVariables is Script {
     function venues() public pure returns (address[] memory list) {
         list = new address[](3);
         list[0] = FERMI_ROUTER;
-        list[1] = KIPSELI_PAMM;
+        list[1] = 0x71e790dd841c8A9061487cb3E78C288E75cE0B3d;
         list[2] = BEBOP_ROUTER;
     }
 
