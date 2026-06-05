@@ -32,10 +32,6 @@ error TokenOutBalanceDecreased();
 error InvalidFallbackFee(uint24 fee);
 /// @notice Thrown when an address argument that must be non-zero is zero.
 error ZeroAddress();
-/// @notice Thrown when a requested frontend fee exceeds `MAX_FEE_BPS`.
-/// @param requested The caller-supplied fee in basis points.
-/// @param max The maximum allowed fee (`MAX_FEE_BPS`).
-error FeeBpsTooHigh(uint16 requested, uint16 max);
 /// @notice Thrown when `setPairFees` is given arrays of unequal length.
 error ArrayLengthMismatch();
 /// @notice Thrown when `addVenue` is given a venue already on the whitelist.

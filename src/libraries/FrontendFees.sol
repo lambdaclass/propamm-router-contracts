@@ -5,7 +5,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IPropAMMRouter} from "../interfaces/IPropAMMRouter.sol";
-import {ETH_SENTINEL, WETH} from "./Constants.sol";
+import {ETH_SENTINEL} from "./Constants.sol";
 import {ETHTransferFailed, ZeroAddress} from "./Errors.sol";
 
 /// @title FrontendFees
