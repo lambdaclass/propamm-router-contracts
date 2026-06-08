@@ -170,7 +170,7 @@ contract PropAMMRouter is
         uint256 grossMin = FrontendFees._grossUp(amountOutMin, fee.bps);
         (uint256 bestQuote, address venue) = _pickBestVenue(tokenIn, tokenOut, amountIn);
 
-        require(bestQuote >= grossMin, QuoteBelowMinimum(grossMin, bestQuote))
+        require(bestQuote >= grossMin, QuoteBelowMinimum(grossMin, bestQuote));
 
         uint256 delivered;
         (delivered, executedVenue) = _coreSwap(venue, tokenIn, tokenOut, amountIn, grossMin, address(this), deadline);
