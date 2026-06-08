@@ -10,6 +10,7 @@ import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockSwapRouter02} from "./mocks/MockSwapRouter02.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
 import {SetupRouterVariables} from "../scripts/setupRouterVariables.s.sol";
+import "../src/libraries/Errors.sol";
 
 contract PropAMMRouterPairFeeTest is Test {
     PropAMMRouter internal router;
@@ -111,7 +112,7 @@ contract PropAMMRouterPairFeeTest is Test {
     }
 
     function test_setPairFee_revertsAboveMax() public {
-        vm.expectRevert(abi.encodeWithSelector(PropAMMRouter.InvalidFallbackFee.selector, uint24(1_000_000)));
+        vm.expectRevert(abi.encodeWithSelector(InvalidFallbackFee.selector, uint24(1_000_000)));
         router.setPairFee(address(tokenIn), address(tokenOut), 1_000_000);
     }
 
@@ -180,7 +181,7 @@ contract PropAMMRouterPairFeeTest is Test {
         address[] memory a = new address[](2);
         address[] memory b = new address[](1);
         uint24[] memory f = new uint24[](2);
-        vm.expectRevert(PropAMMRouter.ArrayLengthMismatch.selector);
+        vm.expectRevert(ArrayLengthMismatch.selector);
         router.setPairFees(a, b, f);
     }
 
@@ -191,7 +192,7 @@ contract PropAMMRouterPairFeeTest is Test {
         a[0] = address(tokenIn);
         b[0] = address(tokenOut);
         f[0] = 1_000_000;
-        vm.expectRevert(abi.encodeWithSelector(PropAMMRouter.InvalidFallbackFee.selector, uint24(1_000_000)));
+        vm.expectRevert(abi.encodeWithSelector(InvalidFallbackFee.selector, uint24(1_000_000)));
         router.setPairFees(a, b, f);
     }
 
@@ -215,7 +216,7 @@ contract PropAMMRouterPairFeeTest is Test {
         b[1] = address(0x1234);
         f[1] = 1_000_000;
 
-        vm.expectRevert(abi.encodeWithSelector(PropAMMRouter.InvalidFallbackFee.selector, uint24(1_000_000)));
+        vm.expectRevert(abi.encodeWithSelector(InvalidFallbackFee.selector, uint24(1_000_000)));
         router.setPairFees(a, b, f);
 
         // entry 0 must NOT have been committed (whole batch rolled back)

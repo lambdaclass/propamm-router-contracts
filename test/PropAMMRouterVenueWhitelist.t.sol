@@ -11,6 +11,7 @@ import {MockSwapRouter02} from "./mocks/MockSwapRouter02.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
 import {FERMI_ROUTER} from "../src/interfaces/IFermiSwapper.sol";
 import {BEBOP_ROUTER} from "../src/interfaces/IBebopRouter.sol";
+import "../src/libraries/Errors.sol";
 
 contract PropAMMRouterVenueWhitelistTest is Test {
     PropAMMRouter internal router;
@@ -140,12 +141,12 @@ contract PropAMMRouterVenueWhitelistTest is Test {
     }
 
     function test_addVenue_zeroReverts() public {
-        vm.expectRevert(PropAMMRouter.ZeroAddress.selector);
+        vm.expectRevert(ZeroAddress.selector);
         router.addVenue(address(0));
     }
 
     function test_addVenue_duplicateReverts() public {
-        vm.expectRevert(abi.encodeWithSelector(PropAMMRouter.VenueAlreadyWhitelisted.selector, FERMI_ROUTER));
+        vm.expectRevert(abi.encodeWithSelector(VenueAlreadyWhitelisted.selector, FERMI_ROUTER));
         router.addVenue(FERMI_ROUTER);
     }
 
@@ -169,7 +170,7 @@ contract PropAMMRouterVenueWhitelistTest is Test {
     }
 
     function test_removeVenue_notWhitelistedReverts() public {
-        vm.expectRevert(abi.encodeWithSelector(PropAMMRouter.VenueNotWhitelisted.selector, genericVenue));
+        vm.expectRevert(abi.encodeWithSelector(VenueNotWhitelisted.selector, genericVenue));
         router.removeVenue(genericVenue);
     }
 
@@ -186,13 +187,13 @@ contract PropAMMRouterVenueWhitelistTest is Test {
     // --- Whitelist gates venue usage --------------------------------------
 
     function test_quoteVenueV1_nonWhitelistedReverts() public {
-        vm.expectRevert(PropAMMRouter.UnknownVenue.selector);
+        vm.expectRevert(UnknownVenue.selector);
         router.quoteVenueV1(genericVenue, address(tokenIn), address(tokenOut), 1 ether);
     }
 
     function test_quoteVenueV1_removedVenueReverts() public {
         router.removeVenue(FERMI_ROUTER);
-        vm.expectRevert(PropAMMRouter.UnknownVenue.selector);
+        vm.expectRevert(UnknownVenue.selector);
         router.quoteVenueV1(FERMI_ROUTER, address(tokenIn), address(tokenOut), 1 ether);
     }
 
@@ -206,7 +207,7 @@ contract PropAMMRouterVenueWhitelistTest is Test {
     function test_swapViaVenueV1_nonWhitelistedReverts() public {
         tokenIn.mint(address(this), 1000);
         tokenIn.approve(address(router), 1000);
-        vm.expectRevert(PropAMMRouter.UnknownVenue.selector);
+        vm.expectRevert(UnknownVenue.selector);
         router.swapViaVenueV1(
             genericVenue, address(tokenIn), address(tokenOut), 1000, 900, recipient, block.timestamp + 1
         );
@@ -216,7 +217,7 @@ contract PropAMMRouterVenueWhitelistTest is Test {
         router.removeVenue(BEBOP_ROUTER);
         tokenIn.mint(address(this), 1000);
         tokenIn.approve(address(router), 1000);
-        vm.expectRevert(PropAMMRouter.UnknownVenue.selector);
+        vm.expectRevert(UnknownVenue.selector);
         router.swapViaVenueV1(
             BEBOP_ROUTER, address(tokenIn), address(tokenOut), 1000, 900, recipient, block.timestamp + 1
         );

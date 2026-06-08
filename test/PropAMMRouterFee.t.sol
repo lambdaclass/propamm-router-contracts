@@ -13,6 +13,8 @@ import {MockV3SwapRouter} from "./mocks/MockV3SwapRouter.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
 import {BEBOP_ROUTER} from "../src/interfaces/IBebopRouter.sol";
 import {MockBebop} from "./mocks/MockBebop.sol";
+import "../src/libraries/Errors.sol";
+import {FrontendFees} from "../src/libraries/FrontendFees.sol";
 
 contract PropAMMRouterFeeTest is Test {
     PropAMMRouter router;
@@ -132,7 +134,7 @@ contract PropAMMRouterFeeTest is Test {
     function test_swapWithFee_revertsFeeTooHigh() public {
         _prepare(1_000e18, 1_000e18);
         vm.prank(user);
-        vm.expectRevert(abi.encodeWithSelector(PropAMMRouter.FeeBpsTooHigh.selector, uint16(101), uint16(100)));
+        vm.expectRevert(abi.encodeWithSelector(FrontendFees.FeeBpsTooHigh.selector, uint16(101), uint16(100)));
         router.swapWithFeeV1(
             address(tokenIn),
             address(tokenOut),
@@ -147,7 +149,7 @@ contract PropAMMRouterFeeTest is Test {
     function test_swapWithFee_revertsZeroFeeRecipient() public {
         _prepare(1_000e18, 1_000e18);
         vm.prank(user);
-        vm.expectRevert(PropAMMRouter.ZeroAddress.selector);
+        vm.expectRevert(ZeroAddress.selector);
         router.swapWithFeeV1(
             address(tokenIn),
             address(tokenOut),
@@ -166,7 +168,7 @@ contract PropAMMRouterFeeTest is Test {
         uint256 netMin = 950e18;
         uint256 grossMin = Math.ceilDiv(netMin * 10_000, 10_000 - 50);
         vm.prank(user);
-        vm.expectRevert(abi.encodeWithSelector(PropAMMRouter.InsufficientOutput.selector, grossMin, uint256(900e18)));
+        vm.expectRevert(abi.encodeWithSelector(InsufficientOutput.selector, grossMin, uint256(900e18)));
         router.swapWithFeeV1(
             address(tokenIn),
             address(tokenOut),
@@ -240,7 +242,7 @@ contract PropAMMRouterFeeTest is Test {
     function test_swapWithFee_revertsPastDeadline() public {
         _prepare(1_000e18, 1_000e18);
         vm.prank(user);
-        vm.expectRevert(PropAMMRouter.Expired.selector);
+        vm.expectRevert(Expired.selector);
         router.swapWithFeeV1(
             address(tokenIn),
             address(tokenOut),
