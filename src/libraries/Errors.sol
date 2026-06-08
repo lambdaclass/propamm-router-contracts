@@ -7,20 +7,16 @@ pragma solidity ^0.8.35;
 error OnlySelf();
 /// @notice Thrown when `venue` is not one of the whitelisted proprietary AMMs.
 error UnknownVenue();
-/// @notice Thrown when a swap cannot deliver at least `amountOutMin` of
-/// `tokenOut` to `recipient`.
-/// @param expectedAmount The minimum acceptable amount of `tokenOut` (i.e.
-/// the caller's `amountOutMin`).
-/// @param receivedAmount The actual amount of `tokenOut` delivered to
-/// `recipient`, measured as a balance delta against the pre-swap snapshot.
+/// @notice Thrown when a swap's `tokenOut` output would be below the caller's
+/// `amountOutMin`. Raised both *before* execution (the best venue quote is
+/// already under the minimum, so the swap is rejected before any funds are
+/// pulled) and *after* execution (the amount delivered to `recipient`,
+/// measured as a balance delta against the pre-swap snapshot, falls short).
+/// @param expectedAmount The minimum acceptable amount of `tokenOut` (the
+/// caller's `amountOutMin`, grossed up for any frontend fee).
+/// @param receivedAmount The amount that fell short: the best venue quote for
+/// the pre-execution check, or the delivered balance delta post-execution.
 error InsufficientOutput(uint256 expectedAmount, uint256 receivedAmount);
-/// @notice Thrown by `swapV1` when the best quote across all venues is below
-/// `amountOutMin`, rejecting the swap before any funds are pulled. Distinct
-/// from `InsufficientOutput`, which signals a shortfall measured *after*
-/// execution.
-/// @param amountOutMin The caller's minimum acceptable amount of `tokenOut`.
-/// @param bestQuote The best `tokenOut` amount any venue quoted.
-error QuoteBelowMinimum(uint256 amountOutMin, uint256 bestQuote);
 /// @notice Thrown when a swap is invoked after its `deadline`.
 error Expired();
 /// @notice Thrown when no venue can produce a quote for the requested pair

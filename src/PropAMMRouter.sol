@@ -132,7 +132,7 @@ contract PropAMMRouter is
     /// @dev Picks the best-quoting venue via `_pickBestVenue`, then executes
     /// through `_coreSwap`; a `fallbackSwapRouter` selection (the Uniswap
     /// fallback won, or no venue could quote) routes straight to the fallback venue.
-    /// Reverts `QuoteBelowMinimum`
+    /// Reverts `InsufficientOutput`
     /// before pulling funds when the best quote is under `amountOutMin`. Quotes
     /// are advisory, so `_coreSwap` re-checks `amountOutMin` against the
     /// delivered balance delta.
@@ -145,7 +145,7 @@ contract PropAMMRouter is
         uint256 deadline
     ) external payable whenNotPaused nonReentrant returns (uint256 amountOut, address executedVenue) {
         (uint256 bestQuote, address venue) = _pickBestVenue(tokenIn, tokenOut, amountIn);
-        require(bestQuote >= amountOutMin, QuoteBelowMinimum(amountOutMin, bestQuote));
+        require(bestQuote >= amountOutMin, InsufficientOutput(amountOutMin, bestQuote));
 
         (amountOut, executedVenue) = _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
@@ -170,7 +170,7 @@ contract PropAMMRouter is
         uint256 grossMin = FrontendFees._grossUp(amountOutMin, fee.bps);
         (uint256 bestQuote, address venue) = _pickBestVenue(tokenIn, tokenOut, amountIn);
 
-        require(bestQuote >= grossMin, QuoteBelowMinimum(grossMin, bestQuote));
+        require(bestQuote >= grossMin, InsufficientOutput(grossMin, bestQuote));
 
         uint256 delivered;
         (delivered, executedVenue) = _coreSwap(venue, tokenIn, tokenOut, amountIn, grossMin, address(this), deadline);
