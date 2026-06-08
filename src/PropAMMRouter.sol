@@ -238,7 +238,11 @@ contract PropAMMRouter is
         address recipient,
         uint256 deadline
     ) public payable whenNotPaused nonReentrant returns (uint256 amountOut, address executedVenue) {
-        (, address venue) = _pickBestVenueFrom(venues, tokenIn, tokenOut, amountIn);
+        (uint256 bestQuote, address venue) = _pickBestVenueFrom(venues, tokenIn, tokenOut, amountIn);
+
+        if (venue == address(0) || bestQuote < amountOutMin) {
+            venue = fallbackSwapRouter;
+        }
 
         (amountOut, executedVenue) = _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
@@ -261,7 +265,11 @@ contract PropAMMRouter is
         FrontendFees._validateFee(fee);
 
         uint256 grossMin = FrontendFees._grossUp(amountOutMin, fee.bps);
-        (, address venue) = _pickBestVenueFrom(venues, tokenIn, tokenOut, amountIn);
+        (uint256 bestQuote, address venue) = _pickBestVenueFrom(venues, tokenIn, tokenOut, amountIn);
+
+        if (venue == address(0) || bestQuote < amountOutMin) {
+            venue = fallbackSwapRouter;
+        }
 
         uint256 delivered;
         (delivered, executedVenue) = _coreSwap(venue, tokenIn, tokenOut, amountIn, grossMin, address(this), deadline);
