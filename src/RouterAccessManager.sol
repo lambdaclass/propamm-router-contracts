@@ -3,11 +3,11 @@ pragma solidity ^0.8.35;
 
 import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import {PropAMMRouter} from "./PropAMMRouter.sol";
+import {BlitzRouter} from "./BlitzRouter.sol";
 
 /// @title RouterAccessManager
 /// @notice Central authority governing every `restricted` administrative
-/// entrypoint on `PropAMMRouter`, with the access policy codified here in the
+/// entrypoint on `BlitzRouter`, with the access policy codified here in the
 /// contract rather than applied by a deployment script.
 /// @dev The policy is `AccessManager` state (selector->role maps and per-role
 /// execution delays), so it cannot be pure `immutable` data and is not held by
@@ -101,7 +101,7 @@ contract RouterAccessManager is AccessManager {
     /// `AccessManager` interface. `onlyAuthorized` resolves to `ADMIN_ROLE` here
     /// (this selector is unmapped on the manager-as-target, so it defaults to
     /// admin).
-    /// @param router The deployed `PropAMMRouter` proxy.
+    /// @param router The deployed `BlitzRouter` proxy.
     function configureRouter(address router) external onlyAuthorized {
         if (routerConfigured) revert RouterAlreadyConfigured();
         if (router == address(0)) revert ZeroAddress();
@@ -109,20 +109,20 @@ contract RouterAccessManager is AccessManager {
 
         // UPGRADER_ROLE: upgrades + fallback config (incl. per-pair fees) + rescue.
         _setTargetFunctionRole(router, UUPSUpgradeable.upgradeToAndCall.selector, UPGRADER_ROLE);
-        _setTargetFunctionRole(router, PropAMMRouter.setFallbackSwapRouter.selector, UPGRADER_ROLE);
-        _setTargetFunctionRole(router, PropAMMRouter.setFallbackQuoter.selector, UPGRADER_ROLE);
-        _setTargetFunctionRole(router, PropAMMRouter.setFallbackFee.selector, UPGRADER_ROLE);
-        _setTargetFunctionRole(router, PropAMMRouter.setPairFee.selector, UPGRADER_ROLE);
-        _setTargetFunctionRole(router, PropAMMRouter.setPairFees.selector, UPGRADER_ROLE);
-        _setTargetFunctionRole(router, PropAMMRouter.rescueTokens.selector, UPGRADER_ROLE);
+        _setTargetFunctionRole(router, BlitzRouter.setFallbackSwapRouter.selector, UPGRADER_ROLE);
+        _setTargetFunctionRole(router, BlitzRouter.setFallbackQuoter.selector, UPGRADER_ROLE);
+        _setTargetFunctionRole(router, BlitzRouter.setFallbackFee.selector, UPGRADER_ROLE);
+        _setTargetFunctionRole(router, BlitzRouter.setPairFee.selector, UPGRADER_ROLE);
+        _setTargetFunctionRole(router, BlitzRouter.setPairFees.selector, UPGRADER_ROLE);
+        _setTargetFunctionRole(router, BlitzRouter.rescueTokens.selector, UPGRADER_ROLE);
 
         // GUARDIAN_ROLE: instant pause. RESUMER_ROLE: deliberate unpause.
-        _setTargetFunctionRole(router, PropAMMRouter.pause.selector, GUARDIAN_ROLE);
-        _setTargetFunctionRole(router, PropAMMRouter.unpause.selector, RESUMER_ROLE);
+        _setTargetFunctionRole(router, BlitzRouter.pause.selector, GUARDIAN_ROLE);
+        _setTargetFunctionRole(router, BlitzRouter.unpause.selector, RESUMER_ROLE);
 
         // LISTING_ROLE: venue whitelist management (operations-paced).
-        _setTargetFunctionRole(router, PropAMMRouter.addVenue.selector, LISTING_ROLE);
-        _setTargetFunctionRole(router, PropAMMRouter.removeVenue.selector, LISTING_ROLE);
+        _setTargetFunctionRole(router, BlitzRouter.addVenue.selector, LISTING_ROLE);
+        _setTargetFunctionRole(router, BlitzRouter.removeVenue.selector, LISTING_ROLE);
 
         // Future re-gating of the router now carries a delay (phases in after
         // minSetback(), 5 days, since it is an increase from 0).

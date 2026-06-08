@@ -2,7 +2,7 @@
 pragma solidity ^0.8.35;
 
 import "forge-std/Script.sol";
-import {PropAMMRouter} from "../src/PropAMMRouter.sol";
+import {BlitzRouter} from "../src/BlitzRouter.sol";
 import {FERMI_ROUTER} from "../src/interfaces/IFermiSwapper.sol";
 import {BEBOP_ROUTER} from "../src/interfaces/IBebopRouter.sol";
 
@@ -76,11 +76,11 @@ contract SetupRouterVariables is Script {
         // re-add the default propAMM venues. addVenue reverts on a duplicate, so guard
         // each with isWhitelistedVenue to keep the script idempotent / re-runnable.
         vm.startBroadcast();
-        PropAMMRouter(proxy).setFallbackFee(FALLBACK_FEE);
-        PropAMMRouter(proxy).setPairFees(tokenA, tokenB, fees);
+        BlitzRouter(proxy).setFallbackFee(FALLBACK_FEE);
+        BlitzRouter(proxy).setPairFees(tokenA, tokenB, fees);
         for (uint256 i = 0; i < venueList.length; i++) {
-            if (!PropAMMRouter(proxy).isWhitelistedVenue(venueList[i])) {
-                PropAMMRouter(proxy).addVenue(venueList[i]);
+            if (!BlitzRouter(proxy).isWhitelistedVenue(venueList[i])) {
+                BlitzRouter(proxy).addVenue(venueList[i]);
             }
         }
         vm.stopBroadcast();

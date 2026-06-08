@@ -5,15 +5,15 @@ import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import {IAccessManaged} from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
-import {PropAMMRouter} from "../src/PropAMMRouter.sol";
+import {BlitzRouter} from "../src/BlitzRouter.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockSwapRouter02} from "./mocks/MockSwapRouter02.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
 import {SetupRouterVariables} from "../scripts/setupRouterVariables.s.sol";
 import "../src/libraries/Errors.sol";
 
-contract PropAMMRouterPairFeeTest is Test {
-    PropAMMRouter internal router;
+contract BlitzRouterPairFeeTest is Test {
+    BlitzRouter internal router;
     AccessManager internal manager;
     MockSwapRouter02 internal mockRouter;
     MockQuoterV2 internal mockQuoter;
@@ -31,7 +31,7 @@ contract PropAMMRouterPairFeeTest is Test {
     address internal constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
 
     // Re-declared locally so vm.expectEmit can match the router's emit.
-    // Mirror of PropAMMRouter.PairFeeUpdated (added in Task 3); kept in sync so vm.expectEmit matches.
+    // Mirror of BlitzRouter.PairFeeUpdated (added in Task 3); kept in sync so vm.expectEmit matches.
     event PairFeeUpdated(address indexed tokenA, address indexed tokenB, uint24 oldFee, uint24 newFee);
 
     function setUp() public {
@@ -45,11 +45,11 @@ contract PropAMMRouterPairFeeTest is Test {
         // directly while anyone else gets AccessManagedUnauthorized.
         manager = new AccessManager(owner);
 
-        PropAMMRouter impl = new PropAMMRouter();
+        BlitzRouter impl = new BlitzRouter();
         bytes memory initData =
-            abi.encodeCall(PropAMMRouter.initialize, (address(mockRouter), address(mockQuoter), address(manager)));
+            abi.encodeCall(BlitzRouter.initialize, (address(mockRouter), address(mockQuoter), address(manager)));
         ERC1967Proxy proxy = new ERC1967Proxy(address(impl), initData);
-        router = PropAMMRouter(payable(address(proxy)));
+        router = BlitzRouter(payable(address(proxy)));
     }
 
     function test_setUp_initialized() public view {

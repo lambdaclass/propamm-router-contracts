@@ -1,4 +1,4 @@
-# PropAMMRouter
+# BlitzRouter
 
 Single-hop router that quotes and executes swaps against a proprietary AMM (FermiSwap, Kipseli, or Bebop) or directly against Uniswap V3, and falls back to Uniswap V3 when the chosen proprietary venue cannot fill the swap.
 
@@ -13,7 +13,7 @@ The PropAMMs the router interacts with are deployed at:
 
 ## Overview
 
-Venues are identified **by address**: the three proprietary AMM routers (FermiSwap, Kipseli, Bebop) plus the Uniswap V3 fallback, denoted by the SwapRouter02 address wired in at deployment. The router exposes the following external functions (see `src/interfaces/IPropAMMRouter.sol` for the full NatSpec and the [rationale](https://github.com/lambdaclass/propamm-router-contracts/blob/main/docs/rationale.md) document with some design decisions):
+Venues are identified **by address**: the three proprietary AMM routers (FermiSwap, Kipseli, Bebop) plus the Uniswap V3 fallback, denoted by the SwapRouter02 address wired in at deployment. The router exposes the following external functions (see `src/interfaces/IBlitzRouter.sol` for the full NatSpec and the [rationale](https://github.com/lambdaclass/propamm-router-contracts/blob/main/docs/rationale.md) document with some design decisions):
 
 - `swapV1(tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline)`: pulls `amountIn` of `tokenIn` from `msg.sender`, routes through the best-quoting venue, and falls back to Uniswap V3 if that venue reverts or under-delivers. Returns `(amountOut, executedVenue)`, where `executedVenue` is the proprietary venue that filled or the SwapRouter02 address when the fallback ran. Reverts `InsufficientOutput` before pulling funds if the best quote is below `amountOutMin`, and re-checks `amountOutMin` against the measured balance delta of `recipient` after execution (the same error covers both the pre-pull and post-execution shortfall). Reverts when the contract is paused (see [Pausing the contract](#pausing-the-contract)); quote functions remain callable.
 - `swapViaVenueV1(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline)`: attempts the caller-specified `venue` first. A proprietary venue still falls back to Uniswap V3 if it fails to fill; naming the Uniswap V3 SwapRouter02 address routes directly to Uniswap V3 (it *is* the fallback, so there is nothing further to fall back to). Reverts `UnknownVenue` if `venue` is neither a whitelisted proprietary AMM nor the SwapRouter02 address.
@@ -41,7 +41,7 @@ As a consequence:
 
 Three implementation-only entrypoints take a per-call, basis-point fee from the swap
 **output token** and forward it to a caller-supplied recipient. They are **not** part of
-`IPropAMMRouter`; encode them against the deployed `PropAMMRouter`.
+`IBlitzRouter`; encode them against the deployed `BlitzRouter`.
 
 - `swapWithFeeV1(tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline, fee)`
 - `swapViaVenueWithFeeV1(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline, fee)`
@@ -65,13 +65,13 @@ are unchanged and return **gross** output; a frontend nets out by subtracting it
 
 ### Deployment
 
-**Important**: the PropAMMRouter depends on Ethereum mainnet state, since it interacts with the Fermi, Kipseli, and Bebop router addresses (and the UniswapV3 router fallback). Therefore, for local development we suggest using a fork of mainnet. You can start an anvil instance forking mainnet with:
+**Important**: the BlitzRouter depends on Ethereum mainnet state, since it interacts with the Fermi, Kipseli, and Bebop router addresses (and the UniswapV3 router fallback). Therefore, for local development we suggest using a fork of mainnet. You can start an anvil instance forking mainnet with:
 
 ```bash
 anvil --fork-url https://ethereum-rpc.publicnode.com
 ```
 
-To deploy the PropAMMRouter contract, run the `scripts/Deploy.s.sol` script. It deploys a `RouterAccessManager` (an OpenZeppelin `AccessManager`) as the authority, deploys the router proxy under it, and activates the policy with a single `configureRouter` call.
+To deploy the BlitzRouter contract, run the `scripts/Deploy.s.sol` script. It deploys a `RouterAccessManager` (an OpenZeppelin `AccessManager`) as the authority, deploys the router proxy under it, and activates the policy with a single `configureRouter` call.
 
 The roles and their delays are contract constants:
 
@@ -107,7 +107,7 @@ forge clean && forge script scripts/Deploy.s.sol \
 
 ### Quoting with Titan state overrides
 
-The proprietary AMMs maintain off-chain liquidity that is not reflected by mainnet state, so a plain `eth_call` to `PropAMMRouter.quoteV1` against the anvil fork only sees stale liquidity. To get accurate quotes, Titan exposes the JSON-RPC method `titan_getPammStateOverrides`, whose result is passed as the third parameter of `eth_call`.
+The proprietary AMMs maintain off-chain liquidity that is not reflected by mainnet state, so a plain `eth_call` to `BlitzRouter.quoteV1` against the anvil fork only sees stale liquidity. To get accurate quotes, Titan exposes the JSON-RPC method `titan_getPammStateOverrides`, whose result is passed as the third parameter of `eth_call`.
 The Titan endpoint only serves `titan_getPammStateOverrides`. The `eth_call` itself is sent to the anvil fork.
 
 The response is keyed by proprietary AMM router address, with one entry per venue:
@@ -129,7 +129,7 @@ The three keys are the FermiSwap, Bebop, and Kipseli routers, respectively. When
 
 ```bash
 RPC_URL=http://127.0.0.1:8545
-ROUTER=<PropAMMRouter proxy address logged by Deploy.s.sol>
+ROUTER=<BlitzRouter proxy address logged by Deploy.s.sol>
 WETH=0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2
 USDC=0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48
 
@@ -152,7 +152,7 @@ OVERRIDES=$(curl -s -X POST https://eu.rpc.titanbuilder.xyz \
         + { ($weth): { stateDiff: { ($slot): "0x0000000000000000000000000000000000000000000000008ac7230489e80000" } } }
       ')
 
-# 2. eth_call PropAMMRouter.quoteVenueV1(venue, WETH, USDC, 1e18) with the overrides.
+# 2. eth_call BlitzRouter.quoteVenueV1(venue, WETH, USDC, 1e18) with the overrides.
 #    The Uniswap V3 fallback always prices at the configured `fallbackFee` tier
 #    (3000 by default); there is no per-call fee argument.
 DATA=$(cast calldata "quoteVenueV1(address,address,address,uint256)" $VENUE_ADDR $WETH $USDC 1000000000000000000)
@@ -189,7 +189,7 @@ Upgrades are gated through the `RouterAccessManager`: `_authorizeUpgrade` is `re
 
 ### Writing a new implementation
 
-Place the new implementation under `src/` (for example `src/PropAMMRouterV2.sol`). It must:
+Place the new implementation under `src/` (for example `src/BlitzRouterV2.sol`). It must:
 
 1. **Have a compatible storage layout:** and only append new storage variables at the end. Never reorder, rename, or remove existing storage slots.
 2. **Include the `@custom:oz-upgrades-from` annotation** pointing to the previous contract name. This is what triggers automatic storage-layout validation by `openzeppelin-foundry-upgrades`.
@@ -198,8 +198,8 @@ Place the new implementation under `src/` (for example `src/PropAMMRouterV2.sol`
 Example skeleton:
 
 ```solidity
-/// @custom:oz-upgrades-from PropAMMRouter
-contract PropAMMRouterV2 {
+/// @custom:oz-upgrades-from BlitzRouter
+contract BlitzRouterV2 {
     uint256 private _newField; // appended at the end of storage
 
     function initializeV2(uint256 newField_) public reinitializer(2) {
@@ -217,13 +217,13 @@ Because upgrades carry an execution delay, the flow is two steps:
 It reads:
 - `ACCESS_MANAGER`: the `RouterAccessManager` address (logged by `Deploy.s.sol`).
 - `ROUTER_PROXY`: address of the deployed proxy to upgrade.
-- `ROUTER_IMPL_NAME`: filename of the new implementation in `src/` (e.g. `"PropAMMRouterV2.sol"`).
+- `ROUTER_IMPL_NAME`: filename of the new implementation in `src/` (e.g. `"BlitzRouterV2.sol"`).
 - `ROUTER_IMPL_REFERENCE` (optional): reference contract for storage-layout validation, unless the new implementation carries an `@custom:oz-upgrades-from` annotation.
 
 ```bash
 export ACCESS_MANAGER=<manager address logged by Deploy.s.sol>
 export ROUTER_PROXY=<proxy address logged by Deploy.s.sol>
-export ROUTER_IMPL_NAME=PropAMMRouterV2.sol
+export ROUTER_IMPL_NAME=BlitzRouterV2.sol
 forge clean && forge script scripts/Upgrade.s.sol \
     --broadcast --rpc-url $RPC_URL --private-key $UPGRADER_KEY
 ```
@@ -240,4 +240,4 @@ forge script scripts/Execute.s.sol \
 
 `$UPGRADER_KEY` must hold `UPGRADER_ROLE`, and **the same account must run both steps** — the scheduled operation is keyed by `(caller, target, data)`. Alternatively, after the delay the upgrader can call `upgradeToAndCall(newImpl, "")` on the proxy directly; the `restricted` modifier consumes the schedule.
 
-The scheduled call passes no reinitializer calldata. If the new implementation defines a `reinitializer`, edit `scripts/Upgrade.s.sol` to encode it (e.g. `abi.encodeCall(PropAMMRouterV2.initializeV2, (newField))`) in place of the empty `""` before scheduling.
+The scheduled call passes no reinitializer calldata. If the new implementation defines a `reinitializer`, edit `scripts/Upgrade.s.sol` to encode it (e.g. `abi.encodeCall(BlitzRouterV2.initializeV2, (newField))`) in place of the empty `""` before scheduling.

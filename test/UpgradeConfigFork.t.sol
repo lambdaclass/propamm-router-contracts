@@ -4,7 +4,7 @@ pragma solidity ^0.8.35;
 import "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import {PropAMMRouter} from "../src/PropAMMRouter.sol";
+import {BlitzRouter} from "../src/BlitzRouter.sol";
 import {SetupRouterVariables} from "../scripts/setupRouterVariables.s.sol";
 
 /// @notice Mainnet-fork test of the real upgrade flow for the live proxy, which
@@ -24,7 +24,7 @@ contract UpgradeConfigForkTest is Test {
     address constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
     address constant DAI = 0x6B175474E89094C44Da98b954EedeAC495271d0F;
 
-    PropAMMRouter router = PropAMMRouter(payable(PROXY));
+    BlitzRouter router = BlitzRouter(payable(PROXY));
     SetupRouterVariables seed;
     bool forked;
 
@@ -38,7 +38,7 @@ contract UpgradeConfigForkTest is Test {
 
     /// @dev Bare upgrade with no reinitializer calldata, exactly like Upgrade.s.sol.
     function _bareUpgrade() internal {
-        PropAMMRouter newImpl = new PropAMMRouter();
+        BlitzRouter newImpl = new BlitzRouter();
         vm.prank(OWNER);
         UUPSUpgradeable(PROXY).upgradeToAndCall(address(newImpl), "");
     }

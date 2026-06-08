@@ -3,7 +3,7 @@ pragma solidity ^0.8.35;
 
 import "forge-std/Script.sol";
 import {Upgrades} from "openzeppelin-foundry-upgrades/Upgrades.sol";
-import {PropAMMRouter} from "../src/PropAMMRouter.sol";
+import {BlitzRouter} from "../src/BlitzRouter.sol";
 import {RouterAccessManager} from "../src/RouterAccessManager.sol";
 
 /// @notice Deploys the `RouterAccessManager` authority and the UUPS router proxy
@@ -46,7 +46,7 @@ contract Deploy is Script {
 
         // 2. Router proxy, governed by the manager from initialization.
         address proxy = Upgrades.deployUUPSProxy(
-            "PropAMMRouter.sol", abi.encodeCall(PropAMMRouter.initialize, (swapRouter, quoter, address(manager)))
+            "BlitzRouter.sol", abi.encodeCall(BlitzRouter.initialize, (swapRouter, quoter, address(manager)))
         );
 
         // 3. Activate the on-chain policy: wires selectors->roles and locks in

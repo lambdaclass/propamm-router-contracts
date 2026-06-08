@@ -12,7 +12,7 @@ import {
     AccessManagedUpgradeable
 } from "@openzeppelin/contracts-upgradeable/access/manager/AccessManagedUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
-import {IPropAMMRouter} from "./interfaces/IPropAMMRouter.sol";
+import {IBlitzRouter} from "./interfaces/IBlitzRouter.sol";
 import {IPropAMM} from "./interfaces/IPropAMM.sol";
 import {IWETH} from "./interfaces/IWETH.sol";
 import {FERMI_ROUTER, IFermiSwapper} from "./interfaces/IFermiSwapper.sol";
@@ -23,13 +23,13 @@ import {ETH_SENTINEL, USDC, USDT, WETH} from "./libraries/Constants.sol";
 import "./libraries/Errors.sol";
 import "./libraries/Events.sol";
 
-/// @title PropAMMRouter
+/// @title BlitzRouter
 /// @notice Routes single-hop swaps to a propAMM and falls back through a fallback
 /// venue if the chosen venue reverts.
 /// @dev Designed to live behind a UUPS proxy. The fallback path is wired at
 /// initialization via `fallbackSwapRouter` and `fallbackQuoter`
-contract PropAMMRouter is
-    IPropAMMRouter,
+contract BlitzRouter is
+    IBlitzRouter,
     ReentrancyGuardTransient,
     Initializable,
     PausableUpgradeable,
@@ -128,7 +128,7 @@ contract PropAMMRouter is
     // Swap //
     //------//
 
-    /// @inheritdoc IPropAMMRouter
+    /// @inheritdoc IBlitzRouter
     /// @dev Picks the best-quoting venue via `_pickBestVenue`, then executes
     /// through `_coreSwap`; a `fallbackSwapRouter` selection (the Uniswap
     /// fallback won, or no venue could quote) routes straight to the fallback venue.
@@ -151,7 +151,7 @@ contract PropAMMRouter is
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
 
-    /// @inheritdoc IPropAMMRouter
+    /// @inheritdoc IBlitzRouter
     /// @dev Validates `fee`, grosses up the net `amountOutMin` so the user still nets
     /// at least their minimum, routes the swap to this contract, then forwards the fee
     /// and the net. Emits `Swapped` with the net amount and the real `recipient`.
@@ -179,7 +179,7 @@ contract PropAMMRouter is
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
 
-    /// @inheritdoc IPropAMMRouter
+    /// @inheritdoc IBlitzRouter
     /// @dev Swaps via the `venue`. It must be a callable venue or the
     /// fallback venue named by the `fallbackSwapRouter` address.
     function swapViaVenueV1(
@@ -197,7 +197,7 @@ contract PropAMMRouter is
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
 
-    /// @inheritdoc IPropAMMRouter
+    /// @inheritdoc IBlitzRouter
     /// @dev Like `swapViaVenueV1` plus the fee skim; the underlying
     /// swap is routed to this contract, then fee + net are forwarded.
     /// Reverts `UnknownVenue` if `venue` is neither a whitelisted propAMM
@@ -223,7 +223,7 @@ contract PropAMMRouter is
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
 
-    /// @inheritdoc IPropAMMRouter
+    /// @inheritdoc IBlitzRouter
     /// @dev Requotes ONLY the caller-supplied `venues` on-chain via
     /// `_pickBestVenueFrom` and attempts to swap via the best-quoting one;
     /// quotes are advisory, so `amountOutMin` is enforced at execution by
@@ -248,7 +248,7 @@ contract PropAMMRouter is
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
 
-    /// @inheritdoc IPropAMMRouter
+    /// @inheritdoc IBlitzRouter
     /// @dev Like `swapViaSelectedVenuesV1` plus the fee skim; requotes
     /// only `venues`, grosses up the net min, routes the swap to this contract, then forwards
     /// fee + net.
@@ -487,7 +487,7 @@ contract PropAMMRouter is
     // Quote //
     //-------//
 
-    /// @inheritdoc IPropAMMRouter
+    /// @inheritdoc IBlitzRouter
     /// @dev Delegates to `_pickBestVenue` (which compares the proprietary AMMs
     /// and fallback) and reverts `NoQuotesAvailable` if nothing could be priced.
     function quoteV1(address tokenIn, address tokenOut, uint256 amount)
@@ -505,7 +505,7 @@ contract PropAMMRouter is
         require(bestQuote > 0, NoQuotesAvailable());
     }
 
-    /// @inheritdoc IPropAMMRouter
+    /// @inheritdoc IBlitzRouter
     /// @dev Gates on `_isVenue` (a whitelisted propAMM or the fallback),
     /// reverting `UnknownVenue` otherwise. Prices `venue` through
     /// `_dispatchQuoteVenue` (which resolves the fallback address to the Uniswap
@@ -539,7 +539,7 @@ contract PropAMMRouter is
         }
     }
 
-    /// @inheritdoc IPropAMMRouter
+    /// @inheritdoc IBlitzRouter
     /// @dev Delegates to `_pickBestVenueFrom`, considering ONLY `venues`. Venues
     /// that revert while quoting — including non-whitelisted addresses, which
     /// `_dispatchQuoteVenue` rejects with `UnknownVenue` — are skipped, not surfaced.
@@ -561,7 +561,7 @@ contract PropAMMRouter is
         (bestAmountOut, bestVenue) = _pickBestVenueFrom(venues, tokenIn, tokenOut, amountIn);
         if (bestVenue == address(0)) {
             // None of the considered venues could be priced; fall back to the
-            // public venue, as documented by `IPropAMMRouter`.
+            // public venue, as documented by `IBlitzRouter`.
             try this.quoteUniswapV3(tokenIn, tokenOut, amountIn) returns (uint256 fallbackOut) {
                 bestAmountOut = fallbackOut;
                 bestVenue = fallbackSwapRouter;

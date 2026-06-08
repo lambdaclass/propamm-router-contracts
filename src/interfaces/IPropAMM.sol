@@ -3,7 +3,7 @@ pragma solidity ^0.8.35;
 
 /// @title IPropAMM
 /// @notice Interface a proprietary AMM must implement to be added to the
-/// `PropAMMRouter` whitelist.
+/// `BlitzRouter` whitelist.
 /// @dev The router uses a push-payment model: before calling `swap` it
 /// transfers `amountIn` of `tokenIn` to the propAMM, then `swap` is expected to
 /// consume that balance.

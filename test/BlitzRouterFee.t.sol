@@ -5,8 +5,8 @@ import {Test, Vm} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {IPropAMMRouter} from "../src/interfaces/IPropAMMRouter.sol";
-import {PropAMMRouter} from "../src/PropAMMRouter.sol";
+import {IBlitzRouter} from "../src/interfaces/IBlitzRouter.sol";
+import {BlitzRouter} from "../src/BlitzRouter.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockFeeOnTransferERC20} from "./mocks/MockFeeOnTransferERC20.sol";
 import {MockV3SwapRouter} from "./mocks/MockV3SwapRouter.sol";
@@ -16,8 +16,8 @@ import {MockBebop} from "./mocks/MockBebop.sol";
 import "../src/libraries/Errors.sol";
 import {FrontendFees} from "../src/libraries/FrontendFees.sol";
 
-contract PropAMMRouterFeeTest is Test {
-    PropAMMRouter router;
+contract BlitzRouterFeeTest is Test {
+    BlitzRouter router;
     AccessManager manager;
     MockV3SwapRouter swapRouter;
     MockQuoterV2 quoter;
@@ -28,15 +28,15 @@ contract PropAMMRouterFeeTest is Test {
     address user = makeAddr("user");
     address feeRecipient = makeAddr("feeRecipient");
 
-    function _deployRouter() internal returns (PropAMMRouter) {
+    function _deployRouter() internal returns (BlitzRouter) {
         // Plain AccessManager with `owner` as delay-0 admin: unmapped selectors
         // default to ADMIN_ROLE, so `owner` can call every `restricted` function
         // (e.g. pause) directly.
         manager = new AccessManager(owner);
-        PropAMMRouter impl = new PropAMMRouter();
+        BlitzRouter impl = new BlitzRouter();
         bytes memory data =
-            abi.encodeCall(PropAMMRouter.initialize, (address(swapRouter), address(quoter), address(manager)));
-        return PropAMMRouter(payable(address(new ERC1967Proxy(address(impl), data))));
+            abi.encodeCall(BlitzRouter.initialize, (address(swapRouter), address(quoter), address(manager)));
+        return BlitzRouter(payable(address(new ERC1967Proxy(address(impl), data))));
     }
 
     function setUp() public {
@@ -72,7 +72,7 @@ contract PropAMMRouterFeeTest is Test {
             expectedNet,
             user,
             block.timestamp + 1,
-            IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
+            IBlitzRouter.FrontendFee({bps: 50, recipient: feeRecipient})
         );
 
         assertEq(amountOut, expectedNet);
@@ -96,7 +96,7 @@ contract PropAMMRouterFeeTest is Test {
             expectedNet,
             user,
             block.timestamp + 1,
-            IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
+            IBlitzRouter.FrontendFee({bps: 50, recipient: feeRecipient})
         );
 
         assertEq(amountOut, expectedNet);
@@ -122,7 +122,7 @@ contract PropAMMRouterFeeTest is Test {
             expectedNet,
             user,
             block.timestamp + 1,
-            IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
+            IBlitzRouter.FrontendFee({bps: 50, recipient: feeRecipient})
         );
 
         assertEq(amountOut, expectedNet);
@@ -142,7 +142,7 @@ contract PropAMMRouterFeeTest is Test {
             0,
             user,
             block.timestamp + 1,
-            IPropAMMRouter.FrontendFee({bps: 101, recipient: feeRecipient})
+            IBlitzRouter.FrontendFee({bps: 101, recipient: feeRecipient})
         );
     }
 
@@ -157,7 +157,7 @@ contract PropAMMRouterFeeTest is Test {
             0,
             user,
             block.timestamp + 1,
-            IPropAMMRouter.FrontendFee({bps: 50, recipient: address(0)})
+            IBlitzRouter.FrontendFee({bps: 50, recipient: address(0)})
         );
     }
 
@@ -176,7 +176,7 @@ contract PropAMMRouterFeeTest is Test {
             netMin,
             user,
             block.timestamp + 1,
-            IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
+            IBlitzRouter.FrontendFee({bps: 50, recipient: feeRecipient})
         );
     }
 
@@ -191,12 +191,12 @@ contract PropAMMRouterFeeTest is Test {
             1_000e18,
             user,
             block.timestamp + 1,
-            IPropAMMRouter.FrontendFee({bps: 0, recipient: feeRecipient})
+            IBlitzRouter.FrontendFee({bps: 0, recipient: feeRecipient})
         );
         Vm.Log[] memory logs = vm.getRecordedLogs();
         for (uint256 i = 0; i < logs.length; i++) {
             assertTrue(
-                logs[i].topics[0] != IPropAMMRouter.FrontendFeeCharged.selector,
+                logs[i].topics[0] != IBlitzRouter.FrontendFeeCharged.selector,
                 "FrontendFeeCharged must not fire at zero fee"
             );
         }
@@ -216,7 +216,7 @@ contract PropAMMRouterFeeTest is Test {
             100,
             user,
             block.timestamp + 1,
-            IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
+            IBlitzRouter.FrontendFee({bps: 50, recipient: feeRecipient})
         );
         assertEq(amountOut, 101); // fee = 101*50/10_000 = 0 (floored)
         assertEq(tokenOut.balanceOf(feeRecipient), 0);
@@ -235,7 +235,7 @@ contract PropAMMRouterFeeTest is Test {
             0,
             user,
             block.timestamp + 1,
-            IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
+            IBlitzRouter.FrontendFee({bps: 50, recipient: feeRecipient})
         );
     }
 
@@ -250,7 +250,7 @@ contract PropAMMRouterFeeTest is Test {
             0,
             user,
             block.timestamp - 1,
-            IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
+            IBlitzRouter.FrontendFee({bps: 50, recipient: feeRecipient})
         );
     }
 
@@ -281,7 +281,7 @@ contract PropAMMRouterFeeTest is Test {
             0,
             user,
             block.timestamp + 1,
-            IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
+            IBlitzRouter.FrontendFee({bps: 50, recipient: feeRecipient})
         );
 
         assertEq(amountOut, net);
@@ -309,7 +309,7 @@ contract PropAMMRouterFeeTest is Test {
             netMin,
             user,
             block.timestamp + 1,
-            IPropAMMRouter.FrontendFee({bps: bps, recipient: feeRecipient})
+            IBlitzRouter.FrontendFee({bps: bps, recipient: feeRecipient})
         );
 
         uint256 expectedFee = delivered * bps / 10_000;
@@ -341,7 +341,7 @@ contract PropAMMRouterFeeTest is Test {
             net,
             user,
             block.timestamp + 1,
-            IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
+            IBlitzRouter.FrontendFee({bps: 50, recipient: feeRecipient})
         );
 
         assertEq(amountOut, net);
@@ -356,7 +356,7 @@ contract PropAMMRouterFeeTest is Test {
         _prepare(1_000e18, 990e18);
 
         vm.expectEmit(true, true, true, true, address(router));
-        emit IPropAMMRouter.Swapped(
+        emit IBlitzRouter.Swapped(
             user, address(tokenIn), address(tokenOut), 1_000e18, 990e18, user, address(swapRouter)
         );
 
@@ -382,7 +382,7 @@ contract PropAMMRouterFeeTest is Test {
         venues[0] = address(0xDEAD); // non-whitelisted -> UnknownVenue, skipped; venue stays address(0)
 
         vm.expectEmit(true, true, true, true, address(router));
-        emit IPropAMMRouter.Swapped(
+        emit IBlitzRouter.Swapped(
             user, address(tokenIn), address(tokenOut), 1_000e18, 990e18, user, address(swapRouter)
         );
 

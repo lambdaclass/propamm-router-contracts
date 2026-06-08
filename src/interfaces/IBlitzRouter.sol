@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.35;
 
-/// @title IPropAMMRouter
+/// @title IBlitzRouter
 /// @notice Router for single-hop swaps across whitelisted proprietary venues,
 /// with a public-venue fallback used when the chosen propAMM cannot fill.
-interface IPropAMMRouter {
+interface IBlitzRouter {
     /// @notice Emitted once per successful swap after `tokenOut` is delivered to `recipient`.
     /// @param sender The address that invoked the swap entrypoint and supplied
     /// `amountIn` of `tokenIn`. Indexed so consumers can fetch a given account's

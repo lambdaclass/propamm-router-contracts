@@ -19,10 +19,10 @@ import {RouterAccessManager} from "../src/RouterAccessManager.sol";
 /// Required env:
 ///   ACCESS_MANAGER   the RouterAccessManager address.
 ///   ROUTER_PROXY     the router proxy to upgrade.
-///   ROUTER_IMPL_NAME new implementation contract (e.g. "PropAMMRouterV2.sol").
+///   ROUTER_IMPL_NAME new implementation contract (e.g. "BlitzRouterV2.sol").
 /// Optional env:
 ///   ROUTER_IMPL_REFERENCE  reference contract for storage-layout validation
-///                          (e.g. "PropAMMRouter.sol"). Recommended unless the
+///                          (e.g. "BlitzRouter.sol"). Recommended unless the
 ///                          new impl declares its predecessor via an
 ///                          oz-upgrades-from annotation.
 contract Upgrade is Script {

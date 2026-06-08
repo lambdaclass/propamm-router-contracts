@@ -1,10 +1,10 @@
 # RouterAccessManager: how access control works and how to call restricted functions
 
-The router's administrative surface is governed by [`RouterAccessManager`](../src/RouterAccessManager.sol), an [OpenZeppelin `AccessManager`](https://docs.openzeppelin.com/contracts/5.x/access-control#access-management) that acts as the single authority for every `restricted` function on `PropAMMRouter`. This document explains the model, the roles and delays in force, and — operationally — how each restricted function must be called.
+The router's administrative surface is governed by [`RouterAccessManager`](../src/RouterAccessManager.sol), an [OpenZeppelin `AccessManager`](https://docs.openzeppelin.com/contracts/5.x/access-control#access-management) that acts as the single authority for every `restricted` function on `BlitzRouter`. This document explains the model, the roles and delays in force, and — operationally — how each restricted function must be called.
 
 ## The model in one paragraph
 
-`PropAMMRouter` is `AccessManagedUpgradeable`: every admin entrypoint carries the `restricted` modifier, which asks the manager "can this caller invoke this selector on this target, and with what delay?". The manager holds the whole policy as state: a map from `(target, selector)` to a **role**, and per-`(role, account)` **execution delays**. A caller with the right role and a **zero** delay calls the router directly, in one transaction. A caller whose role carries a **non-zero** delay cannot: they must first **schedule** the operation on the manager, wait out the delay (during which the pending operation is publicly visible on-chain), and then **execute** it. This makes the manager double as a timelock — there is no separate timelock contract.
+`BlitzRouter` is `AccessManagedUpgradeable`: every admin entrypoint carries the `restricted` modifier, which asks the manager "can this caller invoke this selector on this target, and with what delay?". The manager holds the whole policy as state: a map from `(target, selector)` to a **role**, and per-`(role, account)` **execution delays**. A caller with the right role and a **zero** delay calls the router directly, in one transaction. A caller whose role carries a **non-zero** delay cannot: they must first **schedule** the operation on the manager, wait out the delay (during which the pending operation is publicly visible on-chain), and then **execute** it. This makes the manager double as a timelock — there is no separate timelock contract.
 
 ```
 zero-delay role             non-zero-delay role
@@ -46,7 +46,7 @@ There is additionally a **target admin delay** on the router (`ADMIN_DELAY` = 7 
 Only `pause()` qualifies. The `GUARDIAN_ROLE` holder calls the router directly:
 
 ```solidity
-PropAMMRouter(proxy).pause();
+BlitzRouter(proxy).pause();
 ```
 
 One transaction, effective immediately. (The bootstrap `ADMIN_ROLE` holder, while it exists with delay 0, can also call anything directly — see [Deployment and bootstrap](#deployment-and-bootstrap).)
@@ -58,7 +58,7 @@ Every other restricted function is held by a role with a non-zero execution dela
 **1. Schedule** the exact call on the manager:
 
 ```solidity
-bytes memory data = abi.encodeCall(PropAMMRouter.unpause, ());
+bytes memory data = abi.encodeCall(BlitzRouter.unpause, ());
 // when = 0 means "earliest allowed": block.timestamp + the caller's execution delay.
 (bytes32 operationId, uint32 nonce) = manager.schedule(address(proxy), data, 0);
 ```
@@ -73,7 +73,7 @@ manager.execute(address(proxy), data);
 
 // (b) directly on the router — the `restricted` modifier detects and
 //     consumes the matching schedule:
-PropAMMRouter(proxy).unpause();
+BlitzRouter(proxy).unpause();
 ```
 
 Key mechanics to be aware of:
@@ -134,8 +134,8 @@ cast send $ACCESS_MANAGER "execute(address,bytes)" $ROUTER_PROXY $DATA \
 1. **Schedule** with [`scripts/Upgrade.s.sol`](../scripts/Upgrade.s.sol) (broadcast by the `UPGRADER_ROLE` holder). It deploys the new implementation, runs the OpenZeppelin upgrade-safety validations, and schedules `upgradeToAndCall(newImpl, "")` on the manager. It logs the `operationId`, the ready-at timestamp, and the exact `EXEC_TARGET` / `EXEC_DATA` for step 2.
 
    ```bash
-   ACCESS_MANAGER=0x... ROUTER_PROXY=0x... ROUTER_IMPL_NAME="PropAMMRouterV2.sol" \
-   ROUTER_IMPL_REFERENCE="PropAMMRouter.sol" \
+   ACCESS_MANAGER=0x... ROUTER_PROXY=0x... ROUTER_IMPL_NAME="BlitzRouterV2.sol" \
+   ROUTER_IMPL_REFERENCE="BlitzRouter.sol" \
    forge script scripts/Upgrade.s.sol --rpc-url $RPC --broadcast --private-key $UPGRADER_KEY
    ```
 

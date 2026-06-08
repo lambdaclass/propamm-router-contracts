@@ -4,7 +4,7 @@ pragma solidity ^0.8.35;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {IPropAMMRouter} from "../interfaces/IPropAMMRouter.sol";
+import {IBlitzRouter} from "../interfaces/IBlitzRouter.sol";
 import {ETH_SENTINEL} from "./Constants.sol";
 import {ETHTransferFailed, ZeroAddress} from "./Errors.sol";
 
@@ -25,7 +25,7 @@ library FrontendFees {
 
     /// @notice Reverts unless the frontend fee is within cap and has a real recipient.
     /// @param fee The caller-supplied fee parameters.
-    function _validateFee(IPropAMMRouter.FrontendFee calldata fee) internal pure {
+    function _validateFee(IBlitzRouter.FrontendFee calldata fee) internal pure {
         require(fee.bps <= MAX_FEE_BPS, FeeBpsTooHigh(fee.bps, MAX_FEE_BPS));
         require(fee.recipient != address(0), ZeroAddress());
     }
@@ -59,7 +59,7 @@ library FrontendFees {
     function _skimAndDisburse(
         address tokenOut,
         uint256 delivered,
-        IPropAMMRouter.FrontendFee calldata fee,
+        IBlitzRouter.FrontendFee calldata fee,
         address recipient
     ) internal returns (uint256 net) {
         uint256 feeAmt = _feeAmount(delivered, fee.bps);
@@ -71,7 +71,7 @@ library FrontendFees {
             } else {
                 IERC20(tokenOut).safeTransfer(fee.recipient, feeAmt);
             }
-            emit IPropAMMRouter.FrontendFeeCharged(fee.recipient, tokenOut, feeAmt, msg.sender);
+            emit IBlitzRouter.FrontendFeeCharged(fee.recipient, tokenOut, feeAmt, msg.sender);
         }
         if (net > 0) {
             if (tokenOut == ETH_SENTINEL) {

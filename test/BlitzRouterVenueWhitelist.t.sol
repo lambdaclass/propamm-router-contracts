@@ -5,7 +5,7 @@ import {Test, stdError} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import {IAccessManaged} from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
-import {PropAMMRouter} from "../src/PropAMMRouter.sol";
+import {BlitzRouter} from "../src/BlitzRouter.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockSwapRouter02} from "./mocks/MockSwapRouter02.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
@@ -13,8 +13,8 @@ import {FERMI_ROUTER} from "../src/interfaces/IFermiSwapper.sol";
 import {BEBOP_ROUTER} from "../src/interfaces/IBebopRouter.sol";
 import "../src/libraries/Errors.sol";
 
-contract PropAMMRouterVenueWhitelistTest is Test {
-    PropAMMRouter internal router;
+contract BlitzRouterVenueWhitelistTest is Test {
+    BlitzRouter internal router;
     AccessManager internal manager;
     MockSwapRouter02 internal mockRouter;
     MockQuoterV2 internal mockQuoter;
@@ -34,7 +34,7 @@ contract PropAMMRouterVenueWhitelistTest is Test {
     address internal genericVenue = address(0xABCD);
 
     // Re-declared locally so vm.expectEmit can match the router's emit (mirror of
-    // PropAMMRouter.VenueWhitelisted / VenueRemoved; kept in sync).
+    // BlitzRouter.VenueWhitelisted / VenueRemoved; kept in sync).
     event VenueWhitelisted(address indexed venue);
     event VenueRemoved(address indexed venue);
 
@@ -49,11 +49,11 @@ contract PropAMMRouterVenueWhitelistTest is Test {
         // directly while anyone else gets AccessManagedUnauthorized.
         manager = new AccessManager(owner);
 
-        PropAMMRouter impl = new PropAMMRouter();
+        BlitzRouter impl = new BlitzRouter();
         bytes memory initData =
-            abi.encodeCall(PropAMMRouter.initialize, (address(mockRouter), address(mockQuoter), address(manager)));
+            abi.encodeCall(BlitzRouter.initialize, (address(mockRouter), address(mockQuoter), address(manager)));
         ERC1967Proxy proxy = new ERC1967Proxy(address(impl), initData);
-        router = PropAMMRouter(payable(address(proxy)));
+        router = BlitzRouter(payable(address(proxy)));
     }
 
     // --- Seeding -----------------------------------------------------------
