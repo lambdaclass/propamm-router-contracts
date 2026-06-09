@@ -1,8 +1,8 @@
 /**
  * Thin wrappers around viem for reading from and writing to contracts.
  *
- * Domain-specific bindings (router, access manager, ...) should be built on
- * top of `ContractClient.read` / `ContractClient.write` with their own ABIs.
+ * Domain-specific bindings (router, ...) are built on top of
+ * `ContractClient.read` / `call` / `write` with their own ABIs.
  */
 
 import {
@@ -21,7 +21,7 @@ import {
 export interface ContractClientOptions {
   /** JSON-RPC endpoint, e.g. `http://localhost:8545`. */
   rpcUrl: string;
-  /** Target chain (e.g. `mainnet` or `anvil` from `viem/chains`). */
+  /** Target chain (e.g. `mainnet` or `anvil` from `@propamm/sdk/common/chains`). */
   chain: Chain;
   /** Account used to sign transactions. Omit for a read-only client. */
   account?: Account;
@@ -66,6 +66,23 @@ export class ContractClient {
       abi: params.abi,
       functionName: params.functionName,
       args: params.args ?? [],
+    });
+    return result as T;
+  }
+
+  /**
+   * Simulate a state-changing function via `eth_call` and return its result
+   * without sending a transaction. Useful for nonpayable functions that are
+   * effectively queries (e.g. on-chain quotes).
+   */
+  async call<T = unknown>(params: WriteParams): Promise<T> {
+    const { result } = await this.publicClient.simulateContract({
+      account: this.account,
+      address: params.address,
+      abi: params.abi,
+      functionName: params.functionName,
+      args: params.args ?? [],
+      value: params.value,
     });
     return result as T;
   }
