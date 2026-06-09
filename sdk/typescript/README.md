@@ -10,11 +10,36 @@ pnpm build      # compile to dist/
 pnpm typecheck
 ```
 
-## Usage
+## Getting started
 
-Imports are hierarchical; the root exports only the two entry classes and
-core types. viem essentials (chains, account builders) are re-exported so
-basic usage never needs a direct viem import.
+Quote and swap 1 ETH for USDC through the best venue:
+
+```ts
+import { ContractClient } from "@propamm/sdk/client";
+import { PropAmmRouter } from "@propamm/sdk/router";
+import { ETH_SENTINEL, USDC } from "@propamm/sdk/common/tokens";
+import { applySlippage, deadlineIn } from "@propamm/sdk/common/helpers";
+import { mainnet } from "@propamm/sdk/common/chains";
+import { privateKeyToAccount } from "@propamm/sdk/common/accounts";
+
+const account = privateKeyToAccount("0x...");
+const client = new ContractClient({ rpcUrl: "https://...", chain: mainnet, account });
+const router = new PropAmmRouter(client, "0x..."); // deployed router proxy
+
+const { amountOut } = await router.quote(ETH_SENTINEL, USDC, 10n ** 18n);
+
+const result = await router.swapAndWait({
+  tokenIn: ETH_SENTINEL,
+  tokenOut: USDC,
+  amountIn: 10n ** 18n,
+  amountOutMin: applySlippage(amountOut, 50), // quote - 0.5%
+  recipient: account.address,
+  deadline: deadlineIn(300), // now + 5 min
+});
+console.log(`received ${result.amountOut} USDC via ${result.executedVenue}`);
+```
+
+## Usage
 
 ```ts
 import { ContractClient } from "@propamm/sdk/client";
@@ -101,10 +126,10 @@ await client.write({
 Source modules map 1:1 to import paths (`src/<path>.ts` → `@propamm/sdk/<path>`):
 
 - `src/client.ts` — generic viem-based contract client (`read`/`call`/`write`/`waitForTransaction`).
-- `src/router/index.ts` — `PropAmmRouter` bindings (quotes, swaps, `*AndWait` variants, `waitForSwap`, `approve`/`allowance`, views) plus `frontendFee` and `MAX_FEE_BPS`. Method names drop the on-chain `V1` suffix.
+- `src/router/index.ts` — `PropAmmRouter` bindings (quotes, swaps, `*AndWait` variants, `waitForSwap`, `approve`/`allowance`, views) plus `frontendFee` and `MAX_FEE_BPS`.
 - `src/router/abi.ts` — human-readable `PropAMMRouter` ABI (functions, events, errors).
 - `src/common/tokens.ts` — `ETH_SENTINEL` and mainnet token addresses.
-- `src/common/pamms.ts` — curated `PAMMS` name → venue address mapping.
+- `src/common/pamms.ts` — `PAMMS` name → venue address mapping.
 - `src/common/helpers.ts` — `applySlippage`, `deadlineIn`.
 - `src/common/chains.ts`, `src/common/accounts.ts` — viem re-exports.
 
