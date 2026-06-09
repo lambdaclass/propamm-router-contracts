@@ -28,4 +28,6 @@ jobs:
         run: forge fmt --check
 
       - name: Run tests
+        env:
+          ETH_RPC_URL: https://ethereum-rpc.publicnode.com
         run: forge test
