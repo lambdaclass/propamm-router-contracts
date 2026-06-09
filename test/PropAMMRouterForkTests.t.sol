@@ -27,7 +27,7 @@ contract PropAMMRouterForkTests is Test {
 
     /// @dev A newly deployed Kipseli PAMM, distinct from the built-in
     /// `KIPSELI_PAMM` address.
-    address constant NEW_KIPSELI_PAMM = 0xcCdda3258aA079ce45E6aa6F35829a6612eb7C45;
+    address constant NEW_KIPSELI_PAMM = 0x71e790dd841c8A9061487cb3E78C288E75cE0B3d;
     address constant NEW_FERMI_ROUTER = 0x5979458912F80B96d30D4220af8E2e4925A33320;
 
     IPropAMMRouter router;
