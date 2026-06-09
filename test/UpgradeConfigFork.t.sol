@@ -24,7 +24,7 @@ contract UpgradeConfigForkTest is Test {
     address constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
     address constant DAI = 0x6B175474E89094C44Da98b954EedeAC495271d0F;
 
-    PropAMMRouter router = PropAMMRouter(PROXY);
+    PropAMMRouter router = PropAMMRouter(payable(PROXY));
     SetupRouterVariables seed;
     bool forked;
 
@@ -72,8 +72,9 @@ contract UpgradeConfigForkTest is Test {
 
         // Upgraded but not yet configured: fallbackFee is 0 and the Uniswap
         // fallback reverts (invalid tier 0) for any pair. The venue whitelist is
-        // also empty — _seedDefaultVenues is initializer-gated and never re-ran.
-        assertEq(router.owner(), OWNER, "owner preserved across upgrade");
+        // also empty — the venue seeding in `initialize` is initializer-gated
+        // and never re-ran.
+        assertEq(router.authority(), OWNER, "owner preserved across upgrade");
         assertEq(router.fallbackFee(), 0, "fallbackFee 0 right after bare upgrade");
         assertEq(router.whitelistedVenueCount(), 0, "no venues right after bare upgrade");
         vm.expectRevert();

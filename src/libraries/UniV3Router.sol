@@ -40,8 +40,9 @@ library UniV3Router {
     ) internal returns (uint256 amountOut) {
         IERC20(tokenIn).forceApprove(address(swapRouter), amountIn);
 
-        amountOut = IV3SwapRouter(swapRouter).exactInputSingle(
-            IV3SwapRouter.ExactInputSingleParams({
+        amountOut = IV3SwapRouter(swapRouter)
+            .exactInputSingle(
+                IV3SwapRouter.ExactInputSingleParams({
                 tokenIn: tokenIn,
                 tokenOut: tokenOut,
                 fee: fee,
@@ -50,7 +51,7 @@ library UniV3Router {
                 amountOutMinimum: amountOutMinimum,
                 sqrtPriceLimitX96: 0
             })
-        );
+            );
 
         // Prevent later transfers if token was partially pulled
         IERC20(tokenIn).forceApprove(swapRouter, 0);
@@ -83,8 +84,9 @@ library UniV3Router {
     ) internal returns (uint256 amountIn) {
         IERC20(tokenIn).forceApprove(address(swapRouter), amountInMaximum);
 
-        amountIn = IV3SwapRouter(swapRouter).exactOutputSingle(
-            IV3SwapRouter.ExactOutputSingleParams({
+        amountIn = IV3SwapRouter(swapRouter)
+            .exactOutputSingle(
+                IV3SwapRouter.ExactOutputSingleParams({
                 tokenIn: tokenIn,
                 tokenOut: tokenOut,
                 fee: fee,
@@ -93,15 +95,12 @@ library UniV3Router {
                 amountInMaximum: amountInMaximum,
                 sqrtPriceLimitX96: 0
             })
-        );
+            );
 
         IERC20(tokenIn).forceApprove(address(swapRouter), 0);
 
         if (amountIn < amountInMaximum) {
-            IERC20(tokenIn).safeTransfer(
-                msg.sender,
-                amountInMaximum - amountIn
-            );
+            IERC20(tokenIn).safeTransfer(msg.sender, amountInMaximum - amountIn);
         }
     }
 
@@ -116,22 +115,16 @@ library UniV3Router {
     /// @param amountIn The exact amount of `tokenIn` to quote against.
     /// @param quoter The address of the Uniswap V3 QuoterV2 contract.
     /// @return amountOut The amount of `tokenOut` the swap would produce.
-    function quoteExactIn(
-        address tokenIn,
-        address tokenOut,
-        uint24 fee,
-        uint256 amountIn,
-        address quoter
-    ) internal returns (uint256 amountOut) {
-        (amountOut, , , ) = IQuoterV2(quoter).quoteExactInputSingle(
-            IQuoterV2.QuoteExactInputSingleParams({
-                tokenIn: tokenIn,
-                tokenOut: tokenOut,
-                amountIn: amountIn,
-                fee: fee,
-                sqrtPriceLimitX96: 0
+    function quoteExactIn(address tokenIn, address tokenOut, uint24 fee, uint256 amountIn, address quoter)
+        internal
+        returns (uint256 amountOut)
+    {
+        (amountOut,,,) = IQuoterV2(quoter)
+            .quoteExactInputSingle(
+                IQuoterV2.QuoteExactInputSingleParams({
+                tokenIn: tokenIn, tokenOut: tokenOut, amountIn: amountIn, fee: fee, sqrtPriceLimitX96: 0
             })
-        );
+            );
     }
 
     /// @notice Quotes the `tokenIn` required to receive an exact `amountOut`
@@ -145,21 +138,15 @@ library UniV3Router {
     /// @param amountOut The exact amount of `tokenOut` to quote against.
     /// @param quoter The address of the Uniswap V3 QuoterV2 contract.
     /// @return amountIn The amount of `tokenIn` the swap would require.
-    function quoteExactOut(
-        address tokenIn,
-        address tokenOut,
-        uint24 fee,
-        uint256 amountOut,
-        address quoter
-    ) internal returns (uint256 amountIn) {
-        (amountIn, , , ) = IQuoterV2(quoter).quoteExactOutputSingle(
-            IQuoterV2.QuoteExactOutputSingleParams({
-                tokenIn: tokenIn,
-                tokenOut: tokenOut,
-                amount: amountOut,
-                fee: fee,
-                sqrtPriceLimitX96: 0
+    function quoteExactOut(address tokenIn, address tokenOut, uint24 fee, uint256 amountOut, address quoter)
+        internal
+        returns (uint256 amountIn)
+    {
+        (amountIn,,,) = IQuoterV2(quoter)
+            .quoteExactOutputSingle(
+                IQuoterV2.QuoteExactOutputSingleParams({
+                tokenIn: tokenIn, tokenOut: tokenOut, amount: amountOut, fee: fee, sqrtPriceLimitX96: 0
             })
-        );
+            );
     }
 }
