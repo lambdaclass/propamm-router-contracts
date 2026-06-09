@@ -40,6 +40,18 @@ const result = await router.swapAndWait({
 console.log(`received ${formatUnits(result.amountOut, 6)} USDC via ${result.executedVenue}`);
 ```
 
+A runnable version of this example lives in
+[`examples/getting-started.ts`](examples/getting-started.ts):
+
+```sh
+pnpm build
+node examples/getting-started.ts   # Node >= 22.18 runs TypeScript directly
+```
+
+It defaults to a local anvil mainnet fork with anvil's funded account and the
+mainnet router deployment; override with `RPC_URL` / `PRIVATE_KEY` /
+`ROUTER_ADDRESS` / `SLIPPAGE_BPS`.
+
 ## Usage
 
 ```ts
