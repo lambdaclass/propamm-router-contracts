@@ -25,6 +25,11 @@ contract PropAMMRouterForkTests is Test {
     // The address of the mainnet PropAMMRouter contract (demo environment)
     address constant MAINNET_PROPAMM_ROUTER_ADDRESS = 0x4DdF368080CD7946db5b459aD591c350158175e1;
 
+    /// @dev A newly deployed Kipseli PAMM, distinct from the built-in
+    /// `KIPSELI_PAMM` address.
+    address constant NEW_KIPSELI_PAMM = 0xcCdda3258aA079ce45E6aa6F35829a6612eb7C45;
+    address constant NEW_FERMI_ROUTER = 0x5979458912F80B96d30D4220af8E2e4925A33320;
+
     IPropAMMRouter router;
     address taker;
 
@@ -45,9 +50,6 @@ contract PropAMMRouterForkTests is Test {
         vm.deal(taker, 10 ether);
     }
 
-    /// @dev A newly deployed Kipseli PAMM, distinct from the built-in
-    /// `KIPSELI_PAMM` address.
-    address constant NEW_KIPSELI_PAMM = 0xcCdda3258aA079ce45E6aa6F35829a6612eb7C45;
 
     /// @dev Calls the `swapViaVenueV1` function passing Kipseli as venue,
     /// and asserts the swap was actually executed by Kipseli (didn't fallback to Uniswap).
@@ -62,7 +64,7 @@ contract PropAMMRouterForkTests is Test {
     /// It updates the price before sending the swap transaction.
     function test_swapViaVenueV1Fermi() public {
         _updateFermiPrice();
-        _runSwapViaVenueV1(FERMI_ROUTER);
+        _runSwapViaVenueV1(NEW_FERMI_ROUTER);
     }
 
     /// @dev Calls the `swapViaVenueV1` function passing Uniswap (fallback) as venue.
@@ -107,11 +109,12 @@ contract PropAMMRouterForkTests is Test {
         // 0x774c15474849b646ae2feab49379c7b178c1a32b4944e04aef842bb6823c6146
         // Fermi's pricing lane scoped to this target; unlike Kipseli's lane 0,
         // the lane index is a full 32-byte key.
-        address priceTarget = 0xe514A3c48DA8B233f65b5d15BA1905d6d35BFE48;
+
+        address priceTarget = 0x26e5A56f807d4C937B0b815266B135F09B4Bf312;
         uint256 laneIndex = 0x2eec03b8999af9793df60f1395a1b41c29e22b324ea3200ca21bc692979b9d46;
         // Single packed price slot; replayed verbatim, the timestamp is
         // restamped to fork time in `_updateRegistryState`.
-        uint256 priceSlot0 = 0x0000000000000000000000000000000000000000000000000000002951c4a160;
+        uint256 priceSlot0 = 0x0000000000000000000000000000000000000000000000000000002779853ea0;
 
         uint256[] memory slots = new uint256[](1);
         slots[0] = priceSlot0;
