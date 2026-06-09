@@ -50,7 +50,6 @@ contract PropAMMRouterForkTests is Test {
         vm.deal(taker, 10 ether);
     }
 
-
     /// @dev Calls the `swapViaVenueV1` function passing Kipseli as venue,
     /// and asserts the swap was actually executed by Kipseli (didn't fallback to Uniswap).
     /// It updates the price before sending the swap transaction.
