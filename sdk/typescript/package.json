@@ -1,0 +1,29 @@
+{
+  "name": "@propamm/sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for the PropAMM contracts and backend REST API",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "viem": "^2.50.4"
+  },
+  "devDependencies": {
+    "typescript": "~6.0.2"
+  }
+}
