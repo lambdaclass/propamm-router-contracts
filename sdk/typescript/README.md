@@ -18,7 +18,7 @@ Quote and swap 1 ETH for USDC through the best venue:
 import { ContractClient } from "@propamm/sdk/client";
 import { PropAmmRouter } from "@propamm/sdk/router";
 import { ETH_SENTINEL, USDC } from "@propamm/sdk/common/tokens";
-import { applySlippage, deadlineIn } from "@propamm/sdk/common/helpers";
+import { applySlippage, deadlineIn, formatUnits, parseEther } from "@propamm/sdk/common/helpers";
 import { mainnet } from "@propamm/sdk/common/chains";
 import { privateKeyToAccount } from "@propamm/sdk/common/accounts";
 
@@ -26,17 +26,18 @@ const account = privateKeyToAccount("0x...");
 const client = new ContractClient({ rpcUrl: "https://...", chain: mainnet, account });
 const router = new PropAmmRouter(client, "0x..."); // deployed router proxy
 
-const { amountOut } = await router.quote(ETH_SENTINEL, USDC, 10n ** 18n);
+const amountIn = parseEther("1");
+const { amountOut } = await router.quote(ETH_SENTINEL, USDC, amountIn);
 
 const result = await router.swapAndWait({
   tokenIn: ETH_SENTINEL,
   tokenOut: USDC,
-  amountIn: 10n ** 18n,
+  amountIn,
   amountOutMin: applySlippage(amountOut, 50), // quote - 0.5%
   recipient: account.address,
   deadline: deadlineIn(300), // now + 5 min
 });
-console.log(`received ${result.amountOut} USDC via ${result.executedVenue}`);
+console.log(`received ${formatUnits(result.amountOut, 6)} USDC via ${result.executedVenue}`);
 ```
 
 ## Usage
@@ -46,7 +47,7 @@ import { ContractClient } from "@propamm/sdk/client";
 import { PropAmmRouter, frontendFee } from "@propamm/sdk/router";
 import { ETH_SENTINEL, USDC, WETH } from "@propamm/sdk/common/tokens";
 import { PAMMS } from "@propamm/sdk/common/pamms";
-import { applySlippage, deadlineIn } from "@propamm/sdk/common/helpers";
+import { applySlippage, deadlineIn, parseEther, parseUnits } from "@propamm/sdk/common/helpers";
 import { mainnet } from "@propamm/sdk/common/chains";
 import { privateKeyToAccount } from "@propamm/sdk/common/accounts";
 
@@ -58,14 +59,15 @@ const client = new ContractClient({
 const router = new PropAmmRouter(client, "0x..."); // deployed router proxy
 
 // Quote, approve, swap, then wait
-const { amountOut, venue } = await router.quote(USDC, WETH, 1_000_000n);
+const amountIn = parseUnits("100", 6); // 100 USDC
+const { amountOut, venue } = await router.quote(USDC, WETH, amountIn);
 
-await router.approve(USDC, 1_000_000n); // ERC-20 input requires router allowance
+await router.approve(USDC, amountIn); // ERC-20 input requires router allowance
 
 const hash = await router.swap({
   tokenIn: USDC,
   tokenOut: WETH,
-  amountIn: 1_000_000n,
+  amountIn,
   amountOutMin: applySlippage(amountOut, 50), // quote - 0.5%
   recipient: me,
   deadline: deadlineIn(300), // now + 5 min
@@ -77,7 +79,7 @@ const result = await router.waitForSwap(hash);
 const res = await router.swapViaVenueAndWait(PAMMS.kipseli, {
   tokenIn: USDC,
   tokenOut: WETH,
-  amountIn: 1_000_000n,
+  amountIn,
   amountOutMin: minOut,
   recipient: me,
   deadline: deadlineIn(300),
@@ -87,7 +89,7 @@ const res = await router.swapViaVenueAndWait(PAMMS.kipseli, {
 await router.swapAndWait({
   tokenIn: ETH_SENTINEL,
   tokenOut: USDC,
-  amountIn: 10n ** 18n,
+  amountIn: parseEther("1"),
   amountOutMin: minOut,
   recipient: me,
   deadline: deadlineIn(300),
@@ -130,7 +132,7 @@ Source modules map 1:1 to import paths (`src/<path>.ts` → `@propamm/sdk/<path>
 - `src/router/abi.ts` — human-readable `PropAMMRouter` ABI (functions, events, errors).
 - `src/common/tokens.ts` — `ETH_SENTINEL` and mainnet token addresses.
 - `src/common/pamms.ts` — `PAMMS` name → venue address mapping.
-- `src/common/helpers.ts` — `applySlippage`, `deadlineIn`.
+- `src/common/helpers.ts` — `applySlippage`, `deadlineIn`, and unit conversion (`parseEther`, `parseUnits`, `formatEther`, `formatUnits`).
 - `src/common/chains.ts`, `src/common/accounts.ts` — viem re-exports.
 
 The on-chain quote functions are nonpayable (not view), so the bindings call

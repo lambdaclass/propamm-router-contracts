@@ -1,3 +1,10 @@
+// Decimal/unit conversion, re-exported from viem:
+//   parseEther("1")        -> 1000000000000000000n
+//   parseUnits("1", 6)     -> 1000000n            (e.g. USDC)
+//   formatEther(10n ** 18n) -> "1"
+//   formatUnits(1000000n, 6) -> "1"
+export { formatEther, formatUnits, parseEther, parseUnits } from "viem";
+
 const BPS_DENOMINATOR = 10_000n;
 
 /**
