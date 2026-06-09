@@ -29,7 +29,7 @@ contract PropAMMRouterForkTests is Test {
     address taker;
 
     function setUp() public {
-        string memory rpc = vm.envString("ETH_RPC_URL");
+        string memory rpc = vm.envString("RPC_URL");
 
         vm.createSelectFork(rpc);
         taker = makeAddr("taker");
