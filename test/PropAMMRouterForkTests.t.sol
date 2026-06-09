@@ -3,15 +3,10 @@ pragma solidity ^0.8.35;
 
 import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {
-    ERC1967Proxy
-} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {IPropAMMRouter} from "../src/interfaces/IPropAMMRouter.sol";
 import {FERMI_ROUTER} from "../src/interfaces/IFermiSwapper.sol";
-import {
-    PRIO_UPDATE_REGISTRY,
-    IPrioUpdateRegistry
-} from "../test/interfaces/IPrioUpdateRegistry.sol";
+import {PRIO_UPDATE_REGISTRY, IPrioUpdateRegistry} from "../test/interfaces/IPrioUpdateRegistry.sol";
 
 /// @title PropAMMRouterForkTests
 /// @notice Fork-test rig exercising the `IPropAMMRouter` interface against a
@@ -52,8 +47,7 @@ contract PropAMMRouterForkTests is Test {
 
     /// @dev A newly deployed Kipseli PAMM, distinct from the built-in
     /// `KIPSELI_PAMM` address.
-    address constant NEW_KIPSELI_PAMM =
-        0xcCdda3258aA079ce45E6aa6F35829a6612eb7C45;
+    address constant NEW_KIPSELI_PAMM = 0xcCdda3258aA079ce45E6aa6F35829a6612eb7C45;
 
     /// @dev Calls the `swapViaVenueV1` function passing Kipseli as venue,
     /// and asserts the swap was actually executed by Kipseli (didn't fallback to Uniswap).
@@ -130,12 +124,7 @@ contract PropAMMRouterForkTests is Test {
         vm.prank(target);
         registry.addUpdater(address(this));
 
-        registry.updateState(
-            target,
-            laneIndex,
-            uint32(block.timestamp),
-            slots
-        );
+        registry.updateState(target, laneIndex, uint32(block.timestamp), slots);
     }
 
     function _fundTakerUSDC(uint256 amount) internal {
@@ -150,52 +139,29 @@ contract PropAMMRouterForkTests is Test {
         assertEq(IERC20(USDC).balanceOf(taker), amount, "USDC fund failed");
     }
 
-    function _setMaxAllowance(
-        address token,
-        address owner,
-        address spender
-    ) internal {
+    function _setMaxAllowance(address token, address owner, address spender) internal {
         bytes32 inner = keccak256(abi.encode(owner, USDC_ALLOWANCES_SLOT));
         bytes32 slot = keccak256(abi.encode(spender, inner));
         vm.store(token, slot, bytes32(type(uint256).max));
 
-        assertEq(
-            IERC20(token).allowance(owner, spender),
-            type(uint256).max,
-            "allowance set failed"
-        );
+        assertEq(IERC20(token).allowance(owner, spender), type(uint256).max, "allowance set failed");
     }
 
     /// @dev Calls the `swapViaVenueV1` function, passing the given venue.
     /// It asserts the swap executed via the given venue, and `amountOut` is
     /// at least `amountOutMin`.
     function _runSwapViaVenueV1(address venue) internal {
-        (uint256 amountOutMin,) =
-            router.quoteVenueV1(venue, USDC, WETH, AMOUNT_IN);
+        (uint256 amountOutMin,) = router.quoteVenueV1(venue, USDC, WETH, AMOUNT_IN);
         uint256 deadline = block.timestamp + 120;
 
         uint256 wethBalanceBeforeSwap = IERC20(WETH).balanceOf(taker);
 
         vm.prank(taker);
-        (uint256 amountOut, address executedVenue) = router.swapViaVenueV1(
-            venue,
-            USDC,
-            WETH,
-            AMOUNT_IN,
-            amountOutMin,
-            taker,
-            deadline
-        );
+        (uint256 amountOut, address executedVenue) =
+            router.swapViaVenueV1(venue, USDC, WETH, AMOUNT_IN, amountOutMin, taker, deadline);
 
-        assertTrue(
-            executedVenue == venue,
-            "wrong execution venue for pinned swapViaVenueV1"
-        );
+        assertTrue(executedVenue == venue, "wrong execution venue for pinned swapViaVenueV1");
         assertGe(amountOut, amountOutMin, "amountOut < amountOutMin");
-        assertEq(
-            amountOut,
-            IERC20(WETH).balanceOf(taker) - wethBalanceBeforeSwap,
-            "amountOut != delta"
-        );
+        assertEq(amountOut, IERC20(WETH).balanceOf(taker) - wethBalanceBeforeSwap, "amountOut != delta");
     }
 }

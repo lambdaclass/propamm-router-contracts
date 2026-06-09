@@ -5,8 +5,7 @@ pragma solidity ^0.8.35;
 // proprietary AMMs read at swap time. A venue prices a swap by reading its lane
 // via `getState`; if that lane is stale the swap reverts, so the lane must be
 // (re)published with a fresh `updateState` before the swap.
-address constant PRIO_UPDATE_REGISTRY =
-    0xDa7AfeeD01fe625CF15d187a19f94B45f00b8C5F;
+address constant PRIO_UPDATE_REGISTRY = 0xDa7AfeeD01fe625CF15d187a19f94B45f00b8C5F;
 
 /// @title IPrioUpdateRegistry
 /// @notice Minimal interface for the on-chain registry that holds the
@@ -26,10 +25,5 @@ interface IPrioUpdateRegistry {
     /// lie within the registry's accepted freshness window around
     /// `block.timestamp`.
     /// @param slots The packed slot values to write (slot 0 must fit in 27 bytes).
-    function updateState(
-        address target,
-        uint256 laneIndex,
-        uint32 updateTimestamp,
-        uint256[] calldata slots
-    ) external;
+    function updateState(address target, uint256 laneIndex, uint32 updateTimestamp, uint256[] calldata slots) external;
 }
