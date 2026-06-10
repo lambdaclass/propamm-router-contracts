@@ -67,6 +67,63 @@ pub const ERC20_ALLOWANCE: &str = "allowance(address,address)";
 // Events
 pub const SWAPPED_EVENT: &str = "Swapped(address,address,address,uint256,uint256,address,address)";
 pub const FRONTEND_FEE_CHARGED_EVENT: &str = "FrontendFeeCharged(address,address,uint256,address)";
+pub const FALLBACK_FEE_UPDATED_EVENT: &str = "FallbackFeeUpdated(uint24,uint24)";
+pub const FALLBACK_SWAP_ROUTER_UPDATED_EVENT: &str = "FallbackSwapRouterUpdated(address,address)";
+pub const FALLBACK_QUOTER_UPDATED_EVENT: &str = "FallbackQuoterUpdated(address,address)";
+pub const PAIR_FEE_UPDATED_EVENT: &str = "PairFeeUpdated(address,address,uint24,uint24)";
+pub const TOKENS_RESCUED_EVENT: &str = "TokensRescued(address,address,uint256)";
+pub const VENUE_WHITELISTED_EVENT: &str = "VenueWhitelisted(address)";
+pub const VENUE_REMOVED_EVENT: &str = "VenueRemoved(address)";
+
+/// Every router function the SDK binds (the ERC-20 helpers are not part of
+/// the router's ABI). Keep in sync when adding signature constants — the
+/// contract-parity test enumerates this list.
+pub const FUNCTIONS: &[&str] = &[
+    SWAP,
+    SWAP_WITH_FEE,
+    SWAP_VIA_VENUE,
+    SWAP_VIA_VENUE_WITH_FEE,
+    SWAP_VIA_SELECTED_VENUES,
+    SWAP_VIA_SELECTED_VENUES_WITH_FEE,
+    QUOTE,
+    QUOTE_VENUE,
+    QUOTE_SELECTED_VENUES,
+    QUOTE_UNISWAP_V3,
+    FALLBACK_SWAP_ROUTER,
+    FALLBACK_QUOTER,
+    FALLBACK_FEE,
+    GET_PAIR_FEE,
+    RESOLVED_FEE,
+    IS_WHITELISTED_VENUE,
+    GET_WHITELISTED_VENUES,
+    WHITELISTED_VENUE_COUNT,
+    WHITELISTED_VENUE_AT,
+    PAUSED,
+    AUTHORITY,
+    SET_FALLBACK_SWAP_ROUTER,
+    SET_FALLBACK_QUOTER,
+    SET_FALLBACK_FEE,
+    SET_PAIR_FEE,
+    SET_PAIR_FEES,
+    ADD_VENUE,
+    REMOVE_VENUE,
+    PAUSE,
+    UNPAUSE,
+    RESCUE_TOKENS,
+];
+
+/// Every router event the SDK knows. Same parity-test contract as [`FUNCTIONS`].
+pub const EVENTS: &[&str] = &[
+    SWAPPED_EVENT,
+    FRONTEND_FEE_CHARGED_EVENT,
+    FALLBACK_FEE_UPDATED_EVENT,
+    FALLBACK_SWAP_ROUTER_UPDATED_EVENT,
+    FALLBACK_QUOTER_UPDATED_EVENT,
+    PAIR_FEE_UPDATED_EVENT,
+    TOKENS_RESCUED_EVENT,
+    VENUE_WHITELISTED_EVENT,
+    VENUE_REMOVED_EVENT,
+];
 
 /// Custom errors, for naming revert payloads. Mirrors src/libraries/Errors.sol
 /// plus OpenZeppelin's `EnforcedPause` (what swaps revert with while paused).
@@ -231,5 +288,154 @@ mod tests {
         ];
         let calldata = encode_calldata(SWAP_WITH_FEE, &args).expect("encode");
         assert_eq!(hex::encode(&calldata[..4]), "d4a41dda");
+    }
+
+    /// Functions present in the contract ABI that the SDK deliberately does
+    /// not bind: self-call internals, UUPS/AccessManaged plumbing.
+    const OMITTED_FUNCTIONS: &[&str] = &[
+        "_dispatchQuoteVenue(address,address,address,uint256)",
+        "_dispatchVenue(address,address,address,uint256,uint256,address,uint256,uint256)",
+        "initialize(address,address,address)",
+        "proxiableUUID()",
+        "upgradeToAndCall(address,bytes)",
+        "setAuthority(address)",
+        "isConsumingScheduledOp()",
+        "UPGRADE_INTERFACE_VERSION()",
+    ];
+
+    /// Inherited OpenZeppelin events the SDK does not decode.
+    const OMITTED_EVENTS: &[&str] = &[
+        "AuthorityUpdated(address)",
+        "Initialized(uint64)",
+        "Paused(address)",
+        "Unpaused(address)",
+        "Upgraded(address)",
+    ];
+
+    /// Inherited OpenZeppelin errors the SDK does not name (except
+    /// `EnforcedPause`, which swaps actually surface and is bound).
+    const OMITTED_ERRORS: &[&str] = &[
+        "AccessManagedInvalidAuthority(address)",
+        "AccessManagedRequiredDelay(address,uint32)",
+        "AccessManagedUnauthorized(address)",
+        "AddressEmptyCode(address)",
+        "ERC1967InvalidImplementation(address)",
+        "ERC1967NonPayable()",
+        "ExpectedPause()",
+        "FailedCall()",
+        "InvalidInitialization()",
+        "NotInitializing()",
+        "ReentrancyGuardReentrantCall()",
+        "SafeCastOverflowedUintToInt(uint256)",
+        "SafeERC20FailedOperation(address)",
+        "UUPSUnauthorizedCallContext()",
+        "UUPSUnsupportedProxiableUUID(bytes32)",
+    ];
+
+    /// Canonical type of an ABI input, expanding tuples recursively.
+    fn canonical_type(input: &serde_json::Value) -> String {
+        let ty = input["type"].as_str().expect("abi input type");
+        if let Some(suffix) = ty.strip_prefix("tuple") {
+            let components = input["components"].as_array().expect("tuple components");
+            let inner: Vec<String> = components.iter().map(canonical_type).collect();
+            format!("({}){suffix}", inner.join(","))
+        } else {
+            ty.to_string()
+        }
+    }
+
+    fn canonical_signature(item: &serde_json::Value) -> String {
+        let name = item["name"].as_str().expect("abi item name");
+        let inputs = item["inputs"].as_array().expect("abi item inputs");
+        let types: Vec<String> = inputs.iter().map(canonical_type).collect();
+        format!("{name}({})", types.join(","))
+    }
+
+    /// Two-direction parity against the compiled contract:
+    ///  1. every SDK signature must exist in the contract ABI (catches typos
+    ///     and signature drift after contract changes);
+    ///  2. every contract function/event/error must be bound by the SDK or
+    ///     explicitly allowlisted (catches new contract surface the SDK
+    ///     hasn't picked up — including stale allowlist entries).
+    ///
+    /// Reads the Foundry artifact (`forge build` first). Skips when absent
+    /// unless REQUIRE_CONTRACT_ABI is set (CI sets it).
+    #[test]
+    fn abi_matches_contract() {
+        let path = std::env::var("ROUTER_ABI_JSON").unwrap_or_else(|_| {
+            format!(
+                "{}/../../out/PropAMMRouter.sol/PropAMMRouter.json",
+                env!("CARGO_MANIFEST_DIR")
+            )
+        });
+        let artifact = match std::fs::read_to_string(&path) {
+            Ok(contents) => contents,
+            Err(_) if std::env::var("REQUIRE_CONTRACT_ABI").is_err() => {
+                eprintln!("skipping abi_matches_contract: {path} not found (run `forge build`)");
+                return;
+            }
+            Err(e) => panic!("contract artifact required but unreadable at {path}: {e}"),
+        };
+        let artifact: serde_json::Value = serde_json::from_str(&artifact).expect("artifact JSON");
+
+        let of_kind = |kind: &str| -> Vec<String> {
+            artifact["abi"]
+                .as_array()
+                .expect("abi array")
+                .iter()
+                .filter(|item| item["type"] == kind)
+                .map(canonical_signature)
+                .collect()
+        };
+        let contract_functions = of_kind("function");
+        let contract_events = of_kind("event");
+        let contract_errors = of_kind("error");
+
+        // Sanity-check our canonicalization against forge's own selector map.
+        let method_identifiers = artifact["methodIdentifiers"]
+            .as_object()
+            .expect("methodIdentifiers");
+        for signature in &contract_functions {
+            assert!(
+                method_identifiers.contains_key(signature),
+                "canonicalization bug: {signature} not in methodIdentifiers"
+            );
+        }
+
+        check_parity(
+            "function",
+            FUNCTIONS,
+            &contract_functions,
+            OMITTED_FUNCTIONS,
+        );
+        check_parity("event", EVENTS, &contract_events, OMITTED_EVENTS);
+        check_parity("error", ERROR_SIGNATURES, &contract_errors, OMITTED_ERRORS);
+    }
+
+    fn check_parity(kind: &str, sdk: &[&str], contract: &[String], omitted: &[&str]) {
+        for signature in sdk {
+            assert!(
+                contract.iter().any(|c| c == signature),
+                "SDK {kind} `{signature}` does not exist in the contract ABI"
+            );
+        }
+        for signature in contract {
+            let bound = sdk.contains(&signature.as_str());
+            let allowlisted = omitted.contains(&signature.as_str());
+            assert!(
+                bound || allowlisted,
+                "contract {kind} `{signature}` is neither bound by the SDK nor allowlisted"
+            );
+            assert!(
+                !(bound && allowlisted),
+                "{kind} `{signature}` is both bound and allowlisted — remove it from the allowlist"
+            );
+        }
+        for signature in omitted {
+            assert!(
+                contract.iter().any(|c| c == signature),
+                "allowlisted {kind} `{signature}` no longer exists in the contract — remove it"
+            );
+        }
     }
 }
