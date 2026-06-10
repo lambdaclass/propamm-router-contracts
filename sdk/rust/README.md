@@ -1,11 +1,12 @@
 # PropAMM Rust SDK
 
-SDK for interacting with the `PropAMMRouter` contract over JSON-RPC, built on
-[rex](https://github.com/lambdaclass/rex) / [ethrex](https://github.com/lambdaclass/ethrex)
-for the transport (`EthClient`, signing, state overrides) with alloy's `sol!`
-macro kept for the typed ABI surface (calls, events, errors — for now).
-Mirrors the TypeScript SDK (`../typescript`): same surface, snake_case names,
-no on-chain `V1` suffix.
+SDK for interacting with the `PropAMMRouter` contract over JSON-RPC, built
+entirely on [rex](https://github.com/lambdaclass/rex) /
+[ethrex](https://github.com/lambdaclass/ethrex): `EthClient` transport,
+signing, `eth_call` overrides, and ABI encoding/decoding via ethrex's
+calldata codec (signature strings; selectors are regression-tested against
+`forge inspect PropAMMRouter methodIdentifiers`). Mirrors the TypeScript SDK
+(`../typescript`): same surface, snake_case names, no on-chain `V1` suffix.
 
 rex's `StateOverrideSet` and `BlockOverrideSet` are re-exported, and all
 `eth_call`s go through rex's `call_with_overrides` (rex pinned to the main
@@ -18,6 +19,7 @@ if rex ever exposes the data structurally, that parsing can go away.
 
 ```sh
 cargo build
+cargo test       # incl. ABI selector regression tests
 cargo clippy
 cargo fmt --check
 ```
@@ -104,27 +106,26 @@ fallback quoter only reads live pool state. Custom state diffs go through
 `ContractClient::call` with `CallOverrides` directly.
 
 Admin functions (`addVenue`, `pause`, `setPairFee`, ...) have no typed
-methods, but their call types are in the generated ABI bindings — send them
+methods, but their signatures are in the ABI module — encode and send them
 through the generic client:
 
 ```rust
-use propamm_sdk::router::abi::IPropAMMRouter;
+use propamm_sdk::router::abi::{self, Value};
+use ethrex_l2_sdk::calldata::encode_calldata;
 
-let hash = client
-    .send(router_address, &IPropAMMRouter::addVenueCall { venue }, None)
-    .await?;
+let calldata = encode_calldata(abi::ADD_VENUE, &[Value::Address(venue)])?;
+let hash = client.send(router_address, calldata, None).await?;
 ```
 
 ## Layout
 
 - `src/client.rs` — rex/ethrex-based contract client (`call` with state/block overrides, `send`, `wait_for_transaction`).
-- `src/convert.rs` — conversions between alloy primitives (ABI surface) and ethrex primitives (transport).
 - `src/router/mod.rs` — `PropAmmRouter` bindings (quotes, swaps, `*_and_wait` variants, `wait_for_swap`, `approve`/`allowance`, views) plus `frontend_fee` and `MAX_FEE_BPS`.
-- `src/router/abi.rs` — `sol!`-generated `PropAMMRouter` ABI (functions, events, errors).
+- `src/router/abi.rs` — hand-rolled `PropAMMRouter` ABI: signature constants (selector-tested), return/event decoding, and the custom-error table.
 - `src/overrides/mod.rs` — pAMM state-override sources (`OverridesWsSource`, `OverridesRpcSource`), payload parsing, and `to_state_override`.
 - `src/common/tokens.rs` — `ETH_SENTINEL` and mainnet token addresses.
 - `src/common/pamms.rs` — pAMM venue addresses.
-- `src/common/helpers.rs` — `apply_slippage`, `deadline_in`, and unit conversion re-exports (`parse_ether`, `parse_units`, `format_ether`, `format_units`).
+- `src/common/helpers.rs` — `apply_slippage`, `deadline_in`, `parse_address`, and unit conversion (`parse_ether`, `parse_units`, `format_ether`, `format_units`).
 
 The on-chain quote functions are nonpayable (not view), so the bindings call
 them through `eth_call` simulation (`ContractClient::call`) rather than a

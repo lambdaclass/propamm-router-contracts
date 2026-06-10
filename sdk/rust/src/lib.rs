@@ -7,7 +7,6 @@
 
 pub mod client;
 pub mod common;
-pub(crate) mod convert;
 pub mod error;
 pub mod overrides;
 pub mod router;
@@ -16,5 +15,7 @@ pub use client::{CallOverrides, ContractClient};
 pub use error::{Error, Result};
 pub use router::PropAmmRouter;
 
-// Core primitive types, re-exported so basic usage needs no direct alloy import.
-pub use alloy_primitives::{Address, B256, TxHash, U256};
+// Core primitive types, re-exported from ethrex.
+pub use ethrex_common::{Address, H256, U256};
+/// Transaction hash.
+pub type TxHash = H256;

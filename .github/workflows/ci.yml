@@ -92,3 +92,6 @@ jobs:
 
       - name: Build
         run: cargo build --all-targets
+
+      - name: Run tests
+        run: cargo test

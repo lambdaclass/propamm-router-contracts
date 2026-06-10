@@ -6,10 +6,6 @@ description = "Rust SDK for interacting with the PropAMM contracts"
 license = "MIT"
 
 [dependencies]
-# ABI: typed calls/events/errors via the sol! macro (kept for now)
-alloy-primitives = "1"
-alloy-sol-types = "1"
-
 # Transport: rex / ethrex (git deps; ethrex pinned to the tag rex uses).
 # rex pinned to main at the eth_call overrides merge (#232) — repoint to a tag
 # once one is cut.
@@ -18,10 +14,14 @@ ethrex-common = { git = "https://github.com/lambdaclass/ethrex", tag = "v9.0.0" 
 ethrex-rpc = { git = "https://github.com/lambdaclass/ethrex", tag = "v9.0.0" }
 ethrex-sdk = { git = "https://github.com/lambdaclass/ethrex", tag = "v9.0.0" }
 ethrex-l2-rpc = { git = "https://github.com/lambdaclass/ethrex", tag = "v9.0.0" }
+ethrex-l2-common = { git = "https://github.com/lambdaclass/ethrex", tag = "v9.0.0" }
 secp256k1 = "0.30"
 
 async-trait = "0.1.89"
 futures-util = "0.3.32"
+hex = "0.4.3"
+hex-literal = "0.4.1"
+keccak-hash = "0.11.0"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde_json = "1.0.150"
 thiserror = "2.0.18"

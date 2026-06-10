@@ -6,23 +6,37 @@ pub mod abi;
 
 use std::sync::Arc;
 
-use alloy_primitives::{Address, TxHash, U256};
-use alloy_sol_types::{SolEvent, SolInterface};
+use ethrex_common::{Address, H256, U256};
+use ethrex_l2_sdk::calldata::encode_calldata;
 
 use crate::client::{BlockOverrideSet, CallOverrides, ContractClient, TransactionReceipt};
 use crate::common::tokens::ETH_SENTINEL;
-use crate::convert::{h256_to_b256, to_ethrex_address};
 use crate::error::{Error, Result};
 use crate::overrides::{
     OverridesSnapshot, OverridesSource, OverridesWsSource, ToStateOverrideOptions,
     to_state_override,
 };
-use abi::{IERC20, IPropAMMRouter};
-
-pub use abi::IPropAMMRouter::FrontendFee;
+use abi::Value;
 
 /// Maximum frontend fee accepted by the `swap_*_with_fee` entrypoints, in bps.
 pub const MAX_FEE_BPS: u16 = 100;
+
+/// Frontend fee for the `swap_*_with_fee` entrypoints — build with
+/// [`frontend_fee`]. Encodes as the contract's `FrontendFee` struct.
+#[derive(Debug, Clone, Copy)]
+pub struct FrontendFee {
+    pub bps: u16,
+    pub recipient: Address,
+}
+
+impl FrontendFee {
+    fn to_value(self) -> Value {
+        Value::Tuple(vec![
+            Value::Uint(U256::from(self.bps)),
+            Value::Address(self.recipient),
+        ])
+    }
+}
 
 /// Validated [`FrontendFee`] builder. Fails if `bps` exceeds [`MAX_FEE_BPS`]
 /// or the recipient is the zero address.
@@ -32,7 +46,7 @@ pub fn frontend_fee(bps: u16, recipient: Address) -> Result<FrontendFee> {
             "fee bps must be in [0, {MAX_FEE_BPS}], got {bps}"
         )));
     }
-    if recipient == Address::ZERO {
+    if recipient == Address::zero() {
         return Err(Error::InvalidInput(
             "fee recipient must not be the zero address".into(),
         ));
@@ -57,6 +71,20 @@ pub struct SwapParams {
     pub deadline: U256,
 }
 
+impl SwapParams {
+    /// The trailing argument list shared by every swap entrypoint.
+    fn values(&self) -> Vec<Value> {
+        vec![
+            Value::Address(self.token_in),
+            Value::Address(self.token_out),
+            Value::Uint(self.amount_in),
+            Value::Uint(self.amount_out_min),
+            Value::Address(self.recipient),
+            Value::Uint(self.deadline),
+        ]
+    }
+}
+
 /// Result of an on-chain quote: best output and the venue that produced it.
 #[derive(Debug, Clone)]
 pub struct Quote {
@@ -67,7 +95,7 @@ pub struct Quote {
 /// Decoded outcome of a mined swap (from the `Swapped` event).
 #[derive(Debug)]
 pub struct SwapResult {
-    pub hash: TxHash,
+    pub hash: H256,
     pub receipt: TransactionReceipt,
     pub amount_in: U256,
     pub amount_out: U256,
@@ -176,21 +204,12 @@ impl PropAmmRouter {
         amount_in: U256,
         opts: &QuoteOptions,
     ) -> Result<Quote> {
-        let overrides = self.resolve_overrides(opts).await?;
-        let ret = self
-            .call_router(
-                &IPropAMMRouter::quoteV1Call {
-                    tokenIn: token_in,
-                    tokenOut: token_out,
-                    amount: amount_in,
-                },
-                &overrides,
-            )
-            .await?;
-        Ok(Quote {
-            amount_out: ret.bestQuote,
-            venue: ret.venue,
-        })
+        let args = [
+            Value::Address(token_in),
+            Value::Address(token_out),
+            Value::Uint(amount_in),
+        ];
+        self.quote_call(abi::QUOTE, &args, opts).await
     }
 
     /// Quote a specific venue. Falls back to the Uniswap V3 quote (reporting
@@ -221,22 +240,13 @@ impl PropAmmRouter {
         amount_in: U256,
         opts: &QuoteOptions,
     ) -> Result<Quote> {
-        let overrides = self.resolve_overrides(opts).await?;
-        let ret = self
-            .call_router(
-                &IPropAMMRouter::quoteVenueV1Call {
-                    venue,
-                    tokenIn: token_in,
-                    tokenOut: token_out,
-                    amount: amount_in,
-                },
-                &overrides,
-            )
-            .await?;
-        Ok(Quote {
-            amount_out: ret.amountOut,
-            venue: ret.quotedVenue,
-        })
+        let args = [
+            Value::Address(venue),
+            Value::Address(token_in),
+            Value::Address(token_out),
+            Value::Uint(amount_in),
+        ];
+        self.quote_call(abi::QUOTE_VENUE, &args, opts).await
     }
 
     /// Best quote among a caller-supplied set of venues.
@@ -266,22 +276,14 @@ impl PropAmmRouter {
         amount_in: U256,
         opts: &QuoteOptions,
     ) -> Result<Quote> {
-        let overrides = self.resolve_overrides(opts).await?;
-        let ret = self
-            .call_router(
-                &IPropAMMRouter::quoteSelectedVenuesV1Call {
-                    venues,
-                    tokenIn: token_in,
-                    tokenOut: token_out,
-                    amountIn: amount_in,
-                },
-                &overrides,
-            )
-            .await?;
-        Ok(Quote {
-            amount_out: ret.bestAmountOut,
-            venue: ret.bestVenue,
-        })
+        let args = [
+            address_array(venues),
+            Value::Address(token_in),
+            Value::Address(token_out),
+            Value::Uint(amount_in),
+        ];
+        self.quote_call(abi::QUOTE_SELECTED_VENUES, &args, opts)
+            .await
     }
 
     /// Quote the Uniswap V3 fallback route directly. Never applies overrides —
@@ -292,15 +294,15 @@ impl PropAmmRouter {
         token_out: Address,
         amount_in: U256,
     ) -> Result<U256> {
-        self.call_router(
-            &IPropAMMRouter::quoteUniswapV3Call {
-                tokenIn: token_in,
-                tokenOut: token_out,
-                amount: amount_in,
-            },
-            &CallOverrides::default(),
-        )
-        .await
+        let args = [
+            Value::Address(token_in),
+            Value::Address(token_out),
+            Value::Uint(amount_in),
+        ];
+        let data = self
+            .call_router(abi::QUOTE_UNISWAP_V3, &args, &CallOverrides::default())
+            .await?;
+        abi::as_u256(&abi::decode_values("uint256", &data)?[0])
     }
 
     //-------//
@@ -311,53 +313,22 @@ impl PropAmmRouter {
     // input requires a prior allowance for the router (see `approve`).
 
     /// Swap through the best-quoting venue.
-    pub async fn swap(&self, params: &SwapParams) -> Result<TxHash> {
-        self.send_swap(
-            &IPropAMMRouter::swapV1Call {
-                tokenIn: params.token_in,
-                tokenOut: params.token_out,
-                amountIn: params.amount_in,
-                amountOutMin: params.amount_out_min,
-                recipient: params.recipient,
-                deadline: params.deadline,
-            },
-            params,
-        )
-        .await
+    pub async fn swap(&self, params: &SwapParams) -> Result<H256> {
+        self.send_swap(abi::SWAP, params.values(), params).await
     }
 
     /// Best-venue swap that skims a frontend fee from the output.
-    pub async fn swap_with_fee(&self, params: &SwapParams, fee: FrontendFee) -> Result<TxHash> {
-        self.send_swap(
-            &IPropAMMRouter::swapWithFeeV1Call {
-                tokenIn: params.token_in,
-                tokenOut: params.token_out,
-                amountIn: params.amount_in,
-                amountOutMin: params.amount_out_min,
-                recipient: params.recipient,
-                deadline: params.deadline,
-                fee,
-            },
-            params,
-        )
-        .await
+    pub async fn swap_with_fee(&self, params: &SwapParams, fee: FrontendFee) -> Result<H256> {
+        let mut args = params.values();
+        args.push(fee.to_value());
+        self.send_swap(abi::SWAP_WITH_FEE, args, params).await
     }
 
     /// Swap through an explicit venue (a whitelisted propAMM or the fallback router).
-    pub async fn swap_via_venue(&self, venue: Address, params: &SwapParams) -> Result<TxHash> {
-        self.send_swap(
-            &IPropAMMRouter::swapViaVenueV1Call {
-                venue,
-                tokenIn: params.token_in,
-                tokenOut: params.token_out,
-                amountIn: params.amount_in,
-                amountOutMin: params.amount_out_min,
-                recipient: params.recipient,
-                deadline: params.deadline,
-            },
-            params,
-        )
-        .await
+    pub async fn swap_via_venue(&self, venue: Address, params: &SwapParams) -> Result<H256> {
+        let mut args = vec![Value::Address(venue)];
+        args.extend(params.values());
+        self.send_swap(abi::SWAP_VIA_VENUE, args, params).await
     }
 
     /// Explicit-venue swap that skims a frontend fee from the output.
@@ -366,21 +337,12 @@ impl PropAmmRouter {
         venue: Address,
         params: &SwapParams,
         fee: FrontendFee,
-    ) -> Result<TxHash> {
-        self.send_swap(
-            &IPropAMMRouter::swapViaVenueWithFeeV1Call {
-                venue,
-                tokenIn: params.token_in,
-                tokenOut: params.token_out,
-                amountIn: params.amount_in,
-                amountOutMin: params.amount_out_min,
-                recipient: params.recipient,
-                deadline: params.deadline,
-                fee,
-            },
-            params,
-        )
-        .await
+    ) -> Result<H256> {
+        let mut args = vec![Value::Address(venue)];
+        args.extend(params.values());
+        args.push(fee.to_value());
+        self.send_swap(abi::SWAP_VIA_VENUE_WITH_FEE, args, params)
+            .await
     }
 
     /// Swap through the best of a caller-supplied set of venues.
@@ -388,20 +350,11 @@ impl PropAmmRouter {
         &self,
         venues: Vec<Address>,
         params: &SwapParams,
-    ) -> Result<TxHash> {
-        self.send_swap(
-            &IPropAMMRouter::swapViaSelectedVenuesV1Call {
-                venues,
-                tokenIn: params.token_in,
-                tokenOut: params.token_out,
-                amountIn: params.amount_in,
-                amountOutMin: params.amount_out_min,
-                recipient: params.recipient,
-                deadline: params.deadline,
-            },
-            params,
-        )
-        .await
+    ) -> Result<H256> {
+        let mut args = vec![address_array(venues)];
+        args.extend(params.values());
+        self.send_swap(abi::SWAP_VIA_SELECTED_VENUES, args, params)
+            .await
     }
 
     /// Selected-venues swap that skims a frontend fee from the output.
@@ -410,21 +363,12 @@ impl PropAmmRouter {
         venues: Vec<Address>,
         params: &SwapParams,
         fee: FrontendFee,
-    ) -> Result<TxHash> {
-        self.send_swap(
-            &IPropAMMRouter::swapViaSelectedVenuesWithFeeV1Call {
-                venues,
-                tokenIn: params.token_in,
-                tokenOut: params.token_out,
-                amountIn: params.amount_in,
-                amountOutMin: params.amount_out_min,
-                recipient: params.recipient,
-                deadline: params.deadline,
-                fee,
-            },
-            params,
-        )
-        .await
+    ) -> Result<H256> {
+        let mut args = vec![address_array(venues)];
+        args.extend(params.values());
+        args.push(fee.to_value());
+        self.send_swap(abi::SWAP_VIA_SELECTED_VENUES_WITH_FEE, args, params)
+            .await
     }
 
     //----------------//
@@ -489,40 +433,65 @@ impl PropAmmRouter {
     /// Wait until a swap transaction is mined and decode its outcome from the
     /// router's `Swapped` (and, when present, `FrontendFeeCharged`) events.
     /// Fails if the transaction reverted or emitted no `Swapped` event.
-    pub async fn wait_for_swap(&self, hash: TxHash) -> Result<SwapResult> {
+    pub async fn wait_for_swap(&self, hash: H256) -> Result<SwapResult> {
         let receipt = self.client.wait_for_transaction(hash).await?;
         if !receipt.receipt.status {
-            return Err(Error::Other(format!("swap transaction {hash} reverted")));
+            return Err(Error::Other(format!("swap transaction {hash:#x} reverted")));
         }
 
-        let swapped = self
-            .decode_router_logs::<IPropAMMRouter::Swapped>(&receipt)
-            .into_iter()
-            .next()
-            .ok_or_else(|| {
-                Error::Other(format!(
-                    "transaction {hash} emitted no Swapped event from {}",
-                    self.address
-                ))
-            })?;
+        let swapped_topic = abi::event_topic(abi::SWAPPED_EVENT);
+        let fee_topic = abi::event_topic(abi::FRONTEND_FEE_CHARGED_EVENT);
 
-        let fee = self
-            .decode_router_logs::<IPropAMMRouter::FrontendFeeCharged>(&receipt)
-            .into_iter()
-            .next()
-            .map(|event| FeeCharged {
-                recipient: event.feeRecipient,
-                amount: event.feeAmount,
-            });
+        let mut swapped = None;
+        let mut fee = None;
+        for log in &receipt.logs {
+            if log.log.address != self.address {
+                continue;
+            }
+            let Some(topic0) = log.log.topics.first() else {
+                continue;
+            };
+            if *topic0 == swapped_topic && swapped.is_none() {
+                // Swapped data fields: (amountIn, amountOut, recipient, marketMaker)
+                let values = abi::decode_values("uint256,uint256,address,address", &log.log.data)?;
+                swapped = Some((
+                    abi::as_u256(&values[0])?,
+                    abi::as_u256(&values[1])?,
+                    abi::as_address(&values[2])?,
+                    abi::as_address(&values[3])?,
+                ));
+            } else if *topic0 == fee_topic && fee.is_none() {
+                // FrontendFeeCharged: feeRecipient is indexed (topic 1),
+                // feeAmount is the only data field.
+                let recipient = log
+                    .log
+                    .topics
+                    .get(1)
+                    .map(abi::topic_as_address)
+                    .ok_or_else(|| Error::Abi("FrontendFeeCharged missing topic".into()))?;
+                let values = abi::decode_values("uint256", &log.log.data)?;
+                fee = Some(FeeCharged {
+                    recipient,
+                    amount: abi::as_u256(&values[0])?,
+                });
+            }
+        }
+
+        let (amount_in, amount_out, recipient, market_maker) = swapped.ok_or_else(|| {
+            Error::Other(format!(
+                "transaction {hash:#x} emitted no Swapped event from {:#x}",
+                self.address
+            ))
+        })?;
 
         Ok(SwapResult {
             hash,
-            amount_in: swapped.amountIn,
-            amount_out: swapped.amountOut,
-            executed_venue: swapped.marketMaker,
-            recipient: swapped.recipient,
-            fee,
             receipt,
+            amount_in,
+            amount_out,
+            executed_venue: market_maker,
+            recipient,
+            fee,
         })
     }
 
@@ -531,31 +500,25 @@ impl PropAmmRouter {
     //--------//
 
     /// Approve the router to pull `amount` of `token` from the signer.
-    pub async fn approve(&self, token: Address, amount: U256) -> Result<TxHash> {
-        self.client
-            .send(
-                token,
-                &IERC20::approveCall {
-                    spender: self.address,
-                    amount,
-                },
-                None,
-            )
-            .await
+    pub async fn approve(&self, token: Address, amount: U256) -> Result<H256> {
+        let calldata = encode(
+            abi::ERC20_APPROVE,
+            &[Value::Address(self.address), Value::Uint(amount)],
+        )?;
+        self.client.send(token, calldata, None).await
     }
 
     /// Current router allowance of `token` granted by `owner`.
     pub async fn allowance(&self, token: Address, owner: Address) -> Result<U256> {
-        self.client
-            .call(
-                token,
-                &IERC20::allowanceCall {
-                    owner,
-                    spender: self.address,
-                },
-                &CallOverrides::default(),
-            )
-            .await
+        let calldata = encode(
+            abi::ERC20_ALLOWANCE,
+            &[Value::Address(owner), Value::Address(self.address)],
+        )?;
+        let data = self
+            .client
+            .call(token, calldata, &CallOverrides::default())
+            .await?;
+        abi::as_u256(&abi::decode_values("uint256", &data)?[0])
     }
 
     //-------//
@@ -564,109 +527,104 @@ impl PropAmmRouter {
 
     /// The Uniswap fallback "venue" address (dynamic router configuration).
     pub async fn fallback_swap_router(&self) -> Result<Address> {
-        self.call_router(
-            &IPropAMMRouter::fallbackSwapRouterCall {},
-            &CallOverrides::default(),
-        )
-        .await
+        self.view_address(abi::FALLBACK_SWAP_ROUTER).await
     }
 
     pub async fn fallback_quoter(&self) -> Result<Address> {
-        self.call_router(
-            &IPropAMMRouter::fallbackQuoterCall {},
-            &CallOverrides::default(),
-        )
-        .await
+        self.view_address(abi::FALLBACK_QUOTER).await
     }
 
     pub async fn fallback_fee(&self) -> Result<u32> {
-        let fee = self
-            .call_router(
-                &IPropAMMRouter::fallbackFeeCall {},
-                &CallOverrides::default(),
-            )
+        let data = self
+            .call_router(abi::FALLBACK_FEE, &[], &CallOverrides::default())
             .await?;
-        Ok(fee.to::<u32>())
+        Ok(abi::as_u256(&abi::decode_values("uint24", &data)?[0])?.low_u32())
     }
 
     /// Raw per-pair fee override (0 if unset). Order-independent.
     pub async fn get_pair_fee(&self, token_a: Address, token_b: Address) -> Result<u32> {
-        let fee = self
-            .call_router(
-                &IPropAMMRouter::getPairFeeCall {
-                    tokenA: token_a,
-                    tokenB: token_b,
-                },
-                &CallOverrides::default(),
-            )
+        let args = [Value::Address(token_a), Value::Address(token_b)];
+        let data = self
+            .call_router(abi::GET_PAIR_FEE, &args, &CallOverrides::default())
             .await?;
-        Ok(fee.to::<u32>())
+        Ok(abi::as_u256(&abi::decode_values("uint24", &data)?[0])?.low_u32())
     }
 
     /// Effective Uniswap V3 fallback tier for a pair (override or global).
     pub async fn resolved_fee(&self, token_in: Address, token_out: Address) -> Result<u32> {
-        let fee = self
-            .call_router(
-                &IPropAMMRouter::resolvedFeeCall {
-                    tokenIn: token_in,
-                    tokenOut: token_out,
-                },
-                &CallOverrides::default(),
-            )
+        let args = [Value::Address(token_in), Value::Address(token_out)];
+        let data = self
+            .call_router(abi::RESOLVED_FEE, &args, &CallOverrides::default())
             .await?;
-        Ok(fee.to::<u32>())
+        Ok(abi::as_u256(&abi::decode_values("uint24", &data)?[0])?.low_u32())
     }
 
     pub async fn is_whitelisted_venue(&self, venue: Address) -> Result<bool> {
-        self.call_router(
-            &IPropAMMRouter::isWhitelistedVenueCall { venue },
-            &CallOverrides::default(),
-        )
-        .await
+        let data = self
+            .call_router(
+                abi::IS_WHITELISTED_VENUE,
+                &[Value::Address(venue)],
+                &CallOverrides::default(),
+            )
+            .await?;
+        abi::as_bool(&abi::decode_values("bool", &data)?[0])
     }
 
     /// Every whitelisted propAMM venue (excludes the Uniswap fallback).
     pub async fn get_whitelisted_venues(&self) -> Result<Vec<Address>> {
-        self.call_router(
-            &IPropAMMRouter::getWhitelistedVenuesCall {},
-            &CallOverrides::default(),
-        )
-        .await
+        let data = self
+            .call_router(abi::GET_WHITELISTED_VENUES, &[], &CallOverrides::default())
+            .await?;
+        abi::as_address_array(&abi::decode_values("address[]", &data)?[0])
     }
 
     pub async fn paused(&self) -> Result<bool> {
-        self.call_router(&IPropAMMRouter::pausedCall {}, &CallOverrides::default())
-            .await
+        let data = self
+            .call_router(abi::PAUSED, &[], &CallOverrides::default())
+            .await?;
+        abi::as_bool(&abi::decode_values("bool", &data)?[0])
     }
 
     //-----------//
     // Internals //
     //-----------//
 
-    /// `ContractClient::call` against the router, with revert data decoded
-    /// into the contract's named errors when possible.
-    async fn call_router<C: alloy_sol_types::SolCall>(
+    /// Encode + call a quote entrypoint with resolved overrides and decode
+    /// its `(uint256, address)` result.
+    async fn quote_call(
         &self,
-        call: &C,
+        signature: &str,
+        args: &[Value],
+        opts: &QuoteOptions,
+    ) -> Result<Quote> {
+        let overrides = self.resolve_overrides(opts).await?;
+        let data = self.call_router(signature, args, &overrides).await?;
+        let values = abi::decode_values("uint256,address", &data)?;
+        Ok(Quote {
+            amount_out: abi::as_u256(&values[0])?,
+            venue: abi::as_address(&values[1])?,
+        })
+    }
+
+    /// Encode + `eth_call` against the router, with revert data decoded into
+    /// the contract's named errors when possible.
+    async fn call_router(
+        &self,
+        signature: &str,
+        args: &[Value],
         overrides: &CallOverrides,
-    ) -> Result<C::Return> {
+    ) -> Result<Vec<u8>> {
         self.client
-            .call(self.address, call, overrides)
+            .call(self.address, encode(signature, args)?, overrides)
             .await
             .map_err(decode_revert)
     }
 
-    fn decode_router_logs<E: SolEvent>(&self, receipt: &TransactionReceipt) -> Vec<E> {
-        let router = to_ethrex_address(self.address);
-        receipt
-            .logs
-            .iter()
-            .filter(|log| log.log.address == router)
-            .filter_map(|log| {
-                let topics: Vec<_> = log.log.topics.iter().copied().map(h256_to_b256).collect();
-                E::decode_raw_log(topics, &log.log.data).ok()
-            })
-            .collect()
+    async fn view_address(&self, signature: &str) -> Result<Address> {
+        let data = self
+            .call_router(signature, &[], &CallOverrides::default())
+            .await?;
+        abi::as_address(&abi::decode_values("address", &data)?[0])
     }
 
     /// Resolve a quote's override options into eth_call parameters. The
@@ -702,15 +660,27 @@ impl PropAmmRouter {
         })
     }
 
-    async fn send_swap<C: alloy_sol_types::SolCall>(
+    async fn send_swap(
         &self,
-        call: &C,
+        signature: &str,
+        args: Vec<Value>,
         params: &SwapParams,
-    ) -> Result<TxHash> {
+    ) -> Result<H256> {
         // Native-ETH input is signalled by the sentinel and paid via msg.value.
         let value = (params.token_in == ETH_SENTINEL).then_some(params.amount_in);
-        self.client.send(self.address, call, value).await
+        self.client
+            .send(self.address, encode(signature, &args)?, value)
+            .await
     }
+}
+
+fn encode(signature: &str, args: &[Value]) -> Result<Vec<u8>> {
+    encode_calldata(signature, args)
+        .map_err(|e| Error::Abi(format!("failed to encode {signature}: {e}")))
+}
+
+fn address_array(addresses: Vec<Address>) -> Value {
+    Value::Array(addresses.into_iter().map(Value::Address).collect())
 }
 
 /// Re-shape a raw revert into the contract's named error when the revert data
@@ -723,11 +693,11 @@ fn decode_revert(error: Error) -> Error {
     else {
         return error;
     };
-    match IPropAMMRouter::IPropAMMRouterErrors::abi_decode(data) {
-        Ok(decoded) => Error::Revert {
-            message: format!("{message} ({decoded:?})"),
+    match abi::decode_error(data) {
+        Some(decoded) => Error::Revert {
+            message: format!("{message} ({decoded})"),
             data: Some(data.clone()),
         },
-        Err(_) => error,
+        None => error,
     }
 }

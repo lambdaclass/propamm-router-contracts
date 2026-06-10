@@ -26,16 +26,17 @@ use std::{
     time::{Duration, Instant},
 };
 
-use alloy_primitives::{Address, B256, U256, b256};
 use async_trait::async_trait;
+use ethrex_common::{Address, H256, U256};
 use futures_util::StreamExt;
+use hex_literal::hex;
 use rex_sdk::client::eth::StateOverrideSet;
 use serde_json::Value;
 use tokio::sync::{Mutex, Notify};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
+use crate::common::helpers::parse_address;
 use crate::common::pamms::BEBOP;
-use crate::convert::{b256_to_h256, to_ethrex_address, word_to_ethrex_u256};
 use crate::error::{Error, Result};
 
 pub const DEFAULT_OVERRIDES_RPC_URL: &str = "https://rpc.titanbuilder.xyz";
@@ -44,11 +45,12 @@ pub const DEFAULT_OVERRIDES_WS_URL: &str = "wss://rpc.titanbuilder.xyz/ws/pamm_q
 /// Bebop prices from a single registry slot. When a snapshot carries no Bebop
 /// entry, [`to_state_override`] zeroes this slot by default so a stale
 /// on-chain Bebop price cannot win a best-quote selection it could never fill.
-pub const BEBOP_DEFAULT_SLOT: B256 =
-    b256!("0x3ca381a3d43d4e593578057c4abe441ad9df02f080defd17d2b6e6190cdcd936");
+pub const BEBOP_DEFAULT_SLOT: H256 = H256(hex!(
+    "3ca381a3d43d4e593578057c4abe441ad9df02f080defd17d2b6e6190cdcd936"
+));
 
 /// Storage slot diffs for one contract: slot → value.
-pub type SlotDiffs = HashMap<B256, B256>;
+pub type SlotDiffs = HashMap<H256, U256>;
 /// Per-contract slot diffs: contract address → slots.
 pub type ContractDiffs = HashMap<Address, SlotDiffs>;
 
@@ -86,7 +88,7 @@ pub fn parse_overrides_message(raw: &Value) -> Result<OverridesSnapshot> {
         if META_KEYS.contains(&key.as_str()) || !key.starts_with("0x") {
             continue;
         }
-        let Ok(pamm) = key.parse::<Address>() else {
+        let Ok(pamm) = parse_address(key) else {
             continue;
         };
         if let Some(contracts) = parse_contract_diffs(payload) {
@@ -112,7 +114,7 @@ fn parse_contract_diffs(payload: &Value) -> Option<ContractDiffs> {
 
     let mut contracts = ContractDiffs::new();
     for (address, spec) in override_map {
-        let Ok(address) = address.parse::<Address>() else {
+        let Ok(address) = parse_address(address) else {
             continue;
         };
         let Some(state_diff) = spec.get("stateDiff").and_then(Value::as_object) else {
@@ -125,7 +127,7 @@ fn parse_contract_diffs(payload: &Value) -> Option<ContractDiffs> {
             let (Some(slot), Some(value)) = (parse_word(slot), parsed) else {
                 continue;
             };
-            slots.insert(slot, value);
+            slots.insert(H256(slot.to_big_endian()), value);
         }
         if !slots.is_empty() {
             contracts.insert(address, slots);
@@ -134,10 +136,9 @@ fn parse_contract_diffs(payload: &Value) -> Option<ContractDiffs> {
     (!contracts.is_empty()).then_some(contracts)
 }
 
-fn parse_word(hex: &str) -> Option<B256> {
+fn parse_word(hex: &str) -> Option<U256> {
     hex.strip_prefix("0x")
         .and_then(|h| U256::from_str_radix(h, 16).ok())
-        .map(B256::from)
 }
 
 fn parse_block_number(value: &Value) -> Option<u64> {
@@ -186,17 +187,12 @@ pub fn to_state_override(
         merged
             .entry(BEBOP)
             .or_default()
-            .insert(BEBOP_DEFAULT_SLOT, B256::ZERO);
+            .insert(BEBOP_DEFAULT_SLOT, U256::zero());
     }
 
     let mut set = StateOverrideSet::new();
     for (address, slots) in merged {
-        let account = set.entry(to_ethrex_address(address));
-        for (slot, value) in slots {
-            account
-                .state_diff
-                .insert(b256_to_h256(slot), word_to_ethrex_u256(value));
-        }
+        set.entry(address).state_diff.extend(slots);
     }
     set
 }

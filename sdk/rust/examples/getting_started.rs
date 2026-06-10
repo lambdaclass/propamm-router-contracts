@@ -14,11 +14,11 @@
 //! chains fill at the quoted state normally).
 
 use propamm_sdk::common::helpers::{
-    apply_slippage, deadline_in, format_ether, format_units, parse_ether,
+    apply_slippage, deadline_in, format_ether, format_units, parse_address, parse_ether,
 };
 use propamm_sdk::common::tokens::{ETH_SENTINEL, USDC};
 use propamm_sdk::router::SwapParams;
-use propamm_sdk::{Address, ContractClient, PropAmmRouter};
+use propamm_sdk::{ContractClient, PropAmmRouter};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -28,9 +28,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80".into()
     });
     // mainnet router deployment
-    let router_address: Address = std::env::var("ROUTER_ADDRESS")
-        .unwrap_or_else(|_| "0x4DdF368080CD7946db5b459aD591c350158175e1".into())
-        .parse()?;
+    let router_address = parse_address(
+        &std::env::var("ROUTER_ADDRESS")
+            .unwrap_or_else(|_| "0x4DdF368080CD7946db5b459aD591c350158175e1".into()),
+    )?;
     let slippage_bps: u32 = std::env::var("SLIPPAGE_BPS")
         .unwrap_or_else(|_| "50".into())
         .parse()?;
@@ -42,9 +43,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let amount_in = parse_ether("1")?;
     let quote = router.quote(ETH_SENTINEL, USDC, amount_in).await?;
     println!(
-        "quote: {} ETH -> {} USDC via {}",
+        "quote: {} ETH -> {} USDC via {:#x}",
         format_ether(amount_in),
-        format_units(quote.amount_out, 6)?,
+        format_units(quote.amount_out, 6),
         quote.venue
     );
 
@@ -59,8 +60,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .await?;
     println!(
-        "swapped: received {} USDC via {} (tx {})",
-        format_units(result.amount_out, 6)?,
+        "swapped: received {} USDC via {:#x} (tx {:#x})",
+        format_units(result.amount_out, 6),
         result.executed_venue,
         result.hash
     );

@@ -1,7 +1,8 @@
 //! Thin wrapper around rex/ethrex's `EthClient` for reading from and writing
-//! to contracts. ABI encoding/decoding stays on alloy's `sol!` types; this
-//! module owns the JSON-RPC transport, including `eth_call` simulations with
-//! state and block overrides (rex's `StateOverrideSet`/`BlockOverrideSet`).
+//! to contracts. This module owns the JSON-RPC transport, including
+//! `eth_call` simulations with state and block overrides (rex's
+//! `StateOverrideSet`/`BlockOverrideSet`); ABI encoding/decoding lives in
+//! `router::abi` on ethrex's calldata codec.
 //!
 //! Calls go through rex's `call_with_overrides`, which flattens revert data
 //! into its error string — [`parse_call_error`] recovers the payload from the
@@ -9,16 +10,13 @@
 
 use std::{str::FromStr, sync::Arc};
 
-use alloy_primitives::{Address, TxHash, U256, hex};
-use alloy_sol_types::SolCall;
-use ethrex_common::types::TxType;
+use ethrex_common::{Address, H256, U256, types::TxType};
 use ethrex_l2_rpc::signer::{LocalSigner, Signer};
 use ethrex_l2_sdk::{build_generic_tx, send_generic_transaction};
 use ethrex_rpc::{EthClient, clients::EthClientError, clients::Overrides};
 use rex_sdk::client::eth::call_with_overrides;
 use secp256k1::SecretKey;
 
-use crate::convert::{h256_to_b256, to_alloy_address, to_ethrex_address, to_ethrex_u256};
 use crate::error::{Error, Result};
 
 /// The receipt type returned by the transport (re-exported from ethrex).
@@ -80,20 +78,20 @@ impl ContractClient {
 
     /// Address of the configured signer, if any.
     pub fn signer_address(&self) -> Option<Address> {
-        self.signer.as_ref().map(|s| to_alloy_address(s.address()))
+        self.signer.as_ref().map(|s| s.address())
     }
 
-    /// Simulate a function via `eth_call` and decode its return value, with
+    /// Simulate a call via `eth_call` and return its raw return data, with
     /// optional state and block overrides. Useful for nonpayable functions
     /// that are effectively queries (e.g. on-chain quotes).
-    pub async fn call<C: SolCall>(
+    pub async fn call(
         &self,
         to: Address,
-        call: &C,
+        calldata: Vec<u8>,
         overrides: &CallOverrides,
-    ) -> Result<C::Return> {
+    ) -> Result<Vec<u8>> {
         let tx_overrides = Overrides {
-            from: self.signer.as_ref().map(|s| s.address()),
+            from: self.signer_address(),
             ..Default::default()
         };
         let state = overrides.state.clone().unwrap_or_default();
@@ -101,8 +99,8 @@ impl ContractClient {
 
         let raw = call_with_overrides(
             &self.client,
-            to_ethrex_address(to),
-            call.abi_encode().into(),
+            to,
+            calldata.into(),
             tx_overrides,
             &state,
             &block,
@@ -110,20 +108,13 @@ impl ContractClient {
         .await
         .map_err(parse_call_error)?;
 
-        let data = hex::decode(raw.trim_start_matches("0x"))
-            .map_err(|e| Error::Abi(format!("eth_call returned invalid hex: {e}")))?;
-        C::abi_decode_returns(&data)
-            .map_err(|e| Error::Abi(format!("failed to decode {} return: {e}", C::SIGNATURE)))
+        hex::decode(raw.trim_start_matches("0x"))
+            .map_err(|e| Error::Abi(format!("eth_call returned invalid hex: {e}")))
     }
 
     /// Sign and send a contract call as an EIP-1559 transaction (gas and
     /// nonce are filled by the node). Returns the transaction hash.
-    pub async fn send<C: SolCall>(
-        &self,
-        to: Address,
-        call: &C,
-        value: Option<U256>,
-    ) -> Result<TxHash> {
+    pub async fn send(&self, to: Address, calldata: Vec<u8>, value: Option<U256>) -> Result<H256> {
         let signer = self.signer.as_ref().ok_or_else(|| {
             Error::InvalidInput(
                 "ContractClient was created without a signer; sends are unavailable".into(),
@@ -132,31 +123,26 @@ impl ContractClient {
 
         let overrides = Overrides {
             from: Some(signer.address()),
-            value: value.map(to_ethrex_u256),
+            value,
             ..Default::default()
         };
         let tx = build_generic_tx(
             &self.client,
             TxType::EIP1559,
-            to_ethrex_address(to),
+            to,
             signer.address(),
-            call.abi_encode().into(),
+            calldata.into(),
             overrides,
         )
         .await?;
-        let hash = send_generic_transaction(&self.client, tx, signer).await?;
-        Ok(h256_to_b256(hash))
+        Ok(send_generic_transaction(&self.client, tx, signer).await?)
     }
 
     /// Wait until a transaction is mined and return its receipt.
-    pub async fn wait_for_transaction(&self, hash: TxHash) -> Result<TransactionReceipt> {
-        let receipt = rex_sdk::wait_for_transaction_receipt(
-            crate::convert::b256_to_h256(hash),
-            &self.client,
-            RECEIPT_MAX_RETRIES,
-            true,
-        )
-        .await?;
+    pub async fn wait_for_transaction(&self, hash: H256) -> Result<TransactionReceipt> {
+        let receipt =
+            rex_sdk::wait_for_transaction_receipt(hash, &self.client, RECEIPT_MAX_RETRIES, true)
+                .await?;
         Ok(receipt)
     }
 }
