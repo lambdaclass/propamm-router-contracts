@@ -3,6 +3,8 @@ import { defineConfig } from "vocs";
 export default defineConfig({
   title: "PropAMM SDK",
   description: "SDKs for interacting with the PropAMM contracts",
+  // Set by the Pages deploy workflow (project sites serve at /<repo>/).
+  basePath: process.env.BASE_PATH,
   theme: {
     accentColor: "#8051e7",
   },
