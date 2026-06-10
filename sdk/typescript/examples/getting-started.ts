@@ -44,7 +44,9 @@ const router = new PropAmmRouter(client, ROUTER_ADDRESS);
 
 const amountIn = parseEther("1");
 const { amountOut, venue } = await router.quote(ETH_SENTINEL, USDC, amountIn);
-console.log(`quote: ${formatEther(amountIn)} ETH -> ${formatUnits(amountOut, 6)} USDC via ${venue}`);
+console.log(
+  `quote: ${formatEther(amountIn)} ETH -> ${formatUnits(amountOut, 6)} USDC via ${venue}`,
+);
 
 const result = await router.swapAndWait({
   tokenIn: ETH_SENTINEL,

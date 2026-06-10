@@ -184,67 +184,87 @@ export class PropAmmRouter {
 
   /** Swap through the best-quoting venue. */
   async swap(params: SwapParams): Promise<Hash> {
-    return this.sendSwap("swapV1", [
-      params.tokenIn,
-      params.tokenOut,
-      params.amountIn,
-      params.amountOutMin,
-      params.recipient,
-      params.deadline,
-    ], params);
+    return this.sendSwap(
+      "swapV1",
+      [
+        params.tokenIn,
+        params.tokenOut,
+        params.amountIn,
+        params.amountOutMin,
+        params.recipient,
+        params.deadline,
+      ],
+      params,
+    );
   }
 
   /** Best-venue swap that skims a frontend fee from the output. */
   async swapWithFee(params: SwapParams, fee: FrontendFee): Promise<Hash> {
-    return this.sendSwap("swapWithFeeV1", [
-      params.tokenIn,
-      params.tokenOut,
-      params.amountIn,
-      params.amountOutMin,
-      params.recipient,
-      params.deadline,
-      fee,
-    ], params);
+    return this.sendSwap(
+      "swapWithFeeV1",
+      [
+        params.tokenIn,
+        params.tokenOut,
+        params.amountIn,
+        params.amountOutMin,
+        params.recipient,
+        params.deadline,
+        fee,
+      ],
+      params,
+    );
   }
 
   /** Swap through an explicit venue (a whitelisted propAMM or the fallback router). */
   async swapViaVenue(venue: Address, params: SwapParams): Promise<Hash> {
-    return this.sendSwap("swapViaVenueV1", [
-      venue,
-      params.tokenIn,
-      params.tokenOut,
-      params.amountIn,
-      params.amountOutMin,
-      params.recipient,
-      params.deadline,
-    ], params);
+    return this.sendSwap(
+      "swapViaVenueV1",
+      [
+        venue,
+        params.tokenIn,
+        params.tokenOut,
+        params.amountIn,
+        params.amountOutMin,
+        params.recipient,
+        params.deadline,
+      ],
+      params,
+    );
   }
 
   /** Explicit-venue swap that skims a frontend fee from the output. */
   async swapViaVenueWithFee(venue: Address, params: SwapParams, fee: FrontendFee): Promise<Hash> {
-    return this.sendSwap("swapViaVenueWithFeeV1", [
-      venue,
-      params.tokenIn,
-      params.tokenOut,
-      params.amountIn,
-      params.amountOutMin,
-      params.recipient,
-      params.deadline,
-      fee,
-    ], params);
+    return this.sendSwap(
+      "swapViaVenueWithFeeV1",
+      [
+        venue,
+        params.tokenIn,
+        params.tokenOut,
+        params.amountIn,
+        params.amountOutMin,
+        params.recipient,
+        params.deadline,
+        fee,
+      ],
+      params,
+    );
   }
 
   /** Swap through the best of a caller-supplied set of venues. */
   async swapViaSelectedVenues(venues: readonly Address[], params: SwapParams): Promise<Hash> {
-    return this.sendSwap("swapViaSelectedVenuesV1", [
-      venues,
-      params.tokenIn,
-      params.tokenOut,
-      params.amountIn,
-      params.amountOutMin,
-      params.recipient,
-      params.deadline,
-    ], params);
+    return this.sendSwap(
+      "swapViaSelectedVenuesV1",
+      [
+        venues,
+        params.tokenIn,
+        params.tokenOut,
+        params.amountIn,
+        params.amountOutMin,
+        params.recipient,
+        params.deadline,
+      ],
+      params,
+    );
   }
 
   /** Selected-venues swap that skims a frontend fee from the output. */
@@ -253,16 +273,20 @@ export class PropAmmRouter {
     params: SwapParams,
     fee: FrontendFee,
   ): Promise<Hash> {
-    return this.sendSwap("swapViaSelectedVenuesWithFeeV1", [
-      venues,
-      params.tokenIn,
-      params.tokenOut,
-      params.amountIn,
-      params.amountOutMin,
-      params.recipient,
-      params.deadline,
-      fee,
-    ], params);
+    return this.sendSwap(
+      "swapViaSelectedVenuesWithFeeV1",
+      [
+        venues,
+        params.tokenIn,
+        params.tokenOut,
+        params.amountIn,
+        params.amountOutMin,
+        params.recipient,
+        params.deadline,
+        fee,
+      ],
+      params,
+    );
   }
 
   //-----------------//
@@ -426,7 +450,11 @@ export class PropAmmRouter {
   private async callRouter<T>(
     functionName: string,
     args: readonly unknown[],
-    overrides: { stateOverride?: StateOverride; blockNumber?: bigint; blockTimestamp?: bigint } = {},
+    overrides: {
+      stateOverride?: StateOverride;
+      blockNumber?: bigint;
+      blockTimestamp?: bigint;
+    } = {},
   ): Promise<T> {
     return this.client.call<T>({
       address: this.address,
@@ -482,8 +510,6 @@ export class PropAmmRouter {
   }
 }
 
-function isOverridesSource(
-  value: OverridesSource | OverridesSnapshot,
-): value is OverridesSource {
+function isOverridesSource(value: OverridesSource | OverridesSnapshot): value is OverridesSource {
   return typeof (value as OverridesSource).getOverrides === "function";
 }

@@ -80,7 +80,8 @@ export function parseOverridesMessage(raw: unknown): OverridesSnapshot {
 
   return {
     blockNumber: parseBlockNumber(message["blockNumber"] ?? message["block_number"]),
-    timestampNs: typeof message["timestamp"] === "number" ? BigInt(message["timestamp"]) : undefined,
+    timestampNs:
+      typeof message["timestamp"] === "number" ? BigInt(message["timestamp"]) : undefined,
     perPamm,
   };
 }

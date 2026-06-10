@@ -152,7 +152,7 @@ const rpcRouter = new PropAmmRouter(client, ROUTER, {
 });
 
 // per-call control
-await router.quote(WETH, USDC, amountIn, { overrides: null });      // skip overrides
+await router.quote(WETH, USDC, amountIn, { overrides: null }); // skip overrides
 await router.quote(WETH, USDC, amountIn, { overrides: rpcSource }); // one-off source
 ```
 
