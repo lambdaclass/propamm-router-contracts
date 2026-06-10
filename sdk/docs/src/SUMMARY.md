@@ -2,10 +2,6 @@
 
 [Introduction](introduction.md)
 
-# Concepts
-
-- [State overrides](concepts/state-overrides.md)
-
 # TypeScript SDK
 
 - [Getting started](typescript/getting-started.md)
