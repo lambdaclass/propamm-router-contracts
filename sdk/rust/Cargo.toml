@@ -11,9 +11,9 @@ alloy-primitives = "1"
 alloy-sol-types = "1"
 
 # Transport: rex / ethrex (git deps; ethrex pinned to the tag rex uses).
-# rex pinned to the block_overrides branch for BlockOverrideSet — repoint to a
-# tag once it merges.
-rex-sdk = { git = "https://github.com/lambdaclass/rex", branch = "block_overrides" }
+# rex pinned to main at the eth_call overrides merge (#232) — repoint to a tag
+# once one is cut.
+rex-sdk = { git = "https://github.com/lambdaclass/rex", rev = "389401b0c2e3684e1e9708ec9e9f7901be83d638" }
 ethrex-common = { git = "https://github.com/lambdaclass/ethrex", tag = "v9.0.0" }
 ethrex-rpc = { git = "https://github.com/lambdaclass/ethrex", tag = "v9.0.0" }
 ethrex-sdk = { git = "https://github.com/lambdaclass/ethrex", tag = "v9.0.0" }

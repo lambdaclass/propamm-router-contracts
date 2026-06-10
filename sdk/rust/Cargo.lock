@@ -4196,7 +4196,7 @@ dependencies = [
 [[package]]
 name = "rex-sdk"
 version = "8.0.0"
-source = "git+https://github.com/lambdaclass/rex?branch=block_overrides#b094cf1cf242cfe436eb055b941215b04d113d31"
+source = "git+https://github.com/lambdaclass/rex?rev=389401b0c2e3684e1e9708ec9e9f7901be83d638#389401b0c2e3684e1e9708ec9e9f7901be83d638"
 dependencies = [
  "clap",
  "clap_complete",

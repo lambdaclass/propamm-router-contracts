@@ -8,8 +8,8 @@ Mirrors the TypeScript SDK (`../typescript`): same surface, snake_case names,
 no on-chain `V1` suffix.
 
 rex's `StateOverrideSet` and `BlockOverrideSet` are re-exported, and all
-`eth_call`s go through rex's `call_with_overrides` (from the
-`block_overrides` branch, pinned until it merges). rex flattens revert data
+`eth_call`s go through rex's `call_with_overrides` (rex pinned to the main
+commit that merged eth_call overrides, until a tag is cut). rex flattens revert data
 into its error string; the client recovers the payload from the
 `" (data: 0x…)"` suffix so reverts still decode into named contract errors —
 if rex ever exposes the data structurally, that parsing can go away.
