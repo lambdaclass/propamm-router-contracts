@@ -10,9 +10,10 @@
  * with anvil's default funded account and the mainnet router deployment.
  * Override with RPC_URL / PRIVATE_KEY / ROUTER_ADDRESS / SLIPPAGE_BPS.
  *
- * Note: pAMM venues quote from pushed registry state, which is stale on a
- * fork — if the swap reverts with `InsufficientOutput` there, raise
- * SLIPPAGE_BPS (live chains quote fresh state and fill normally).
+ * Note: quotes automatically apply fresh pAMM state overrides (streamed from
+ * Titan), but a fork still *executes* swaps against its frozen state — if the
+ * swap reverts with `InsufficientOutput` there, raise SLIPPAGE_BPS (live
+ * chains fill at the quoted state normally).
  */
 import { ContractClient } from "@propamm/sdk/client";
 import { PropAmmRouter } from "@propamm/sdk/router";

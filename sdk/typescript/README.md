@@ -120,6 +120,42 @@ await router.paused();
 await router.fallbackSwapRouter(); // Uniswap fallback "venue" address (dynamic, not in PAMMS)
 ```
 
+## State overrides
+
+The pAMM venues price off-chain liquidity that on-chain state does not
+reflect, so a plain `eth_call` quote sees stale prices. Titan publishes
+fresh state overrides, and quotes apply them automatically: the simulation
+carries the overrides plus their block number/timestamp so venues price
+their pushed state instead of the chain's.
+
+Two sources are available; both need no authentication:
+
+- `OverridesWsSource` — streams `wss://rpc.titanbuilder.xyz/ws/pamm_quote_stream`,
+  caching per-pAMM entries across frames and reconnecting with backoff. This
+  is the **default**: a router constructed without options creates one
+  (connecting lazily on the first quote). The socket auto-closes after an
+  idle window without quotes (`idleTimeoutMs`, default 30s; `0` closes after
+  each quote, `Infinity` never) and reconnects transparently, so no teardown
+  is needed — `close()` exists for immediate, permanent shutdown.
+- `OverridesRpcSource` — calls `titan_getPammStateOverrides` over HTTP on
+  each quote. No connection to manage.
+
+```ts
+import { OverridesRpcSource, OverridesWsSource } from "@propamm/sdk/overrides";
+
+// default: streaming WS source created automatically
+const router = new PropAmmRouter(client, ROUTER);
+
+// or attach a source explicitly
+const rpcRouter = new PropAmmRouter(client, ROUTER, {
+  overrides: new OverridesRpcSource(),
+});
+
+// per-call control
+await router.quote(WETH, USDC, amountIn, { overrides: null });      // skip overrides
+await router.quote(WETH, USDC, amountIn, { overrides: rpcSource }); // one-off source
+```
+
 Admin functions (`addVenue`, `pause`, `setPairFee`, ...) have no typed
 methods, but they are in the exported ABI — call them through the generic
 client:
@@ -139,9 +175,10 @@ await client.write({
 
 Source modules map 1:1 to import paths (`src/<path>.ts` → `@propamm/sdk/<path>`):
 
-- `src/client.ts` — generic viem-based contract client (`read`/`call`/`write`/`waitForTransaction`).
+- `src/client.ts` — generic viem-based contract client (`read`/`call`/`write`/`waitForTransaction`); `call` accepts state and block overrides.
 - `src/router/index.ts` — `PropAmmRouter` bindings (quotes, swaps, `*AndWait` variants, `waitForSwap`, `approve`/`allowance`, views) plus `frontendFee` and `MAX_FEE_BPS`.
 - `src/router/abi.ts` — human-readable `PropAMMRouter` ABI (functions, events, errors).
+- `src/overrides/index.ts` — pAMM state-override sources (`OverridesWsSource`, `OverridesRpcSource`), payload parsing, and `toStateOverride`.
 - `src/common/tokens.ts` — `ETH_SENTINEL` and mainnet token addresses.
 - `src/common/pamms.ts` — `PAMMS` name → venue address mapping.
 - `src/common/helpers.ts` — `applySlippage`, `deadlineIn`, and unit conversion (`parseEther`, `parseUnits`, `formatEther`, `formatUnits`).

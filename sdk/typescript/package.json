@@ -15,6 +15,10 @@
       "types": "./dist/router/index.d.ts",
       "import": "./dist/router/index.js"
     },
+    "./overrides": {
+      "types": "./dist/overrides/index.d.ts",
+      "import": "./dist/overrides/index.js"
+    },
     "./*": {
       "types": "./dist/*.d.ts",
       "import": "./dist/*.js"

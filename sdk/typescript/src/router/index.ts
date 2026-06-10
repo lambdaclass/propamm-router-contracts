@@ -11,10 +11,17 @@ import {
   zeroAddress,
   type Address,
   type Hash,
+  type StateOverride,
   type TransactionReceipt,
 } from "viem";
 import { propAmmRouterAbi } from "./abi.js";
 import { ETH_SENTINEL } from "../common/tokens.js";
+import {
+  OverridesWsSource,
+  toStateOverride,
+  type OverridesSnapshot,
+  type OverridesSource,
+} from "../overrides/index.js";
 import type { ContractClient } from "../client.js";
 
 /** Common parameters shared by every swap entrypoint. */
@@ -43,6 +50,24 @@ export interface FrontendFee {
 export interface Quote {
   amountOut: bigint;
   venue: Address;
+}
+
+export interface PropAmmRouterOptions {
+  /**
+   * Source of pAMM state overrides applied to quote simulations. Defaults to
+   * a streaming `OverridesWsSource` (which connects lazily on first use).
+   */
+  overrides?: OverridesSource;
+}
+
+export interface QuoteOptions {
+  /**
+   * Override source (or a fixed snapshot) for this call. Defaults to the
+   * router's attached source; pass `null` to quote without overrides.
+   */
+  overrides?: OverridesSource | OverridesSnapshot | null;
+  /** Inject the Bebop default slot when no Bebop entry is present (default true). */
+  bebopDefault?: boolean;
 }
 
 /** Decoded outcome of a mined swap (from the `Swapped` event). */
@@ -75,25 +100,35 @@ export function frontendFee(bps: number, recipient: Address): FrontendFee {
 export class PropAmmRouter {
   readonly address: Address;
   readonly client: ContractClient;
+  /** Source of pAMM state overrides quotes apply by default. */
+  readonly overrides: OverridesSource;
 
-  constructor(client: ContractClient, address: Address) {
+  constructor(client: ContractClient, address: Address, options: PropAmmRouterOptions = {}) {
     this.client = client;
     this.address = address;
+    this.overrides = options.overrides ?? new OverridesWsSource();
   }
 
   //--------//
   // Quotes //
   //--------//
   // The quote functions are nonpayable on-chain, so they go through
-  // `ContractClient.call` (eth_call simulation) rather than `read`.
+  // `ContractClient.call` (eth_call simulation) rather than `read`. By
+  // default the simulation carries the latest pAMM state overrides (plus
+  // their block number) so venues quote fresh off-chain liquidity.
 
   /** Best quote across all whitelisted venues and the Uniswap V3 fallback. */
-  async quote(tokenIn: Address, tokenOut: Address, amountIn: bigint): Promise<Quote> {
-    const [amountOut, venue] = await this.callRouter<[bigint, Address]>("quoteV1", [
-      tokenIn,
-      tokenOut,
-      amountIn,
-    ]);
+  async quote(
+    tokenIn: Address,
+    tokenOut: Address,
+    amountIn: bigint,
+    opts?: QuoteOptions,
+  ): Promise<Quote> {
+    const [amountOut, venue] = await this.callRouter<[bigint, Address]>(
+      "quoteV1",
+      [tokenIn, tokenOut, amountIn],
+      await this.resolveOverrides(opts),
+    );
     return { amountOut, venue };
   }
 
@@ -106,13 +141,13 @@ export class PropAmmRouter {
     tokenIn: Address,
     tokenOut: Address,
     amountIn: bigint,
+    opts?: QuoteOptions,
   ): Promise<Quote> {
-    const [amountOut, quotedVenue] = await this.callRouter<[bigint, Address]>("quoteVenueV1", [
-      venue,
-      tokenIn,
-      tokenOut,
-      amountIn,
-    ]);
+    const [amountOut, quotedVenue] = await this.callRouter<[bigint, Address]>(
+      "quoteVenueV1",
+      [venue, tokenIn, tokenOut, amountIn],
+      await this.resolveOverrides(opts),
+    );
     return { amountOut, venue: quotedVenue };
   }
 
@@ -122,15 +157,20 @@ export class PropAmmRouter {
     tokenIn: Address,
     tokenOut: Address,
     amountIn: bigint,
+    opts?: QuoteOptions,
   ): Promise<Quote> {
     const [amountOut, venue] = await this.callRouter<[bigint, Address]>(
       "quoteSelectedVenuesV1",
       [venues, tokenIn, tokenOut, amountIn],
+      await this.resolveOverrides(opts),
     );
     return { amountOut, venue };
   }
 
-  /** Quote the Uniswap V3 fallback route directly. */
+  /**
+   * Quote the Uniswap V3 fallback route directly. Never applies overrides —
+   * the fallback quoter only reads live on-chain pool state.
+   */
   async quoteUniswapV3(tokenIn: Address, tokenOut: Address, amountIn: bigint): Promise<bigint> {
     return this.callRouter<bigint>("quoteUniswapV3", [tokenIn, tokenOut, amountIn]);
   }
@@ -383,13 +423,47 @@ export class PropAmmRouter {
     });
   }
 
-  private async callRouter<T>(functionName: string, args: readonly unknown[]): Promise<T> {
+  private async callRouter<T>(
+    functionName: string,
+    args: readonly unknown[],
+    overrides: { stateOverride?: StateOverride; blockNumber?: bigint; blockTimestamp?: bigint } = {},
+  ): Promise<T> {
     return this.client.call<T>({
       address: this.address,
       abi: propAmmRouterAbi,
       functionName,
       args,
+      ...overrides,
     });
+  }
+
+  /**
+   * Resolve a quote's override options into eth_call parameters: pick the
+   * per-call source/snapshot (or the router's attached source), then flatten
+   * the snapshot into viem's state-override format. The snapshot's block
+   * number and timestamp are attached only alongside overrides — venues
+   * revert when the simulated block context doesn't match their pushed state
+   * (the timestamp matters on forks, whose `block.timestamp` lags the
+   * snapshot's freshness window).
+   */
+  private async resolveOverrides(
+    opts?: QuoteOptions,
+  ): Promise<{ stateOverride?: StateOverride; blockNumber?: bigint; blockTimestamp?: bigint }> {
+    const chosen = opts?.overrides === undefined ? this.overrides : opts.overrides;
+    if (chosen === null) return {};
+
+    const snapshot = isOverridesSource(chosen) ? await chosen.getOverrides() : chosen;
+    if (!snapshot) return {};
+
+    const stateOverride = toStateOverride(snapshot, { bebopDefault: opts?.bebopDefault });
+    if (stateOverride.length === 0) return {};
+
+    return {
+      stateOverride,
+      blockNumber: snapshot.blockNumber,
+      blockTimestamp:
+        snapshot.timestampNs !== undefined ? snapshot.timestampNs / 1_000_000_000n : undefined,
+    };
   }
 
   private async sendSwap(
@@ -406,4 +480,10 @@ export class PropAmmRouter {
       value: isAddressEqual(params.tokenIn, ETH_SENTINEL) ? params.amountIn : undefined,
     });
   }
+}
+
+function isOverridesSource(
+  value: OverridesSource | OverridesSnapshot,
+): value is OverridesSource {
+  return typeof (value as OverridesSource).getOverrides === "function";
 }

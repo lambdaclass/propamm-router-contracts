@@ -8,15 +8,20 @@
 import {
   createPublicClient,
   createWalletClient,
+  decodeFunctionResult,
+  encodeFunctionData,
   http,
   type Abi,
   type Account,
   type Address,
+  type BaseError,
   type Chain,
   type Hash,
   type PublicClient,
+  type StateOverride,
   type WalletClient,
 } from "viem";
+import { getContractError } from "viem/utils";
 
 export interface ContractClientOptions {
   /** JSON-RPC endpoint, e.g. `http://localhost:8545`. */
@@ -37,6 +42,15 @@ export interface ReadParams {
 export interface WriteParams extends ReadParams {
   /** ETH value to send along with the call, in wei. */
   value?: bigint;
+}
+
+export interface CallParams extends WriteParams {
+  /** State overrides applied to the `eth_call` (third RPC parameter). */
+  stateOverride?: StateOverride;
+  /** Pin the simulated `block.number` (block override, fourth RPC parameter). */
+  blockNumber?: bigint;
+  /** Pin the simulated `block.timestamp`, in seconds (block override). */
+  blockTimestamp?: bigint;
 }
 
 export class ContractClient {
@@ -73,9 +87,20 @@ export class ContractClient {
   /**
    * Simulate a state-changing function via `eth_call` and return its result
    * without sending a transaction. Useful for nonpayable functions that are
-   * effectively queries (e.g. on-chain quotes).
+   * effectively queries (e.g. on-chain quotes). Optionally applies state and
+   * block-number overrides to the simulation.
    */
-  async call<T = unknown>(params: WriteParams): Promise<T> {
+  async call<T = unknown>(params: CallParams): Promise<T> {
+    // viem's simulateContract doesn't support overrides, so override-carrying
+    // calls go through the raw `call` action with manual encode/decode.
+    if (
+      params.stateOverride ||
+      params.blockNumber !== undefined ||
+      params.blockTimestamp !== undefined
+    ) {
+      return this.callWithOverrides(params);
+    }
+
     const { result } = await this.publicClient.simulateContract({
       account: this.account,
       address: params.address,
@@ -85,6 +110,52 @@ export class ContractClient {
       value: params.value,
     });
     return result as T;
+  }
+
+  private async callWithOverrides<T>(params: CallParams): Promise<T> {
+    const args = params.args ?? [];
+    const calldata = encodeFunctionData({
+      abi: params.abi,
+      functionName: params.functionName,
+      args,
+    });
+
+    const blockOverrides =
+      params.blockNumber !== undefined || params.blockTimestamp !== undefined
+        ? {
+            ...(params.blockNumber !== undefined && { number: params.blockNumber }),
+            ...(params.blockTimestamp !== undefined && { time: params.blockTimestamp }),
+          }
+        : undefined;
+
+    let returnData;
+    try {
+      ({ data: returnData } = await this.publicClient.call({
+        account: this.account,
+        to: params.address,
+        data: calldata,
+        value: params.value,
+        stateOverride: params.stateOverride,
+        blockOverrides,
+      }));
+    } catch (error) {
+      // Re-shape the raw call error so custom contract errors decode by name.
+      throw getContractError(error as BaseError, {
+        abi: params.abi,
+        address: params.address,
+        args,
+        functionName: params.functionName,
+      });
+    }
+
+    if (!returnData) {
+      throw new Error(`call to ${params.functionName} at ${params.address} returned no data`);
+    }
+    return decodeFunctionResult({
+      abi: params.abi,
+      functionName: params.functionName,
+      data: returnData,
+    }) as T;
   }
 
   /**
