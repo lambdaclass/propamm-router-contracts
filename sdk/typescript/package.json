@@ -30,13 +30,23 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "pnpm typecheck && pnpm lint && pnpm format:check",
     "clean": "rm -rf dist"
   },
   "dependencies": {
     "viem": "^2.50.4"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^25.9.2",
-    "typescript": "~6.0.2"
+    "eslint": "^10.4.1",
+    "globals": "^17.6.0",
+    "prettier": "^3.8.4",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.61.0"
   }
 }
