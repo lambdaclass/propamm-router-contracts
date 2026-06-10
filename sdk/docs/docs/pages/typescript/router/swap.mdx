@@ -1,0 +1,113 @@
+# swap
+
+Swap through the best-quoting venue; falls back to Uniswap V3 if the chosen
+venue fails to fill. Returns the transaction hash — pair with
+[`waitForSwap`](/typescript/router/waitForSwap), or use `swapAndWait` to do
+both in one call.
+
+## Usage
+
+:::code-group
+
+```ts [example.ts]
+import { applySlippage, deadlineIn, parseEther } from "@propamm/sdk/common/helpers";
+import { ETH_SENTINEL, USDC } from "@propamm/sdk/common/tokens";
+import { account, router } from "./config";
+
+const amountIn = parseEther("1");
+const { amountOut } = await router.quote(ETH_SENTINEL, USDC, amountIn);
+
+const hash = await router.swap({
+  tokenIn: ETH_SENTINEL,
+  tokenOut: USDC,
+  amountIn,
+  amountOutMin: applySlippage(amountOut, 50),
+  recipient: account.address,
+  deadline: deadlineIn(300),
+});
+```
+
+```ts [config.ts]
+import { ContractClient } from "@propamm/sdk/client";
+import { PropAmmRouter } from "@propamm/sdk/router";
+import { mainnet } from "@propamm/sdk/common/chains";
+import { privateKeyToAccount } from "@propamm/sdk/common/accounts";
+
+export const account = privateKeyToAccount("0x...");
+export const client = new ContractClient({
+  rpcUrl: "https://...",
+  chain: mainnet,
+  account,
+});
+export const router = new PropAmmRouter(client, "0x...");
+```
+
+:::
+
+## Returns
+
+`Hash`
+
+The transaction hash. The transaction is simulated before sending, so
+reverts surface as errors without spending gas.
+
+## swapAndWait
+
+Same parameters; additionally waits for the receipt and decodes the outcome.
+Returns [`SwapResult`](/typescript/router/waitForSwap#returns).
+
+```ts
+const result = await router.swapAndWait({ ...params });
+// { hash, receipt, amountIn, amountOut, executedVenue, recipient, fee? }
+```
+
+## Parameters
+
+All swap entrypoints share these `SwapParams` fields.
+
+### tokenIn
+
+- **Type:** `Address`
+
+Token being sold. Pass `ETH_SENTINEL` for native ETH — the SDK attaches
+`msg.value = amountIn` automatically. ERC-20 input requires a prior
+allowance for the router (see [`approve`](/typescript/router/approve)).
+
+### tokenOut
+
+- **Type:** `Address`
+
+Token being bought; `ETH_SENTINEL` delivers native ETH.
+
+### amountIn
+
+- **Type:** `bigint`
+
+Exact input amount, in atomic units.
+
+### amountOutMin
+
+- **Type:** `bigint`
+
+Minimum acceptable output; the swap reverts with `InsufficientOutput` below
+it. Derive from a quote with `applySlippage`.
+
+```ts
+const hash = await router.swap({
+  // ...
+  amountOutMin: applySlippage(amountOut, 50), // quote - 0.5% // [!code focus]
+});
+```
+
+### recipient
+
+- **Type:** `Address`
+
+Receiver of `tokenOut`.
+
+### deadline
+
+- **Type:** `bigint`
+
+Unix timestamp after which the swap is invalid (reverts with `Expired`).
+Build with `deadlineIn(seconds)`.

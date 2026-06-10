@@ -1,0 +1,71 @@
+# Views
+
+Read-only router state. All views work on read-only clients.
+
+## fallbackSwapRouter
+
+The Uniswap fallback "venue" address — dynamic router configuration, which
+is why it isn't in the static `PAMMS` mapping.
+
+```ts
+const fallback = await router.fallbackSwapRouter();
+// "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45"
+```
+
+**Returns** `Address`
+
+## fallbackQuoter
+
+The quoter contract used to price the fallback route.
+
+**Returns** `Address`
+
+## fallbackFee
+
+The global fallback fee tier, in hundredths of a bip (e.g. `3000` = 0.30%).
+
+**Returns** `number`
+
+## getPairFee
+
+The raw per-pair fee tier override — `0` means unset. Order-independent:
+`getPairFee(a, b) === getPairFee(b, a)`.
+
+```ts
+const fee = await router.getPairFee(USDC, WETH);
+// 500
+```
+
+**Returns** `number`
+
+## resolvedFee
+
+The effective Uniswap V3 tier for a pair: the per-pair override if set,
+otherwise the global `fallbackFee`.
+
+**Returns** `number`
+
+## isWhitelistedVenue
+
+Whether an address is a whitelisted pAMM. The Uniswap fallback is usable as
+a venue without being whitelisted, so this returns `false` for it.
+
+**Returns** `boolean`
+
+## getWhitelistedVenues
+
+Every whitelisted pAMM venue (excludes the Uniswap fallback). Order is not
+guaranteed.
+
+```ts
+const venues = await router.getWhitelistedVenues();
+// ["0xb107...", "0x71e7...", ...]
+```
+
+**Returns** `Address[]`
+
+## paused
+
+Whether swaps are paused. Quote functions remain callable while paused.
+
+**Returns** `boolean`

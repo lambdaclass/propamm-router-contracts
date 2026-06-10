@@ -1,0 +1,47 @@
+# swap_via_selected_venues_with_fee
+
+[`swap_via_selected_venues`](/rust/router/swap_via_selected_venues) plus a
+frontend fee skimmed from the output token.
+`swap_via_selected_venues_with_fee_and_wait` waits and decodes in one call.
+
+## Usage
+
+```rust
+use propamm_sdk::common::pamms::{BEBOP, FERMI};
+use propamm_sdk::router::frontend_fee;
+
+let hash = router
+    .swap_via_selected_venues_with_fee(
+        vec![FERMI, BEBOP],
+        &params,
+        frontend_fee(25, fee_recipient)?,
+    )
+    .await?;
+```
+
+## Returns
+
+`Result<H256>`
+
+The transaction hash.
+
+## Parameters
+
+### venues
+
+- **Type:** `Vec<Address>`
+
+The only venues considered for selection.
+
+### params
+
+- **Type:** `&SwapParams`
+
+See [`swap`](/rust/router/swap#parameters); `amount_out_min` is the **net**
+minimum after the fee.
+
+### fee
+
+- **Type:** `FrontendFee`
+
+Build with [`frontend_fee(bps, recipient)`](/rust/router/frontend_fee).

@@ -1,0 +1,34 @@
+# frontendFee
+
+Validated `FrontendFee` builder for the `*WithFee` swap variants.
+
+## Usage
+
+```ts
+import { frontendFee, MAX_FEE_BPS } from "@propamm/sdk/router";
+
+const fee = frontendFee(25, "0x..."); // 0.25% of the output
+// { bps: 25, recipient: "0x..." }
+```
+
+## Returns
+
+`FrontendFee`
+
+`{ bps: number; recipient: Address }`, ready to pass to a `*WithFee` swap.
+Throws `RangeError` on invalid input.
+
+## Parameters
+
+### bps
+
+- **Type:** `number`
+
+Fee in basis points of the output token; integer in `[0, MAX_FEE_BPS]`
+(`MAX_FEE_BPS = 100`, i.e. 1%).
+
+### recipient
+
+- **Type:** `Address`
+
+Receives the fee in `tokenOut`; must be non-zero.

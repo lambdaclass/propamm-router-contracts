@@ -1,0 +1,109 @@
+# swap
+
+Swap through the best-quoting venue; falls back to Uniswap V3 if the chosen
+venue fails to fill. Returns the transaction hash — pair with
+[`wait_for_swap`](/rust/router/wait_for_swap), or use `swap_and_wait` to do
+both in one call.
+
+## Usage
+
+:::code-group
+
+```rust [example.rs]
+use propamm_sdk::common::helpers::{apply_slippage, deadline_in, parse_ether};
+use propamm_sdk::common::tokens::{ETH_SENTINEL, USDC};
+use propamm_sdk::router::SwapParams;
+
+let amount_in = parse_ether("1")?;
+let quote = router.quote(ETH_SENTINEL, USDC, amount_in).await?;
+
+let hash = router
+    .swap(&SwapParams {
+        token_in: ETH_SENTINEL,
+        token_out: USDC,
+        amount_in,
+        amount_out_min: apply_slippage(quote.amount_out, 50)?,
+        recipient: me,
+        deadline: deadline_in(300),
+    })
+    .await?;
+```
+
+```rust [setup.rs]
+use propamm_sdk::common::helpers::parse_address;
+use propamm_sdk::{ContractClient, PropAmmRouter};
+
+let client = ContractClient::connect_with_signer("https://...", "0x...")?;
+let me = client.signer_address().unwrap();
+let router = PropAmmRouter::new(client, parse_address("0x...")?);
+```
+
+:::
+
+## Returns
+
+`Result<H256>`
+
+The transaction hash. Requires a signing client
+(`ContractClient::connect_with_signer`).
+
+## swap_and_wait
+
+Same parameters; additionally waits for the receipt and decodes the outcome.
+Returns [`SwapResult`](/rust/router/wait_for_swap#returns).
+
+```rust
+let result = router.swap_and_wait(&params).await?;
+// SwapResult { hash, receipt, amount_in, amount_out, executed_venue, recipient, fee }
+```
+
+## Parameters
+
+All swap entrypoints share these `SwapParams` fields.
+
+### token_in
+
+- **Type:** `Address`
+
+Token being sold. Pass `ETH_SENTINEL` for native ETH — the SDK attaches
+`msg.value = amount_in` automatically. ERC-20 input requires a prior
+allowance for the router (see [`approve`](/rust/router/approve)).
+
+### token_out
+
+- **Type:** `Address`
+
+Token being bought; `ETH_SENTINEL` delivers native ETH.
+
+### amount_in
+
+- **Type:** `U256`
+
+Exact input amount, in atomic units.
+
+### amount_out_min
+
+- **Type:** `U256`
+
+Minimum acceptable output; the swap reverts with `InsufficientOutput` below
+it. Derive from a quote with `apply_slippage`.
+
+```rust
+let params = SwapParams {
+    // ...
+    amount_out_min: apply_slippage(quote.amount_out, 50)?, // quote - 0.5% // [!code focus]
+};
+```
+
+### recipient
+
+- **Type:** `Address`
+
+Receiver of `token_out`.
+
+### deadline
+
+- **Type:** `U256`
+
+Unix timestamp after which the swap is invalid (reverts with `Expired`).
+Build with `deadline_in(seconds)`.

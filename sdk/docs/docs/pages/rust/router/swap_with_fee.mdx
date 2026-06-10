@@ -1,0 +1,39 @@
+# swap_with_fee
+
+[`swap`](/rust/router/swap) plus a frontend fee skimmed from the output
+token. `swap_with_fee_and_wait` waits and decodes in one call.
+
+## Usage
+
+```rust
+use propamm_sdk::router::frontend_fee;
+
+let hash = router
+    .swap_with_fee(&params, frontend_fee(25, fee_recipient)?) // 0.25%
+    .await?;
+```
+
+## Returns
+
+`Result<H256>`
+
+The transaction hash. The decoded result's `fee` field (via
+[`wait_for_swap`](/rust/router/wait_for_swap)) carries the charged amount
+and recipient.
+
+## Parameters
+
+### params
+
+- **Type:** `&SwapParams`
+
+See [`swap`](/rust/router/swap#parameters). On the fee paths,
+`amount_out_min` is the **net** minimum the recipient must receive after the
+fee.
+
+### fee
+
+- **Type:** `FrontendFee`
+
+Build with [`frontend_fee(bps, recipient)`](/rust/router/frontend_fee) —
+`bps` capped at `MAX_FEE_BPS` (100 = 1%), paid in `token_out` to `recipient`.

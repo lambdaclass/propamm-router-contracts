@@ -1,0 +1,76 @@
+# quoteVenue
+
+Quote a specific venue.
+
+## Usage
+
+:::code-group
+
+```ts [example.ts]
+import { parseUnits } from "@propamm/sdk/common/helpers";
+import { PAMMS } from "@propamm/sdk/common/pamms";
+import { USDC, WETH } from "@propamm/sdk/common/tokens";
+import { router } from "./config";
+
+const { amountOut, venue } = await router.quoteVenue(
+  PAMMS.fermi,
+  USDC,
+  WETH,
+  parseUnits("100", 6),
+);
+```
+
+```ts [config.ts]
+import { ContractClient } from "@propamm/sdk/client";
+import { PropAmmRouter } from "@propamm/sdk/router";
+import { mainnet } from "@propamm/sdk/common/chains";
+
+export const client = new ContractClient({
+  rpcUrl: "https://...",
+  chain: mainnet,
+});
+export const router = new PropAmmRouter(client, "0x...");
+```
+
+:::
+
+## Returns
+
+`Quote`
+
+The output amount and the venue that was actually priced. When the requested
+venue cannot be priced, the call does **not** revert: it falls back to the
+Uniswap V3 quote and reports the fallback router as `venue`.
+
+## Parameters
+
+### venue
+
+- **Type:** `Address`
+
+A whitelisted pAMM (see `PAMMS` in `@propamm/sdk/common/pamms`) or the
+fallback router address (read it with `router.fallbackSwapRouter()`).
+
+### tokenIn
+
+- **Type:** `Address`
+
+Token being sold, or `ETH_SENTINEL` for native ETH.
+
+### tokenOut
+
+- **Type:** `Address`
+
+Token being bought, or `ETH_SENTINEL` for native ETH.
+
+### amountIn
+
+- **Type:** `bigint`
+
+Exact input amount, in atomic units.
+
+### opts (optional)
+
+- **Type:** `QuoteOptions`
+
+Per-call quote options — see [`quote`](/typescript/router/quote#opts-optional).

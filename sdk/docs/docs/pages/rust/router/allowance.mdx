@@ -1,0 +1,32 @@
+# allowance
+
+Current allowance an owner has granted the router for an ERC-20 token.
+
+## Usage
+
+```rust
+use propamm_sdk::common::tokens::USDC;
+
+let allowance = router.allowance(USDC, me).await?;
+// 100000000
+```
+
+## Returns
+
+`Result<U256>`
+
+The current allowance, in atomic units.
+
+## Parameters
+
+### token
+
+- **Type:** `Address`
+
+The ERC-20 token.
+
+### owner
+
+- **Type:** `Address`
+
+The account whose allowance to read.

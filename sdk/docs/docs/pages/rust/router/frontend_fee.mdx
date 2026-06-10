@@ -1,0 +1,34 @@
+# frontend_fee
+
+Validated `FrontendFee` builder for the `_with_fee` swap variants.
+
+## Usage
+
+```rust
+use propamm_sdk::router::{frontend_fee, MAX_FEE_BPS};
+
+let fee = frontend_fee(25, fee_recipient)?; // 0.25% of the output
+// FrontendFee { bps: 25, recipient: 0x... }
+```
+
+## Returns
+
+`Result<FrontendFee>`
+
+`FrontendFee { bps: u16, recipient: Address }`, ready to pass to a
+`_with_fee` swap. Fails with `Error::InvalidInput` on invalid input.
+
+## Parameters
+
+### bps
+
+- **Type:** `u16`
+
+Fee in basis points of the output token; at most `MAX_FEE_BPS` (`100`,
+i.e. 1%).
+
+### recipient
+
+- **Type:** `Address`
+
+Receives the fee in `token_out`; must be non-zero.

@@ -1,0 +1,53 @@
+# quote_venue
+
+Quote a specific venue.
+
+## Usage
+
+:::code-group
+
+```rust [example.rs]
+use propamm_sdk::common::helpers::parse_units;
+use propamm_sdk::common::pamms::FERMI;
+use propamm_sdk::common::tokens::{USDC, WETH};
+
+let quote = router
+    .quote_venue(FERMI, USDC, WETH, parse_units("100", 6)?)
+    .await?;
+```
+
+```rust [setup.rs]
+use propamm_sdk::common::helpers::parse_address;
+use propamm_sdk::{ContractClient, PropAmmRouter};
+
+let client = ContractClient::connect("https://...")?;
+let router = PropAmmRouter::new(client, parse_address("0x...")?);
+```
+
+:::
+
+## Returns
+
+`Result<Quote>`
+
+The output amount and the venue that was actually priced. When the requested
+venue cannot be priced, the call does **not** fail: it falls back to the
+Uniswap V3 quote and reports the fallback router as `venue`.
+
+## Parameters
+
+### venue
+
+- **Type:** `Address`
+
+A whitelisted pAMM (see `common::pamms`) or the fallback router address
+(read it with `router.fallback_swap_router()`).
+
+### token_in / token_out / amount_in
+
+See [`quote`](/rust/router/quote#parameters).
+
+## quote_venue_with
+
+Same, plus `opts: &QuoteOptions` — see
+[`quote_with`](/rust/router/quote#quote_with).

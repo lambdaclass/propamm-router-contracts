@@ -1,0 +1,43 @@
+# waitForSwap
+
+Wait until a swap transaction is mined and decode its outcome from the
+router's `Swapped` (and, when present, `FrontendFeeCharged`) events.
+
+## Usage
+
+```ts
+const hash = await router.swap(params);
+const result = await router.waitForSwap(hash);
+// {
+//   hash: "0x...",
+//   amountIn: 1000000000000000000n,
+//   amountOut: 1626397384n,
+//   executedVenue: "0x...",
+//   recipient: "0x...",
+//   fee: undefined,
+//   receipt: { ... },
+// }
+```
+
+## Returns
+
+`SwapResult`
+
+- `hash: Hash` / `receipt: TransactionReceipt` — the transaction and its receipt.
+- `amountIn: bigint` — input pulled from the sender.
+- `amountOut: bigint` — output delivered to the recipient (net of any fee).
+- `executedVenue: Address` — the venue that actually filled, or the Uniswap
+  fallback router.
+- `recipient: Address` — who received `tokenOut`.
+- `fee?: { recipient: Address; amount: bigint }` — present when the swap
+  charged a frontend fee.
+
+Throws if the transaction reverted or emitted no `Swapped` event.
+
+## Parameters
+
+### hash
+
+- **Type:** `Hash`
+
+Hash returned by any swap method.

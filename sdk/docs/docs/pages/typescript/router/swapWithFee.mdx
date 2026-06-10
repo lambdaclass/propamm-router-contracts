@@ -1,0 +1,59 @@
+# swapWithFee
+
+[`swap`](/typescript/router/swap) plus a frontend fee skimmed from the
+output token. `swapWithFeeAndWait` waits and decodes in one call.
+
+## Usage
+
+:::code-group
+
+```ts [example.ts]
+import { frontendFee } from "@propamm/sdk/router";
+import { router } from "./config";
+
+const hash = await router.swapWithFee(
+  params,
+  frontendFee(25, "0x..."), // 0.25% to the fee recipient
+);
+```
+
+```ts [config.ts]
+import { ContractClient } from "@propamm/sdk/client";
+import { PropAmmRouter } from "@propamm/sdk/router";
+import { mainnet } from "@propamm/sdk/common/chains";
+import { privateKeyToAccount } from "@propamm/sdk/common/accounts";
+
+export const client = new ContractClient({
+  rpcUrl: "https://...",
+  chain: mainnet,
+  account: privateKeyToAccount("0x..."),
+});
+export const router = new PropAmmRouter(client, "0x...");
+```
+
+:::
+
+## Returns
+
+`Hash`
+
+The transaction hash. The decoded result's `fee` field (via
+[`waitForSwap`](/typescript/router/waitForSwap)) carries the charged amount
+and recipient.
+
+## Parameters
+
+### params
+
+- **Type:** `SwapParams`
+
+See [`swap`](/typescript/router/swap#parameters). On the fee paths,
+`amountOutMin` is the **net** minimum the recipient must receive after the
+fee.
+
+### fee
+
+- **Type:** `FrontendFee`
+
+Build with [`frontendFee(bps, recipient)`](/typescript/router/frontendFee) —
+`bps` capped at `MAX_FEE_BPS` (100 = 1%), paid in `tokenOut` to `recipient`.

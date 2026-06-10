@@ -1,0 +1,37 @@
+# swapViaSelectedVenues
+
+Re-quote only the supplied venues on-chain and swap through the best one;
+routes to the Uniswap V3 fallback when none can be priced.
+`swapViaSelectedVenuesAndWait` waits and decodes in one call.
+
+## Usage
+
+```ts
+import { PAMMS } from "@propamm/sdk/common/pamms";
+
+const hash = await router.swapViaSelectedVenues(
+  [PAMMS.fermi, PAMMS.bebop],
+  params,
+);
+```
+
+## Returns
+
+`Hash`
+
+The transaction hash.
+
+## Parameters
+
+### venues
+
+- **Type:** `Address[]`
+
+The only venues considered for selection. The Uniswap fallback still applies
+at execution time as a safety net.
+
+### params
+
+- **Type:** `SwapParams`
+
+See [`swap`](/typescript/router/swap#parameters).

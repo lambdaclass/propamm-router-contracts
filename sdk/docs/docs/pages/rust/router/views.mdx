@@ -1,0 +1,70 @@
+# Views
+
+Read-only router state. All views work on read-only clients.
+
+## fallback_swap_router
+
+The Uniswap fallback "venue" address — dynamic router configuration, which
+is why it isn't in the static `PAMMS` constants.
+
+```rust
+let fallback = router.fallback_swap_router().await?;
+// 0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45
+```
+
+**Returns** `Result<Address>`
+
+## fallback_quoter
+
+The quoter contract used to price the fallback route.
+
+**Returns** `Result<Address>`
+
+## fallback_fee
+
+The global fallback fee tier, in hundredths of a bip (e.g. `3000` = 0.30%).
+
+**Returns** `Result<u32>`
+
+## get_pair_fee
+
+The raw per-pair fee tier override — `0` means unset. Order-independent:
+`get_pair_fee(a, b) == get_pair_fee(b, a)`.
+
+```rust
+let fee = router.get_pair_fee(USDC, WETH).await?;
+// 500
+```
+
+**Returns** `Result<u32>`
+
+## resolved_fee
+
+The effective Uniswap V3 tier for a pair: the per-pair override if set,
+otherwise the global `fallback_fee`.
+
+**Returns** `Result<u32>`
+
+## is_whitelisted_venue
+
+Whether an address is a whitelisted pAMM. The Uniswap fallback is usable as
+a venue without being whitelisted, so this returns `false` for it.
+
+**Returns** `Result<bool>`
+
+## get_whitelisted_venues
+
+Every whitelisted pAMM venue (excludes the Uniswap fallback). Order is not
+guaranteed.
+
+```rust
+let venues = router.get_whitelisted_venues().await?;
+```
+
+**Returns** `Result<Vec<Address>>`
+
+## paused
+
+Whether swaps are paused. Quote functions remain callable while paused.
+
+**Returns** `Result<bool>`

@@ -1,0 +1,32 @@
+# allowance
+
+Current allowance an owner has granted the router for an ERC-20 token.
+
+## Usage
+
+```ts
+import { USDC } from "@propamm/sdk/common/tokens";
+
+const allowance = await router.allowance(USDC, account.address);
+// 100000000n
+```
+
+## Returns
+
+`bigint`
+
+The current allowance, in atomic units.
+
+## Parameters
+
+### token
+
+- **Type:** `Address`
+
+The ERC-20 token.
+
+### owner
+
+- **Type:** `Address`
+
+The account whose allowance to read.

@@ -1,0 +1,75 @@
+# quoteSelectedVenues
+
+Best quote among a caller-supplied set of venues.
+
+## Usage
+
+:::code-group
+
+```ts [example.ts]
+import { parseUnits } from "@propamm/sdk/common/helpers";
+import { PAMMS } from "@propamm/sdk/common/pamms";
+import { USDC, WETH } from "@propamm/sdk/common/tokens";
+import { router } from "./config";
+
+const { amountOut, venue } = await router.quoteSelectedVenues(
+  [PAMMS.fermi, PAMMS.bebop],
+  USDC,
+  WETH,
+  parseUnits("100", 6),
+);
+```
+
+```ts [config.ts]
+import { ContractClient } from "@propamm/sdk/client";
+import { PropAmmRouter } from "@propamm/sdk/router";
+import { mainnet } from "@propamm/sdk/common/chains";
+
+export const client = new ContractClient({
+  rpcUrl: "https://...",
+  chain: mainnet,
+});
+export const router = new PropAmmRouter(client, "0x...");
+```
+
+:::
+
+## Returns
+
+`Quote`
+
+The best output amount among `venues` and the venue that produced it. Venues
+that revert while quoting are skipped; when none can be priced the router
+falls back to the Uniswap V3 quote.
+
+## Parameters
+
+### venues
+
+- **Type:** `Address[]`
+
+The only venues considered.
+
+### tokenIn
+
+- **Type:** `Address`
+
+Token being sold, or `ETH_SENTINEL` for native ETH.
+
+### tokenOut
+
+- **Type:** `Address`
+
+Token being bought, or `ETH_SENTINEL` for native ETH.
+
+### amountIn
+
+- **Type:** `bigint`
+
+Exact input amount, in atomic units.
+
+### opts (optional)
+
+- **Type:** `QuoteOptions`
+
+Per-call quote options — see [`quote`](/typescript/router/quote#opts-optional).

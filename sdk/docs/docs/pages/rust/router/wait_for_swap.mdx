@@ -1,0 +1,43 @@
+# wait_for_swap
+
+Wait until a swap transaction is mined and decode its outcome from the
+router's `Swapped` (and, when present, `FrontendFeeCharged`) events.
+
+## Usage
+
+```rust
+let hash = router.swap(&params).await?;
+let result = router.wait_for_swap(hash).await?;
+// SwapResult {
+//     hash: 0x...,
+//     amount_in: 1000000000000000000,
+//     amount_out: 1626397384,
+//     executed_venue: 0x...,
+//     recipient: 0x...,
+//     fee: None,
+//     receipt: RpcReceipt { ... },
+// }
+```
+
+## Returns
+
+`Result<SwapResult>`
+
+- `hash: H256` / `receipt: TransactionReceipt` — the transaction and its receipt.
+- `amount_in: U256` — input pulled from the sender.
+- `amount_out: U256` — output delivered to the recipient (net of any fee).
+- `executed_venue: Address` — the venue that actually filled, or the Uniswap
+  fallback router.
+- `recipient: Address` — who received `token_out`.
+- `fee: Option<FeeCharged>` — `{ recipient, amount }`, present when the swap
+  charged a frontend fee.
+
+Fails if the transaction reverted or emitted no `Swapped` event.
+
+## Parameters
+
+### hash
+
+- **Type:** `H256`
+
+Hash returned by any swap method.
