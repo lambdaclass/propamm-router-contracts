@@ -26,17 +26,16 @@ use std::{
     time::{Duration, Instant},
 };
 
-use alloy::{
-    primitives::{Address, B256, U256},
-    rpc::types::state::{AccountOverride, StateOverride},
-};
+use alloy_primitives::{Address, B256, U256, b256};
 use async_trait::async_trait;
 use futures_util::StreamExt;
+use rex_sdk::client::eth::StateOverrideSet;
 use serde_json::Value;
 use tokio::sync::{Mutex, Notify};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 use crate::common::pamms::BEBOP;
+use crate::convert::{b256_to_h256, to_ethrex_address, word_to_ethrex_u256};
 use crate::error::{Error, Result};
 
 pub const DEFAULT_OVERRIDES_RPC_URL: &str = "https://rpc.titanbuilder.xyz";
@@ -45,9 +44,8 @@ pub const DEFAULT_OVERRIDES_WS_URL: &str = "wss://rpc.titanbuilder.xyz/ws/pamm_q
 /// Bebop prices from a single registry slot. When a snapshot carries no Bebop
 /// entry, [`to_state_override`] zeroes this slot by default so a stale
 /// on-chain Bebop price cannot win a best-quote selection it could never fill.
-pub const BEBOP_DEFAULT_SLOT: B256 = B256::new(alloy::hex!(
-    "3ca381a3d43d4e593578057c4abe441ad9df02f080defd17d2b6e6190cdcd936"
-));
+pub const BEBOP_DEFAULT_SLOT: B256 =
+    b256!("0x3ca381a3d43d4e593578057c4abe441ad9df02f080defd17d2b6e6190cdcd936");
 
 /// Storage slot diffs for one contract: slot → value.
 pub type SlotDiffs = HashMap<B256, B256>;
@@ -163,13 +161,13 @@ pub struct ToStateOverrideOptions {
     pub skip_bebop_default: bool,
 }
 
-/// Merge a snapshot's per-pAMM diffs into alloy's [`StateOverride`] format
+/// Merge a snapshot's per-pAMM diffs into rex's [`StateOverrideSet`] format
 /// for `eth_call`. Diffs are merged at slot level when multiple pAMM entries
 /// touch the same contract.
 pub fn to_state_override(
     snapshot: &OverridesSnapshot,
     options: &ToStateOverrideOptions,
-) -> StateOverride {
+) -> StateOverrideSet {
     let mut merged: HashMap<Address, SlotDiffs> = HashMap::new();
     let mut has_bebop = false;
     for (pamm, contracts) in &snapshot.per_pamm {
@@ -191,16 +189,16 @@ pub fn to_state_override(
             .insert(BEBOP_DEFAULT_SLOT, B256::ZERO);
     }
 
-    merged
-        .into_iter()
-        .map(|(address, slots)| {
-            let account = AccountOverride {
-                state_diff: Some(slots.into_iter().collect()),
-                ..Default::default()
-            };
-            (address, account)
-        })
-        .collect()
+    let mut set = StateOverrideSet::new();
+    for (address, slots) in merged {
+        let account = set.entry(to_ethrex_address(address));
+        for (slot, value) in slots {
+            account
+                .state_diff
+                .insert(b256_to_h256(slot), word_to_ethrex_u256(value));
+        }
+    }
+    set
 }
 
 /// Fetch-on-demand source: one `titan_getPammStateOverrides` call per

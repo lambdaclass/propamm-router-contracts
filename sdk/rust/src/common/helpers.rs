@@ -1,6 +1,6 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use alloy::primitives::U256;
+use alloy_primitives::U256;
 
 use crate::error::{Error, Result};
 
@@ -9,7 +9,7 @@ use crate::error::{Error, Result};
 //   parse_units("1", 6)        -> 1000000             (e.g. USDC)
 //   format_ether(...)          -> "1"
 //   format_units(..., 6)       -> "1"
-pub use alloy::primitives::utils::{format_ether, format_units, parse_ether, parse_units};
+pub use alloy_primitives::utils::{format_ether, format_units, parse_ether, parse_units};
 
 const BPS_DENOMINATOR: u64 = 10_000;
 

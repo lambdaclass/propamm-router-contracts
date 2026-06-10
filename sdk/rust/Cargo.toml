@@ -6,10 +6,23 @@ description = "Rust SDK for interacting with the PropAMM contracts"
 license = "MIT"
 
 [dependencies]
-alloy = { version = "2.0.5", features = ["full"] }
+# ABI: typed calls/events/errors via the sol! macro (kept for now)
+alloy-primitives = "1"
+alloy-sol-types = "1"
+
+# Transport: rex / ethrex (git deps; ethrex pinned to the tag rex uses).
+# rex pinned to the block_overrides branch for BlockOverrideSet — repoint to a
+# tag once it merges.
+rex-sdk = { git = "https://github.com/lambdaclass/rex", branch = "block_overrides" }
+ethrex-common = { git = "https://github.com/lambdaclass/ethrex", tag = "v9.0.0" }
+ethrex-rpc = { git = "https://github.com/lambdaclass/ethrex", tag = "v9.0.0" }
+ethrex-sdk = { git = "https://github.com/lambdaclass/ethrex", tag = "v9.0.0" }
+ethrex-l2-rpc = { git = "https://github.com/lambdaclass/ethrex", tag = "v9.0.0" }
+secp256k1 = "0.30"
+
 async-trait = "0.1.89"
 futures-util = "0.3.32"
-reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde_json = "1.0.150"
 thiserror = "2.0.18"
 tokio = { version = "1.52.3", features = ["rt", "macros", "time", "sync"] }

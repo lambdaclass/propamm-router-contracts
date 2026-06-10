@@ -5,10 +5,9 @@
 // The swap entrypoints mirror the contract's parameter lists.
 #![allow(clippy::too_many_arguments)]
 
-use alloy::sol;
+use alloy_sol_types::sol;
 
 sol! {
-    #[sol(rpc)]
     #[derive(Debug)]
     interface IPropAMMRouter {
         struct FrontendFee {
@@ -88,7 +87,6 @@ sol! {
         error EnforcedPause();
     }
 
-    #[sol(rpc)]
     interface IERC20 {
         function approve(address spender, uint256 amount) external returns (bool);
         function allowance(address owner, address spender) external view returns (uint256);

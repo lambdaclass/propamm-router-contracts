@@ -7,6 +7,7 @@
 
 pub mod client;
 pub mod common;
+pub(crate) mod convert;
 pub mod error;
 pub mod overrides;
 pub mod router;
@@ -16,4 +17,4 @@ pub use error::{Error, Result};
 pub use router::PropAmmRouter;
 
 // Core primitive types, re-exported so basic usage needs no direct alloy import.
-pub use alloy::primitives::{Address, B256, TxHash, U256};
+pub use alloy_primitives::{Address, B256, TxHash, U256};

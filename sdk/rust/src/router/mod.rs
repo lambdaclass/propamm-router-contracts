@@ -6,14 +6,12 @@ pub mod abi;
 
 use std::sync::Arc;
 
-use alloy::{
-    primitives::{Address, TxHash, U256},
-    providers::DynProvider,
-    rpc::types::TransactionReceipt,
-};
+use alloy_primitives::{Address, TxHash, U256};
+use alloy_sol_types::{SolEvent, SolInterface};
 
-use crate::client::{CallOverrides, ContractClient};
+use crate::client::{BlockOverrideSet, CallOverrides, ContractClient, TransactionReceipt};
 use crate::common::tokens::ETH_SENTINEL;
+use crate::convert::{h256_to_b256, to_ethrex_address};
 use crate::error::{Error, Result};
 use crate::overrides::{
     OverridesSnapshot, OverridesSource, OverridesWsSource, ToStateOverrideOptions,
@@ -67,7 +65,7 @@ pub struct Quote {
 }
 
 /// Decoded outcome of a mined swap (from the `Swapped` event).
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct SwapResult {
     pub hash: TxHash,
     pub receipt: TransactionReceipt,
@@ -109,15 +107,12 @@ pub struct QuoteOptions {
     pub skip_bebop_default: bool,
 }
 
-type RouterInstance = IPropAMMRouter::IPropAMMRouterInstance<DynProvider>;
-
 /// Typed `PropAMMRouter` bindings. Quotes apply pAMM state overrides from the
 /// attached source by default (a streaming [`OverridesWsSource`] unless one
 /// is provided).
 pub struct PropAmmRouter {
     address: Address,
     client: ContractClient,
-    instance: RouterInstance,
     overrides: Arc<dyn OverridesSource>,
 }
 
@@ -134,11 +129,9 @@ impl PropAmmRouter {
         address: Address,
         overrides: Arc<dyn OverridesSource>,
     ) -> Self {
-        let instance = IPropAMMRouter::new(address, client.provider().clone());
         Self {
             address,
             client,
-            instance,
             overrides,
         }
     }
@@ -185,9 +178,7 @@ impl PropAmmRouter {
     ) -> Result<Quote> {
         let overrides = self.resolve_overrides(opts).await?;
         let ret = self
-            .client
-            .call(
-                self.address,
+            .call_router(
                 &IPropAMMRouter::quoteV1Call {
                     tokenIn: token_in,
                     tokenOut: token_out,
@@ -232,9 +223,7 @@ impl PropAmmRouter {
     ) -> Result<Quote> {
         let overrides = self.resolve_overrides(opts).await?;
         let ret = self
-            .client
-            .call(
-                self.address,
+            .call_router(
                 &IPropAMMRouter::quoteVenueV1Call {
                     venue,
                     tokenIn: token_in,
@@ -279,9 +268,7 @@ impl PropAmmRouter {
     ) -> Result<Quote> {
         let overrides = self.resolve_overrides(opts).await?;
         let ret = self
-            .client
-            .call(
-                self.address,
+            .call_router(
                 &IPropAMMRouter::quoteSelectedVenuesV1Call {
                     venues,
                     tokenIn: token_in,
@@ -305,17 +292,15 @@ impl PropAmmRouter {
         token_out: Address,
         amount_in: U256,
     ) -> Result<U256> {
-        self.client
-            .call(
-                self.address,
-                &IPropAMMRouter::quoteUniswapV3Call {
-                    tokenIn: token_in,
-                    tokenOut: token_out,
-                    amount: amount_in,
-                },
-                &CallOverrides::default(),
-            )
-            .await
+        self.call_router(
+            &IPropAMMRouter::quoteUniswapV3Call {
+                tokenIn: token_in,
+                tokenOut: token_out,
+                amount: amount_in,
+            },
+            &CallOverrides::default(),
+        )
+        .await
     }
 
     //-------//
@@ -327,46 +312,52 @@ impl PropAmmRouter {
 
     /// Swap through the best-quoting venue.
     pub async fn swap(&self, params: &SwapParams) -> Result<TxHash> {
-        let call = self.instance.swapV1(
-            params.token_in,
-            params.token_out,
-            params.amount_in,
-            params.amount_out_min,
-            params.recipient,
-            params.deadline,
-        );
-        self.send_swap(call.into_transaction_request(), params)
-            .await
+        self.send_swap(
+            &IPropAMMRouter::swapV1Call {
+                tokenIn: params.token_in,
+                tokenOut: params.token_out,
+                amountIn: params.amount_in,
+                amountOutMin: params.amount_out_min,
+                recipient: params.recipient,
+                deadline: params.deadline,
+            },
+            params,
+        )
+        .await
     }
 
     /// Best-venue swap that skims a frontend fee from the output.
     pub async fn swap_with_fee(&self, params: &SwapParams, fee: FrontendFee) -> Result<TxHash> {
-        let call = self.instance.swapWithFeeV1(
-            params.token_in,
-            params.token_out,
-            params.amount_in,
-            params.amount_out_min,
-            params.recipient,
-            params.deadline,
-            fee,
-        );
-        self.send_swap(call.into_transaction_request(), params)
-            .await
+        self.send_swap(
+            &IPropAMMRouter::swapWithFeeV1Call {
+                tokenIn: params.token_in,
+                tokenOut: params.token_out,
+                amountIn: params.amount_in,
+                amountOutMin: params.amount_out_min,
+                recipient: params.recipient,
+                deadline: params.deadline,
+                fee,
+            },
+            params,
+        )
+        .await
     }
 
     /// Swap through an explicit venue (a whitelisted propAMM or the fallback router).
     pub async fn swap_via_venue(&self, venue: Address, params: &SwapParams) -> Result<TxHash> {
-        let call = self.instance.swapViaVenueV1(
-            venue,
-            params.token_in,
-            params.token_out,
-            params.amount_in,
-            params.amount_out_min,
-            params.recipient,
-            params.deadline,
-        );
-        self.send_swap(call.into_transaction_request(), params)
-            .await
+        self.send_swap(
+            &IPropAMMRouter::swapViaVenueV1Call {
+                venue,
+                tokenIn: params.token_in,
+                tokenOut: params.token_out,
+                amountIn: params.amount_in,
+                amountOutMin: params.amount_out_min,
+                recipient: params.recipient,
+                deadline: params.deadline,
+            },
+            params,
+        )
+        .await
     }
 
     /// Explicit-venue swap that skims a frontend fee from the output.
@@ -376,18 +367,20 @@ impl PropAmmRouter {
         params: &SwapParams,
         fee: FrontendFee,
     ) -> Result<TxHash> {
-        let call = self.instance.swapViaVenueWithFeeV1(
-            venue,
-            params.token_in,
-            params.token_out,
-            params.amount_in,
-            params.amount_out_min,
-            params.recipient,
-            params.deadline,
-            fee,
-        );
-        self.send_swap(call.into_transaction_request(), params)
-            .await
+        self.send_swap(
+            &IPropAMMRouter::swapViaVenueWithFeeV1Call {
+                venue,
+                tokenIn: params.token_in,
+                tokenOut: params.token_out,
+                amountIn: params.amount_in,
+                amountOutMin: params.amount_out_min,
+                recipient: params.recipient,
+                deadline: params.deadline,
+                fee,
+            },
+            params,
+        )
+        .await
     }
 
     /// Swap through the best of a caller-supplied set of venues.
@@ -396,17 +389,19 @@ impl PropAmmRouter {
         venues: Vec<Address>,
         params: &SwapParams,
     ) -> Result<TxHash> {
-        let call = self.instance.swapViaSelectedVenuesV1(
-            venues,
-            params.token_in,
-            params.token_out,
-            params.amount_in,
-            params.amount_out_min,
-            params.recipient,
-            params.deadline,
-        );
-        self.send_swap(call.into_transaction_request(), params)
-            .await
+        self.send_swap(
+            &IPropAMMRouter::swapViaSelectedVenuesV1Call {
+                venues,
+                tokenIn: params.token_in,
+                tokenOut: params.token_out,
+                amountIn: params.amount_in,
+                amountOutMin: params.amount_out_min,
+                recipient: params.recipient,
+                deadline: params.deadline,
+            },
+            params,
+        )
+        .await
     }
 
     /// Selected-venues swap that skims a frontend fee from the output.
@@ -416,18 +411,20 @@ impl PropAmmRouter {
         params: &SwapParams,
         fee: FrontendFee,
     ) -> Result<TxHash> {
-        let call = self.instance.swapViaSelectedVenuesWithFeeV1(
-            venues,
-            params.token_in,
-            params.token_out,
-            params.amount_in,
-            params.amount_out_min,
-            params.recipient,
-            params.deadline,
-            fee,
-        );
-        self.send_swap(call.into_transaction_request(), params)
-            .await
+        self.send_swap(
+            &IPropAMMRouter::swapViaSelectedVenuesWithFeeV1Call {
+                venues,
+                tokenIn: params.token_in,
+                tokenOut: params.token_out,
+                amountIn: params.amount_in,
+                amountOutMin: params.amount_out_min,
+                recipient: params.recipient,
+                deadline: params.deadline,
+                fee,
+            },
+            params,
+        )
+        .await
     }
 
     //----------------//
@@ -494,44 +491,38 @@ impl PropAmmRouter {
     /// Fails if the transaction reverted or emitted no `Swapped` event.
     pub async fn wait_for_swap(&self, hash: TxHash) -> Result<SwapResult> {
         let receipt = self.client.wait_for_transaction(hash).await?;
-        if !receipt.status() {
+        if !receipt.receipt.status {
             return Err(Error::Other(format!("swap transaction {hash} reverted")));
         }
 
-        let router_logs: Vec<_> = receipt
-            .inner
-            .logs()
-            .iter()
-            .filter(|log| log.address() == self.address)
-            .collect();
-
-        let swapped = router_logs
-            .iter()
-            .find_map(|log| log.log_decode::<IPropAMMRouter::Swapped>().ok())
+        let swapped = self
+            .decode_router_logs::<IPropAMMRouter::Swapped>(&receipt)
+            .into_iter()
+            .next()
             .ok_or_else(|| {
                 Error::Other(format!(
                     "transaction {hash} emitted no Swapped event from {}",
                     self.address
                 ))
             })?;
-        let swapped = swapped.inner.data;
 
-        let fee = router_logs
-            .iter()
-            .find_map(|log| log.log_decode::<IPropAMMRouter::FrontendFeeCharged>().ok())
-            .map(|log| FeeCharged {
-                recipient: log.inner.data.feeRecipient,
-                amount: log.inner.data.feeAmount,
+        let fee = self
+            .decode_router_logs::<IPropAMMRouter::FrontendFeeCharged>(&receipt)
+            .into_iter()
+            .next()
+            .map(|event| FeeCharged {
+                recipient: event.feeRecipient,
+                amount: event.feeAmount,
             });
 
         Ok(SwapResult {
             hash,
-            receipt,
             amount_in: swapped.amountIn,
             amount_out: swapped.amountOut,
             executed_venue: swapped.marketMaker,
             recipient: swapped.recipient,
             fee,
+            receipt,
         })
     }
 
@@ -541,15 +532,30 @@ impl PropAmmRouter {
 
     /// Approve the router to pull `amount` of `token` from the signer.
     pub async fn approve(&self, token: Address, amount: U256) -> Result<TxHash> {
-        let erc20 = IERC20::new(token, self.client.provider().clone());
-        let pending = erc20.approve(self.address, amount).send().await?;
-        Ok(*pending.tx_hash())
+        self.client
+            .send(
+                token,
+                &IERC20::approveCall {
+                    spender: self.address,
+                    amount,
+                },
+                None,
+            )
+            .await
     }
 
     /// Current router allowance of `token` granted by `owner`.
     pub async fn allowance(&self, token: Address, owner: Address) -> Result<U256> {
-        let erc20 = IERC20::new(token, self.client.provider().clone());
-        Ok(erc20.allowance(owner, self.address).call().await?)
+        self.client
+            .call(
+                token,
+                &IERC20::allowanceCall {
+                    owner,
+                    spender: self.address,
+                },
+                &CallOverrides::default(),
+            )
+            .await
     }
 
     //-------//
@@ -558,53 +564,110 @@ impl PropAmmRouter {
 
     /// The Uniswap fallback "venue" address (dynamic router configuration).
     pub async fn fallback_swap_router(&self) -> Result<Address> {
-        Ok(self.instance.fallbackSwapRouter().call().await?)
+        self.call_router(
+            &IPropAMMRouter::fallbackSwapRouterCall {},
+            &CallOverrides::default(),
+        )
+        .await
     }
 
     pub async fn fallback_quoter(&self) -> Result<Address> {
-        Ok(self.instance.fallbackQuoter().call().await?)
+        self.call_router(
+            &IPropAMMRouter::fallbackQuoterCall {},
+            &CallOverrides::default(),
+        )
+        .await
     }
 
     pub async fn fallback_fee(&self) -> Result<u32> {
-        Ok(self.instance.fallbackFee().call().await?.to::<u32>())
+        let fee = self
+            .call_router(
+                &IPropAMMRouter::fallbackFeeCall {},
+                &CallOverrides::default(),
+            )
+            .await?;
+        Ok(fee.to::<u32>())
     }
 
     /// Raw per-pair fee override (0 if unset). Order-independent.
     pub async fn get_pair_fee(&self, token_a: Address, token_b: Address) -> Result<u32> {
-        Ok(self
-            .instance
-            .getPairFee(token_a, token_b)
-            .call()
-            .await?
-            .to::<u32>())
+        let fee = self
+            .call_router(
+                &IPropAMMRouter::getPairFeeCall {
+                    tokenA: token_a,
+                    tokenB: token_b,
+                },
+                &CallOverrides::default(),
+            )
+            .await?;
+        Ok(fee.to::<u32>())
     }
 
     /// Effective Uniswap V3 fallback tier for a pair (override or global).
     pub async fn resolved_fee(&self, token_in: Address, token_out: Address) -> Result<u32> {
-        Ok(self
-            .instance
-            .resolvedFee(token_in, token_out)
-            .call()
-            .await?
-            .to::<u32>())
+        let fee = self
+            .call_router(
+                &IPropAMMRouter::resolvedFeeCall {
+                    tokenIn: token_in,
+                    tokenOut: token_out,
+                },
+                &CallOverrides::default(),
+            )
+            .await?;
+        Ok(fee.to::<u32>())
     }
 
     pub async fn is_whitelisted_venue(&self, venue: Address) -> Result<bool> {
-        Ok(self.instance.isWhitelistedVenue(venue).call().await?)
+        self.call_router(
+            &IPropAMMRouter::isWhitelistedVenueCall { venue },
+            &CallOverrides::default(),
+        )
+        .await
     }
 
     /// Every whitelisted propAMM venue (excludes the Uniswap fallback).
     pub async fn get_whitelisted_venues(&self) -> Result<Vec<Address>> {
-        Ok(self.instance.getWhitelistedVenues().call().await?)
+        self.call_router(
+            &IPropAMMRouter::getWhitelistedVenuesCall {},
+            &CallOverrides::default(),
+        )
+        .await
     }
 
     pub async fn paused(&self) -> Result<bool> {
-        Ok(self.instance.paused().call().await?)
+        self.call_router(&IPropAMMRouter::pausedCall {}, &CallOverrides::default())
+            .await
     }
 
     //-----------//
     // Internals //
     //-----------//
+
+    /// `ContractClient::call` against the router, with revert data decoded
+    /// into the contract's named errors when possible.
+    async fn call_router<C: alloy_sol_types::SolCall>(
+        &self,
+        call: &C,
+        overrides: &CallOverrides,
+    ) -> Result<C::Return> {
+        self.client
+            .call(self.address, call, overrides)
+            .await
+            .map_err(decode_revert)
+    }
+
+    fn decode_router_logs<E: SolEvent>(&self, receipt: &TransactionReceipt) -> Vec<E> {
+        let router = to_ethrex_address(self.address);
+        receipt
+            .logs
+            .iter()
+            .filter(|log| log.log.address == router)
+            .filter_map(|log| {
+                let topics: Vec<_> = log.log.topics.iter().copied().map(h256_to_b256).collect();
+                E::decode_raw_log(topics, &log.log.data).ok()
+            })
+            .collect()
+    }
 
     /// Resolve a quote's override options into eth_call parameters. The
     /// snapshot's block number and timestamp are attached only alongside
@@ -631,24 +694,40 @@ impl PropAmmRouter {
 
         Ok(CallOverrides {
             state: Some(state),
-            block_number: snapshot.block_number,
-            block_timestamp: snapshot.timestamp_ns.map(|ns| ns / 1_000_000_000),
+            block: Some(BlockOverrideSet {
+                number: snapshot.block_number,
+                time: snapshot.timestamp_ns.map(|ns| ns / 1_000_000_000),
+                ..Default::default()
+            }),
         })
     }
 
-    async fn send_swap(
+    async fn send_swap<C: alloy_sol_types::SolCall>(
         &self,
-        mut tx: alloy::rpc::types::TransactionRequest,
+        call: &C,
         params: &SwapParams,
     ) -> Result<TxHash> {
-        use alloy::network::TransactionBuilder;
-        use alloy::providers::Provider;
-
         // Native-ETH input is signalled by the sentinel and paid via msg.value.
-        if params.token_in == ETH_SENTINEL {
-            tx.set_value(params.amount_in);
-        }
-        let pending = self.client.provider().send_transaction(tx).await?;
-        Ok(*pending.tx_hash())
+        let value = (params.token_in == ETH_SENTINEL).then_some(params.amount_in);
+        self.client.send(self.address, call, value).await
+    }
+}
+
+/// Re-shape a raw revert into the contract's named error when the revert data
+/// matches one (e.g. `InsufficientOutput(...)`).
+fn decode_revert(error: Error) -> Error {
+    let Error::Revert {
+        message,
+        data: Some(data),
+    } = &error
+    else {
+        return error;
+    };
+    match IPropAMMRouter::IPropAMMRouterErrors::abi_decode(data) {
+        Ok(decoded) => Error::Revert {
+            message: format!("{message} ({decoded:?})"),
+            data: Some(data.clone()),
+        },
+        Err(_) => error,
     }
 }

@@ -1,4 +1,4 @@
-use alloy::primitives::{Address, address};
+use alloy_primitives::{Address, address};
 
 // PropAMM venues seeded into the router whitelist at initialization.
 pub const FERMI: Address = address!("0x5979458912F80B96d30D4220af8E2e4925A33320");

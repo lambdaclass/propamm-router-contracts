@@ -1,88 +1,86 @@
-//! Thin wrapper around an alloy provider for reading from and writing to
-//! contracts, including `eth_call` simulations with state and block
-//! overrides (which typed contract calls don't carry).
+//! Thin wrapper around rex/ethrex's `EthClient` for reading from and writing
+//! to contracts. ABI encoding/decoding stays on alloy's `sol!` types; this
+//! module owns the JSON-RPC transport, including `eth_call` simulations with
+//! state and block overrides (rex's `StateOverrideSet`/`BlockOverrideSet`).
+//!
+//! Calls go through rex's `call_with_overrides`, which flattens revert data
+//! into its error string — [`parse_call_error`] recovers the payload from the
+//! `" (data: 0x…)"` suffix so reverts still decode into named contract errors.
 
-use std::time::Duration;
+use std::{str::FromStr, sync::Arc};
 
-use alloy::{
-    network::{EthereumWallet, TransactionBuilder},
-    primitives::{Address, Bytes, TxHash, U256},
-    providers::{DynProvider, Provider, ProviderBuilder},
-    rpc::types::{BlockOverrides, TransactionReceipt, TransactionRequest, state::StateOverride},
-    signers::local::PrivateKeySigner,
-    sol_types::SolCall,
-};
+use alloy_primitives::{Address, TxHash, U256, hex};
+use alloy_sol_types::SolCall;
+use ethrex_common::types::TxType;
+use ethrex_l2_rpc::signer::{LocalSigner, Signer};
+use ethrex_l2_sdk::{build_generic_tx, send_generic_transaction};
+use ethrex_rpc::{EthClient, clients::EthClientError, clients::Overrides};
+use rex_sdk::client::eth::call_with_overrides;
+use secp256k1::SecretKey;
 
+use crate::convert::{h256_to_b256, to_alloy_address, to_ethrex_address, to_ethrex_u256};
 use crate::error::{Error, Result};
 
-const RECEIPT_POLL_INTERVAL: Duration = Duration::from_secs(1);
-const RECEIPT_TIMEOUT: Duration = Duration::from_secs(120);
+/// The receipt type returned by the transport (re-exported from ethrex).
+pub use ethrex_rpc::types::receipt::RpcReceipt as TransactionReceipt;
+/// State and block override sets for `eth_call` (re-exported from rex).
+pub use rex_sdk::client::eth::{AccountOverride, BlockOverrideSet, StateOverrideSet};
+
+/// Receipt polling: 2s between attempts inside rex's helper.
+const RECEIPT_MAX_RETRIES: u64 = 60;
 
 /// Optional context for `eth_call` simulations.
 #[derive(Debug, Clone, Default)]
 pub struct CallOverrides {
     /// State overrides applied to the call (third RPC parameter).
-    pub state: Option<StateOverride>,
-    /// Pin the simulated `block.number` (block override, fourth RPC parameter).
-    pub block_number: Option<u64>,
-    /// Pin the simulated `block.timestamp`, in seconds (block override).
-    pub block_timestamp: Option<u64>,
-}
-
-impl CallOverrides {
-    fn is_empty(&self) -> bool {
-        self.state.is_none() && self.block_number.is_none() && self.block_timestamp.is_none()
-    }
+    pub state: Option<StateOverrideSet>,
+    /// Block overrides applied to the call (fourth RPC parameter), e.g. a
+    /// pinned `number`/`time`.
+    pub block: Option<BlockOverrideSet>,
 }
 
 /// JSON-RPC contract client. Construct read-only with [`ContractClient::connect`]
 /// or signing with [`ContractClient::connect_with_signer`].
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ContractClient {
-    provider: DynProvider,
-    signer_address: Option<Address>,
+    client: Arc<EthClient>,
+    signer: Option<Signer>,
 }
 
 impl ContractClient {
     /// Read-only client (quotes and views work; sends don't).
     pub fn connect(rpc_url: &str) -> Result<Self> {
-        let url = rpc_url
-            .parse()
-            .map_err(|e| Error::Other(format!("invalid RPC url: {e}")))?;
-        let provider = ProviderBuilder::new().connect_http(url).erased();
         Ok(Self {
-            provider,
-            signer_address: None,
+            client: Self::eth_client(rpc_url)?,
+            signer: None,
         })
     }
 
     /// Signing client from a 0x-prefixed private key.
     pub fn connect_with_signer(rpc_url: &str, private_key: &str) -> Result<Self> {
-        let signer: PrivateKeySigner = private_key
-            .parse()
-            .map_err(|e| Error::Other(format!("invalid private key: {e}")))?;
-        let signer_address = signer.address();
-        let url = rpc_url
-            .parse()
-            .map_err(|e| Error::Other(format!("invalid RPC url: {e}")))?;
-        let provider = ProviderBuilder::new()
-            .wallet(EthereumWallet::from(signer))
-            .connect_http(url)
-            .erased();
+        let key = SecretKey::from_str(private_key.trim_start_matches("0x"))
+            .map_err(|e| Error::InvalidInput(format!("invalid private key: {e}")))?;
         Ok(Self {
-            provider,
-            signer_address: Some(signer_address),
+            client: Self::eth_client(rpc_url)?,
+            signer: Some(LocalSigner::new(key).into()),
         })
     }
 
-    /// The underlying type-erased provider, for anything not wrapped here.
-    pub fn provider(&self) -> &DynProvider {
-        &self.provider
+    fn eth_client(rpc_url: &str) -> Result<Arc<EthClient>> {
+        let url = rpc_url
+            .parse()
+            .map_err(|e| Error::InvalidInput(format!("invalid RPC url: {e}")))?;
+        Ok(Arc::new(EthClient::new(url)?))
+    }
+
+    /// The underlying ethrex client, for anything not wrapped here.
+    pub fn eth(&self) -> &EthClient {
+        &self.client
     }
 
     /// Address of the configured signer, if any.
     pub fn signer_address(&self) -> Option<Address> {
-        self.signer_address
+        self.signer.as_ref().map(|s| to_alloy_address(s.address()))
     }
 
     /// Simulate a function via `eth_call` and decode its return value, with
@@ -94,54 +92,100 @@ impl ContractClient {
         call: &C,
         overrides: &CallOverrides,
     ) -> Result<C::Return> {
-        let tx = TransactionRequest::default()
-            .with_to(to)
-            .with_input(Bytes::from(call.abi_encode()));
-
-        let data: Bytes = if overrides.is_empty() {
-            self.provider.call(tx).await?
-        } else {
-            let block_overrides = (overrides.block_number.is_some()
-                || overrides.block_timestamp.is_some())
-            .then(|| BlockOverrides {
-                number: overrides.block_number.map(U256::from),
-                time: overrides.block_timestamp,
-                ..Default::default()
-            });
-
-            // The raw 4-positional-parameter form: call object, block tag,
-            // state overrides, block overrides.
-            self.provider
-                .client()
-                .request(
-                    "eth_call",
-                    (
-                        tx,
-                        "latest",
-                        overrides.state.clone().unwrap_or_default(),
-                        block_overrides.unwrap_or_default(),
-                    ),
-                )
-                .await?
+        let tx_overrides = Overrides {
+            from: self.signer.as_ref().map(|s| s.address()),
+            ..Default::default()
         };
+        let state = overrides.state.clone().unwrap_or_default();
+        let block = overrides.block.clone().unwrap_or_default();
 
+        let raw = call_with_overrides(
+            &self.client,
+            to_ethrex_address(to),
+            call.abi_encode().into(),
+            tx_overrides,
+            &state,
+            &block,
+        )
+        .await
+        .map_err(parse_call_error)?;
+
+        let data = hex::decode(raw.trim_start_matches("0x"))
+            .map_err(|e| Error::Abi(format!("eth_call returned invalid hex: {e}")))?;
         C::abi_decode_returns(&data)
-            .map_err(|e| Error::Other(format!("failed to decode {} return: {e}", C::SIGNATURE)))
+            .map_err(|e| Error::Abi(format!("failed to decode {} return: {e}", C::SIGNATURE)))
+    }
+
+    /// Sign and send a contract call as an EIP-1559 transaction (gas and
+    /// nonce are filled by the node). Returns the transaction hash.
+    pub async fn send<C: SolCall>(
+        &self,
+        to: Address,
+        call: &C,
+        value: Option<U256>,
+    ) -> Result<TxHash> {
+        let signer = self.signer.as_ref().ok_or_else(|| {
+            Error::InvalidInput(
+                "ContractClient was created without a signer; sends are unavailable".into(),
+            )
+        })?;
+
+        let overrides = Overrides {
+            from: Some(signer.address()),
+            value: value.map(to_ethrex_u256),
+            ..Default::default()
+        };
+        let tx = build_generic_tx(
+            &self.client,
+            TxType::EIP1559,
+            to_ethrex_address(to),
+            signer.address(),
+            call.abi_encode().into(),
+            overrides,
+        )
+        .await?;
+        let hash = send_generic_transaction(&self.client, tx, signer).await?;
+        Ok(h256_to_b256(hash))
     }
 
     /// Wait until a transaction is mined and return its receipt.
     pub async fn wait_for_transaction(&self, hash: TxHash) -> Result<TransactionReceipt> {
-        let deadline = tokio::time::Instant::now() + RECEIPT_TIMEOUT;
-        loop {
-            if let Some(receipt) = self.provider.get_transaction_receipt(hash).await? {
-                return Ok(receipt);
-            }
-            if tokio::time::Instant::now() >= deadline {
-                return Err(Error::Timeout(format!(
-                    "transaction {hash} not mined within {RECEIPT_TIMEOUT:?}"
-                )));
-            }
-            tokio::time::sleep(RECEIPT_POLL_INTERVAL).await;
-        }
+        let receipt = rex_sdk::wait_for_transaction_receipt(
+            crate::convert::b256_to_h256(hash),
+            &self.client,
+            RECEIPT_MAX_RETRIES,
+            true,
+        )
+        .await?;
+        Ok(receipt)
+    }
+}
+
+/// Re-shape `call_with_overrides` errors. rex reports `eth_call` RPC errors as
+/// `Custom("eth_call rpc error: <message> (data: 0x…)")`, with the revert
+/// payload interpolated into the string — recover it so callers can decode
+/// named contract errors. Parsing is coupled to rex's format string; if it
+/// stops matching, errors degrade to undecoded messages, never wrong data.
+fn parse_call_error(error: EthClientError) -> Error {
+    let EthClientError::Custom(text) = &error else {
+        return Error::Client(error);
+    };
+    let Some(rest) = text.strip_prefix("eth_call rpc error: ") else {
+        return Error::Client(error);
+    };
+
+    if let Some((message, suffix)) = rest.rsplit_once(" (data: 0x")
+        && let Some(data) = suffix
+            .strip_suffix(')')
+            .and_then(|hex_data| hex::decode(hex_data).ok())
+    {
+        return Error::Revert {
+            message: message.to_string(),
+            data: Some(data),
+        };
+    }
+    Error::Revert {
+        message: rest.to_string(),
+        data: None,
     }
 }

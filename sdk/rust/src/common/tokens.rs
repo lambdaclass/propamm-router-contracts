@@ -1,4 +1,4 @@
-use alloy::primitives::{Address, address};
+use alloy_primitives::{Address, address};
 
 /// Sentinel passed as `token_in` or `token_out` to signal native ETH.
 pub const ETH_SENTINEL: Address = address!("0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE");

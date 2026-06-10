@@ -2,13 +2,21 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum Error {
-    /// JSON-RPC transport failure (connection, serialization, node errors).
-    #[error("transport error: {0}")]
-    Transport(#[from] alloy::transports::TransportError),
+    /// JSON-RPC client failure (transport, node errors, tx building/sending).
+    #[error("rpc client error: {0}")]
+    Client(#[from] ethrex_rpc::clients::EthClientError),
 
-    /// Contract interaction failure (revert, ABI decoding, ...).
-    #[error("contract error: {0}")]
-    Contract(#[from] alloy::contract::Error),
+    /// An `eth_call` reverted. `data` carries the raw revert payload when the
+    /// node provided one (the router bindings decode it into named errors).
+    #[error("call reverted: {message}")]
+    Revert {
+        message: String,
+        data: Option<Vec<u8>>,
+    },
+
+    /// ABI encoding/decoding failure.
+    #[error("abi error: {0}")]
+    Abi(String),
 
     /// Failure while fetching or parsing pAMM state overrides.
     #[error("overrides error: {0}")]
@@ -18,11 +26,11 @@ pub enum Error {
     #[error("timeout: {0}")]
     Timeout(String),
 
-    /// Invalid caller-supplied input (addresses, fee bounds, ...).
+    /// Invalid caller-supplied input (addresses, fee bounds, keys, URLs, ...).
     #[error("invalid input: {0}")]
     InvalidInput(String),
 
-    /// Anything else (signer parsing, URL parsing, decoding, ...).
+    /// Anything else.
     #[error("{0}")]
     Other(String),
 }
