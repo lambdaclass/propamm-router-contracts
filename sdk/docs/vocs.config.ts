@@ -16,10 +16,12 @@ export default defineConfig({
     { text: "Introduction", link: "/" },
     {
       text: "TypeScript SDK",
+      collapsed: false,
       items: [
         { text: "Getting started", link: "/typescript/getting-started" },
         {
           text: "Quotes",
+          collapsed: true,
           items: [
             { text: "quote", link: "/typescript/router/quote" },
             { text: "quoteVenue", link: "/typescript/router/quoteVenue" },
@@ -29,6 +31,7 @@ export default defineConfig({
         },
         {
           text: "Swaps",
+          collapsed: true,
           items: [
             { text: "swap", link: "/typescript/router/swap" },
             { text: "swapWithFee", link: "/typescript/router/swapWithFee" },
@@ -45,6 +48,7 @@ export default defineConfig({
         },
         {
           text: "Router",
+          collapsed: true,
           items: [
             { text: "approve", link: "/typescript/router/approve" },
             { text: "allowance", link: "/typescript/router/allowance" },
@@ -53,6 +57,7 @@ export default defineConfig({
         },
         {
           text: "State overrides",
+          collapsed: true,
           items: [
             { text: "OverridesWsSource", link: "/typescript/overrides/ws-source" },
             { text: "OverridesRpcSource", link: "/typescript/overrides/rpc-source" },
@@ -64,10 +69,12 @@ export default defineConfig({
     },
     {
       text: "Rust SDK",
+      collapsed: false,
       items: [
         { text: "Getting started", link: "/rust/getting-started" },
         {
           text: "Quotes",
+          collapsed: true,
           items: [
             { text: "quote", link: "/rust/router/quote" },
             { text: "quote_venue", link: "/rust/router/quote_venue" },
@@ -77,6 +84,7 @@ export default defineConfig({
         },
         {
           text: "Swaps",
+          collapsed: true,
           items: [
             { text: "swap", link: "/rust/router/swap" },
             { text: "swap_with_fee", link: "/rust/router/swap_with_fee" },
@@ -93,6 +101,7 @@ export default defineConfig({
         },
         {
           text: "Router",
+          collapsed: true,
           items: [
             { text: "approve", link: "/rust/router/approve" },
             { text: "allowance", link: "/rust/router/allowance" },
@@ -101,6 +110,7 @@ export default defineConfig({
         },
         {
           text: "State overrides",
+          collapsed: true,
           items: [
             { text: "OverridesWsSource", link: "/rust/overrides/ws-source" },
             { text: "OverridesRpcSource", link: "/rust/overrides/rpc-source" },
