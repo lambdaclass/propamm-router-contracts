@@ -4,6 +4,10 @@ Quote the Uniswap V3 fallback route directly, at the pair's resolved fee
 tier. Never applies state overrides — the fallback quoter only reads live
 on-chain pool state.
 
+```rust
+pub async fn quote_uniswap_v3(&self, token_in: Address, token_out: Address, amount_in: U256) -> Result<U256>
+```
+
 ## Usage
 
 ```rust

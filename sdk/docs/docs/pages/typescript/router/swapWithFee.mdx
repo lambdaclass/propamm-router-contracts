@@ -3,6 +3,11 @@
 [`swap`](/typescript/router/swap) plus a frontend fee skimmed from the
 output token. `swapWithFeeAndWait` waits and decodes in one call.
 
+```ts
+swapWithFee(params: SwapParams, fee: FrontendFee): Promise<Hash>
+swapWithFeeAndWait(params: SwapParams, fee: FrontendFee): Promise<SwapResult>
+```
+
 ## Usage
 
 :::code-group

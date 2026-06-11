@@ -4,6 +4,10 @@ Quote the Uniswap V3 fallback route directly, at the pair's resolved fee
 tier. Never applies state overrides — the fallback quoter only reads live
 on-chain pool state.
 
+```ts
+quoteUniswapV3(tokenIn: Address, tokenOut: Address, amountIn: bigint): Promise<bigint>
+```
+
 ## Usage
 
 :::code-group

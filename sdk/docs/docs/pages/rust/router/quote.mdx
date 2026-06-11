@@ -7,6 +7,11 @@ through `eth_call` simulation — by default carrying the latest pAMM state
 overrides plus their block number/timestamp, so venues quote fresh off-chain
 liquidity.
 
+```rust
+pub async fn quote(&self, token_in: Address, token_out: Address, amount_in: U256) -> Result<Quote>
+pub async fn quote_with(&self, token_in: Address, token_out: Address, amount_in: U256, opts: &QuoteOptions) -> Result<Quote>
+```
+
 ## Usage
 
 :::code-group

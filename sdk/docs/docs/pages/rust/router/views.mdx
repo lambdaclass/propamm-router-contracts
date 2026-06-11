@@ -4,6 +4,10 @@ Read-only router state. All views work on read-only clients.
 
 ## fallback_swap_router
 
+```rust
+pub async fn fallback_swap_router(&self) -> Result<Address>
+```
+
 The Uniswap fallback "venue" address — dynamic router configuration, which
 is why it isn't in the static `PAMMS` constants.
 
@@ -16,17 +20,29 @@ let fallback = router.fallback_swap_router().await?;
 
 ## fallback_quoter
 
+```rust
+pub async fn fallback_quoter(&self) -> Result<Address>
+```
+
 The quoter contract used to price the fallback route.
 
 **Returns** `Result<Address>`
 
 ## fallback_fee
 
+```rust
+pub async fn fallback_fee(&self) -> Result<u32>
+```
+
 The global fallback fee tier, in hundredths of a bip (e.g. `3000` = 0.30%).
 
 **Returns** `Result<u32>`
 
 ## get_pair_fee
+
+```rust
+pub async fn get_pair_fee(&self, token_a: Address, token_b: Address) -> Result<u32>
+```
 
 The raw per-pair fee tier override — `0` means unset. Order-independent:
 `get_pair_fee(a, b) == get_pair_fee(b, a)`.
@@ -40,6 +56,10 @@ let fee = router.get_pair_fee(USDC, WETH).await?;
 
 ## resolved_fee
 
+```rust
+pub async fn resolved_fee(&self, token_in: Address, token_out: Address) -> Result<u32>
+```
+
 The effective Uniswap V3 tier for a pair: the per-pair override if set,
 otherwise the global `fallback_fee`.
 
@@ -47,12 +67,20 @@ otherwise the global `fallback_fee`.
 
 ## is_whitelisted_venue
 
+```rust
+pub async fn is_whitelisted_venue(&self, venue: Address) -> Result<bool>
+```
+
 Whether an address is a whitelisted pAMM. The Uniswap fallback is usable as
 a venue without being whitelisted, so this returns `false` for it.
 
 **Returns** `Result<bool>`
 
 ## get_whitelisted_venues
+
+```rust
+pub async fn get_whitelisted_venues(&self) -> Result<Vec<Address>>
+```
 
 Every whitelisted pAMM venue (excludes the Uniswap fallback). Order is not
 guaranteed.
@@ -64,6 +92,10 @@ let venues = router.get_whitelisted_venues().await?;
 **Returns** `Result<Vec<Address>>`
 
 ## paused
+
+```rust
+pub async fn paused(&self) -> Result<bool>
+```
 
 Whether swaps are paused. Quote functions remain callable while paused.
 

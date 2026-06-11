@@ -5,6 +5,11 @@ venue fails to fill. Returns the transaction hash — pair with
 [`waitForSwap`](/typescript/router/waitForSwap), or use `swapAndWait` to do
 both in one call.
 
+```ts
+swap(params: SwapParams): Promise<Hash>
+swapAndWait(params: SwapParams): Promise<SwapResult>
+```
+
 ## Usage
 
 :::code-group

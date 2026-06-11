@@ -3,6 +3,10 @@
 Wait until a swap transaction is mined and decode its outcome from the
 router's `Swapped` (and, when present, `FrontendFeeCharged`) events.
 
+```rust
+pub async fn wait_for_swap(&self, hash: H256) -> Result<SwapResult>
+```
+
 ## Usage
 
 ```rust

@@ -5,6 +5,10 @@ Lower-level pieces of the `overrides` module, for custom sources or manual
 
 ## parse_overrides_message
 
+```rust
+pub fn parse_overrides_message(raw: &Value) -> Result<OverridesSnapshot>
+```
+
 Parse a raw payload (a WS frame or the JSON-RPC `result`) into an
 `OverridesSnapshot`; pAMMs/contracts with empty `stateDiff`s are dropped.
 
@@ -18,6 +22,10 @@ let snapshot = parse_overrides_message(&serde_json::from_str(frame)?)?;
 **Returns** `Result<OverridesSnapshot>`.
 
 ## to_state_override
+
+```rust
+pub fn to_state_override(snapshot: &OverridesSnapshot, options: &ToStateOverrideOptions) -> StateOverrideSet
+```
 
 Flatten a snapshot into rex's `StateOverrideSet` for `eth_call`, merging
 diffs at slot level.

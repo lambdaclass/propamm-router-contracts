@@ -3,6 +3,11 @@
 Swap through an explicit venue. `swapViaVenueAndWait` waits and decodes in
 one call.
 
+```ts
+swapViaVenue(venue: Address, params: SwapParams): Promise<Hash>
+swapViaVenueAndWait(venue: Address, params: SwapParams): Promise<SwapResult>
+```
+
 ## Usage
 
 :::code-group

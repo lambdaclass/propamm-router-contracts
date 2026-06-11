@@ -4,6 +4,11 @@
 skimmed from the output token. `swapViaVenueWithFeeAndWait` waits and
 decodes in one call.
 
+```ts
+swapViaVenueWithFee(venue: Address, params: SwapParams, fee: FrontendFee): Promise<Hash>
+swapViaVenueWithFeeAndWait(venue: Address, params: SwapParams, fee: FrontendFee): Promise<SwapResult>
+```
+
 ## Usage
 
 ```ts

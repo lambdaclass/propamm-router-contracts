@@ -3,6 +3,11 @@
 Swap through an explicit venue. `swap_via_venue_and_wait` waits and decodes
 in one call.
 
+```rust
+pub async fn swap_via_venue(&self, venue: Address, params: &SwapParams) -> Result<H256>
+pub async fn swap_via_venue_and_wait(&self, venue: Address, params: &SwapParams) -> Result<SwapResult>
+```
+
 ## Usage
 
 ```rust

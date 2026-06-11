@@ -4,6 +4,10 @@ Fetch-on-demand source for pAMM state overrides: one
 `titan_getPammStateOverrides` HTTP call per `get_overrides()`. Nothing to
 manage; simplest for sporadic quoting.
 
+```rust
+pub fn new(url: impl Into<String>) -> Self
+```
+
 ## Usage
 
 ```rust
@@ -25,6 +29,10 @@ let opts = QuoteOptions {
 ## Methods
 
 ### get_overrides()
+
+```rust
+pub async fn get_overrides(&self) -> Result<OverridesSnapshot>
+```
 
 **Returns** `Result<OverridesSnapshot>` — a fresh snapshot fetched from the
 endpoint. Fails on HTTP or JSON-RPC errors.

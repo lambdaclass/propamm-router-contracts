@@ -2,6 +2,11 @@
 
 Quote a specific venue.
 
+```rust
+pub async fn quote_venue(&self, venue: Address, token_in: Address, token_out: Address, amount_in: U256) -> Result<Quote>
+pub async fn quote_venue_with(&self, venue: Address, token_in: Address, token_out: Address, amount_in: U256, opts: &QuoteOptions) -> Result<Quote>
+```
+
 ## Usage
 
 :::code-group

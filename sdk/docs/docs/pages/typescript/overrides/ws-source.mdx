@@ -4,6 +4,10 @@ Streaming source for pAMM state overrides — the router default. Caches
 per-pAMM entries across frames (a frame only carries the pAMMs it updates),
 reconnects with backoff, and auto-closes when idle.
 
+```ts
+new OverridesWsSource(options?: OverridesWsSourceOptions)
+```
+
 ## Usage
 
 ```ts
@@ -22,6 +26,10 @@ const router2 = new PropAmmRouter(client, "0x...", { overrides: source });
 
 ### getOverrides()
 
+```ts
+getOverrides(): Promise<OverridesSnapshot>
+```
+
 **Returns** `Promise<OverridesSnapshot>` — the accumulated snapshot
 (`{ blockNumber?, timestampNs?, perPamm }`). Connects lazily on first use
 and waits for the first frame; after an idle close it reconnects and waits
@@ -29,6 +37,10 @@ for a fresh frame instead of serving stale data. Throws on first-frame
 timeout or after `close()`.
 
 ### close()
+
+```ts
+close(): void
+```
 
 Immediate, permanent teardown. Not needed for process exit — the idle
 timeout handles that.

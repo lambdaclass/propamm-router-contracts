@@ -4,6 +4,10 @@ Streaming source for pAMM state overrides — the router default. Caches
 per-pAMM entries across frames (a frame only carries the pAMMs it updates),
 reconnects with backoff, and drops the connection when idle.
 
+```rust
+pub fn new(config: OverridesWsSourceConfig) -> Self
+```
+
 ## Usage
 
 ```rust
@@ -27,6 +31,10 @@ let router2 = PropAmmRouter::with_overrides(client, address, Arc::new(source));
 
 ### get_overrides()
 
+```rust
+pub async fn get_overrides(&self) -> Result<OverridesSnapshot>
+```
+
 **Returns** `Result<OverridesSnapshot>` — the accumulated snapshot
 (`block_number`, `timestamp_ns`, `per_pamm`). Connects lazily on first use
 and waits for the first frame; after an idle close it reconnects and waits
@@ -34,6 +42,10 @@ for a fresh frame instead of serving stale data. Fails on first-frame
 timeout or after `close()`.
 
 ### close()
+
+```rust
+pub fn close(&self)
+```
 
 Immediate, permanent teardown.
 

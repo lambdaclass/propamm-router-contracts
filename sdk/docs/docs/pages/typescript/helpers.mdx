@@ -5,6 +5,10 @@ and viem re-exports.
 
 ## applySlippage
 
+```ts
+applySlippage(amount: bigint, bps: number): bigint
+```
+
 Shave basis points off an amount — derive `amountOutMin` from a quote.
 
 ```ts
@@ -19,6 +23,10 @@ throws `RangeError` otherwise).
 
 ## deadlineIn
 
+```ts
+deadlineIn(seconds: number): bigint
+```
+
 Unix-timestamp deadline some seconds from now, for swap `deadline` params.
 
 ```ts
@@ -30,6 +38,13 @@ const deadline = deadlineIn(300); // now + 5 min
 **Parameters:** `seconds: number`. **Returns** `bigint`.
 
 ## parseEther / parseUnits / formatEther / formatUnits
+
+```ts
+parseEther(value: string): bigint
+parseUnits(value: string, decimals: number): bigint
+formatEther(value: bigint): string
+formatUnits(value: bigint, decimals: number): string
+```
 
 viem's unit conversion, re-exported.
 

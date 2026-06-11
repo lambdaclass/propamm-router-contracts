@@ -4,6 +4,10 @@ Utilities from `common::helpers`, plus the token/venue constants.
 
 ## apply_slippage
 
+```rust
+pub fn apply_slippage(amount: U256, bps: u32) -> Result<U256>
+```
+
 Shave basis points off an amount — derive `amount_out_min` from a quote.
 
 ```rust
@@ -18,6 +22,10 @@ let min_out = apply_slippage(quote.amount_out, 50)?; // quote - 0.5%
 
 ## deadline_in
 
+```rust
+pub fn deadline_in(seconds: u64) -> U256
+```
+
 Unix-timestamp deadline some seconds from now, for swap `deadline` params.
 
 ```rust
@@ -30,6 +38,10 @@ let deadline = deadline_in(300); // now + 5 min
 
 ## parse_address
 
+```rust
+pub fn parse_address(s: &str) -> Result<Address>
+```
+
 Parse a 0x-prefixed (or bare) 20-byte hex address.
 
 ```rust
@@ -41,6 +53,13 @@ let router_address = parse_address("0x4DdF368080CD7946db5b459aD591c350158175e1")
 **Returns** `Result<Address>`.
 
 ## parse_units / format_units / parse_ether / format_ether
+
+```rust
+pub fn parse_units(amount: &str, decimals: u32) -> Result<U256>
+pub fn format_units(value: U256, decimals: u32) -> String
+pub fn parse_ether(amount: &str) -> Result<U256>
+pub fn format_ether(value: U256) -> String
+```
 
 Decimal ↔ atomic-unit conversion; the `ether` variants fix `decimals = 18`.
 Parsing fails on malformed numbers, more fractional digits than `decimals`,

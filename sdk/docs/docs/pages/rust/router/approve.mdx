@@ -3,6 +3,10 @@
 Approve the router to pull an amount of an ERC-20 token from the signer.
 Required before any swap with ERC-20 input.
 
+```rust
+pub async fn approve(&self, token: Address, amount: U256) -> Result<H256>
+```
+
 ## Usage
 
 ```rust

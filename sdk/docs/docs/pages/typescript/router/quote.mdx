@@ -7,6 +7,10 @@ through `eth_call` simulation — by default carrying the latest pAMM state
 overrides plus their block number/timestamp, so venues quote fresh off-chain
 liquidity.
 
+```ts
+quote(tokenIn: Address, tokenOut: Address, amountIn: bigint, opts?: QuoteOptions): Promise<Quote>
+```
+
 ## Usage
 
 :::code-group

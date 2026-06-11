@@ -3,6 +3,10 @@
 Wait until a swap transaction is mined and decode its outcome from the
 router's `Swapped` (and, when present, `FrontendFeeCharged`) events.
 
+```ts
+waitForSwap(hash: Hash): Promise<SwapResult>
+```
+
 ## Usage
 
 ```ts

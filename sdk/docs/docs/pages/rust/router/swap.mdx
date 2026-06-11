@@ -5,6 +5,11 @@ venue fails to fill. Returns the transaction hash — pair with
 [`wait_for_swap`](/rust/router/wait_for_swap), or use `swap_and_wait` to do
 both in one call.
 
+```rust
+pub async fn swap(&self, params: &SwapParams) -> Result<H256>
+pub async fn swap_and_wait(&self, params: &SwapParams) -> Result<SwapResult>
+```
+
 ## Usage
 
 :::code-group

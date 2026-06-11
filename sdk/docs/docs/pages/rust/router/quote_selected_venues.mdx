@@ -2,6 +2,11 @@
 
 Best quote among a caller-supplied set of venues.
 
+```rust
+pub async fn quote_selected_venues(&self, venues: Vec<Address>, token_in: Address, token_out: Address, amount_in: U256) -> Result<Quote>
+pub async fn quote_selected_venues_with(&self, venues: Vec<Address>, token_in: Address, token_out: Address, amount_in: U256, opts: &QuoteOptions) -> Result<Quote>
+```
+
 ## Usage
 
 ```rust

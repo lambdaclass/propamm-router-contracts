@@ -4,6 +4,11 @@ Re-quote only the supplied venues on-chain and swap through the best one;
 routes to the Uniswap V3 fallback when none can be priced.
 `swapViaSelectedVenuesAndWait` waits and decodes in one call.
 
+```ts
+swapViaSelectedVenues(venues: Address[], params: SwapParams): Promise<Hash>
+swapViaSelectedVenuesAndWait(venues: Address[], params: SwapParams): Promise<SwapResult>
+```
+
 ## Usage
 
 ```ts

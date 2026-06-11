@@ -2,6 +2,10 @@
 
 Current allowance an owner has granted the router for an ERC-20 token.
 
+```rust
+pub async fn allowance(&self, token: Address, owner: Address) -> Result<U256>
+```
+
 ## Usage
 
 ```rust

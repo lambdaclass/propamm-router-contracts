@@ -4,6 +4,11 @@
 from the output token. `swap_via_venue_with_fee_and_wait` waits and decodes
 in one call.
 
+```rust
+pub async fn swap_via_venue_with_fee(&self, venue: Address, params: &SwapParams, fee: FrontendFee) -> Result<H256>
+pub async fn swap_via_venue_with_fee_and_wait(&self, venue: Address, params: &SwapParams, fee: FrontendFee) -> Result<SwapResult>
+```
+
 ## Usage
 
 ```rust

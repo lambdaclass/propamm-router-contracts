@@ -5,6 +5,10 @@ Lower-level pieces of `@propamm/sdk/overrides`, for custom sources or manual
 
 ## parseOverridesMessage
 
+```ts
+parseOverridesMessage(raw: unknown): OverridesSnapshot
+```
+
 Parse a raw payload (a WS frame or the JSON-RPC `result`) into an
 `OverridesSnapshot`: metadata keys split out, addresses and slots
 lowercased, empty `stateDiff`s dropped.
@@ -20,6 +24,10 @@ const snapshot = parseOverridesMessage(JSON.parse(frame));
 **Returns** `OverridesSnapshot`.
 
 ## toStateOverride
+
+```ts
+toStateOverride(snapshot: OverridesSnapshot, options?: ToStateOverrideOptions): StateOverride
+```
 
 Flatten a snapshot into viem's `StateOverride` array for `eth_call`, merging
 diffs at slot level and padding words to 32 bytes.

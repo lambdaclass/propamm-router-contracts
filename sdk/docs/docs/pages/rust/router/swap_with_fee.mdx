@@ -3,6 +3,11 @@
 [`swap`](/rust/router/swap) plus a frontend fee skimmed from the output
 token. `swap_with_fee_and_wait` waits and decodes in one call.
 
+```rust
+pub async fn swap_with_fee(&self, params: &SwapParams, fee: FrontendFee) -> Result<H256>
+pub async fn swap_with_fee_and_wait(&self, params: &SwapParams, fee: FrontendFee) -> Result<SwapResult>
+```
+
 ## Usage
 
 ```rust
