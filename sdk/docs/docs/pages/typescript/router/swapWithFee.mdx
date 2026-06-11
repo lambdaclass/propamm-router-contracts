@@ -50,15 +50,15 @@ and recipient.
 
 ### params
 
-- **Type:** `SwapParams`
+- **Type:** [`SwapParams`](/typescript/types#swapparams)
 
-See [`swap`](/typescript/router/swap#parameters). On the fee paths,
+See [`SwapParams`](/typescript/types#swapparams). On the fee paths,
 `amountOutMin` is the **net** minimum the recipient must receive after the
 fee.
 
 ### fee
 
-- **Type:** `FrontendFee`
+- **Type:** [`FrontendFee`](/typescript/types#frontendfee)
 
 Build with [`frontendFee(bps, recipient)`](/typescript/router/frontendFee) —
 `bps` capped at `MAX_FEE_BPS` (100 = 1%), paid in `tokenOut` to `recipient`.

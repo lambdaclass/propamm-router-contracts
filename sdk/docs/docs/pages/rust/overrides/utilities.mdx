@@ -10,7 +10,7 @@ pub fn parse_overrides_message(raw: &Value) -> Result<OverridesSnapshot>
 ```
 
 Parse a raw payload (a WS frame or the JSON-RPC `result`) into an
-`OverridesSnapshot`; pAMMs/contracts with empty `stateDiff`s are dropped.
+[`OverridesSnapshot`](/rust/types#overridessnapshot); pAMMs/contracts with empty `stateDiff`s are dropped.
 
 ```rust
 use propamm_sdk::overrides::parse_overrides_message;
@@ -19,7 +19,7 @@ let snapshot = parse_overrides_message(&serde_json::from_str(frame)?)?;
 ```
 
 **Parameters:** `raw: &serde_json::Value`. Fails if it isn't a JSON object.
-**Returns** `Result<OverridesSnapshot>`.
+**Returns** [`Result<OverridesSnapshot>`](/rust/types#overridessnapshot).
 
 ## to_state_override
 

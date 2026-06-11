@@ -64,34 +64,13 @@ let result = router.swap_and_wait(&params).await?;
 
 ## Parameters
 
-All swap entrypoints share these `SwapParams` fields.
+### params
 
-### token_in
+- **Type:** [`&SwapParams`](/rust/types#swapparams)
 
-- **Type:** `Address`
-
-Token being sold. Pass `ETH_SENTINEL` for native ETH — the SDK attaches
-`msg.value = amount_in` automatically. ERC-20 input requires a prior
-allowance for the router (see [`approve`](/rust/router/approve)).
-
-### token_out
-
-- **Type:** `Address`
-
-Token being bought; `ETH_SENTINEL` delivers native ETH.
-
-### amount_in
-
-- **Type:** `U256`
-
-Exact input amount, in atomic units.
-
-### amount_out_min
-
-- **Type:** `U256`
-
-Minimum acceptable output; the swap reverts with `InsufficientOutput` below
-it. Derive from a quote with `apply_slippage`.
+The parameters shared by every swap entrypoint — see the type for
+field-by-field docs. Derive `amount_out_min` from a quote with
+`apply_slippage`, and `deadline` with `deadline_in`.
 
 ```rust
 let params = SwapParams {
@@ -99,16 +78,3 @@ let params = SwapParams {
     amount_out_min: apply_slippage(quote.amount_out, 50)?, // quote - 0.5% // [!code focus]
 };
 ```
-
-### recipient
-
-- **Type:** `Address`
-
-Receiver of `token_out`.
-
-### deadline
-
-- **Type:** `U256`
-
-Unix timestamp after which the swap is invalid (reverts with `Expired`).
-Build with `deadline_in(seconds)`.

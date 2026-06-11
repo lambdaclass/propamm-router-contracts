@@ -25,16 +25,9 @@ const result = await router.waitForSwap(hash);
 
 ## Returns
 
-`SwapResult`
+[`SwapResult`](/typescript/types#swapresult)
 
-- `hash: Hash` / `receipt: TransactionReceipt` — the transaction and its receipt.
-- `amountIn: bigint` — input pulled from the sender.
-- `amountOut: bigint` — output delivered to the recipient (net of any fee).
-- `executedVenue: Address` — the venue that actually filled, or the Uniswap
-  fallback router.
-- `recipient: Address` — who received `tokenOut`.
-- `fee?: { recipient: Address; amount: bigint }` — present when the swap
-  charged a frontend fee.
+The decoded swap outcome.
 
 Throws if the transaction reverted or emitted no `Swapped` event.
 

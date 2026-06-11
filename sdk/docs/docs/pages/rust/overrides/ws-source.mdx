@@ -35,8 +35,7 @@ let router2 = PropAmmRouter::with_overrides(client, address, Arc::new(source));
 pub async fn get_overrides(&self) -> Result<OverridesSnapshot>
 ```
 
-**Returns** `Result<OverridesSnapshot>` — the accumulated snapshot
-(`block_number`, `timestamp_ns`, `per_pamm`). Connects lazily on first use
+**Returns** [`Result<OverridesSnapshot>`](/rust/types#overridessnapshot) — the accumulated snapshot. Connects lazily on first use
 and waits for the first frame; after an idle close it reconnects and waits
 for a fresh frame instead of serving stale data. Fails on first-frame
 timeout or after `close()`.

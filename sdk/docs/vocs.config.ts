@@ -67,6 +67,7 @@ export default defineConfig({
           ],
         },
         { text: "Helpers", link: "/typescript/helpers" },
+        { text: "Types", link: "/typescript/types" },
       ],
     },
     {
@@ -120,6 +121,7 @@ export default defineConfig({
           ],
         },
         { text: "Helpers", link: "/rust/helpers" },
+        { text: "Types", link: "/rust/types" },
       ],
     },
   ],

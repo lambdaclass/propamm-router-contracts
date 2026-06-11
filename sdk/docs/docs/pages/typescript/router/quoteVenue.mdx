@@ -40,7 +40,7 @@ export const router = new PropAmmRouter(client, "0x...");
 
 ## Returns
 
-`Quote`
+[`Quote`](/typescript/types#quote)
 
 The output amount and the venue that was actually priced. When the requested
 venue cannot be priced, the call does **not** revert: it falls back to the
@@ -75,6 +75,6 @@ Exact input amount, in atomic units.
 
 ### opts (optional)
 
-- **Type:** `QuoteOptions`
+- **Type:** [`QuoteOptions`](/typescript/types#quoteoptions)
 
 Per-call quote options — see [`quote`](/typescript/router/quote#opts-optional).

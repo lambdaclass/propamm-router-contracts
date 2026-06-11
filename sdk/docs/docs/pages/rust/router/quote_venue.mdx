@@ -33,7 +33,7 @@ let router = PropAmmRouter::new(client, parse_address("0x...")?);
 
 ## Returns
 
-`Result<Quote>`
+[`Result<Quote>`](/rust/types#quote)
 
 The output amount and the venue that was actually priced. When the requested
 venue cannot be priced, the call does **not** fail: it falls back to the
@@ -54,5 +54,5 @@ See [`quote`](/rust/router/quote#parameters).
 
 ## quote_venue_with
 
-Same, plus `opts: &QuoteOptions` — see
+Same, plus [`opts: &QuoteOptions`](/rust/types#quoteoptions) — see
 [`quote_with`](/rust/router/quote#quote_with).

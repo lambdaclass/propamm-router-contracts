@@ -19,7 +19,7 @@ let quote = router
 
 ## Returns
 
-`Result<Quote>`
+[`Result<Quote>`](/rust/types#quote)
 
 The best output amount among `venues` and the venue that produced it. Venues
 that revert while quoting are skipped; when none can be priced the router
@@ -39,5 +39,5 @@ See [`quote`](/rust/router/quote#parameters).
 
 ## quote_selected_venues_with
 
-Same, plus `opts: &QuoteOptions` — see
+Same, plus [`opts: &QuoteOptions`](/rust/types#quoteoptions) — see
 [`quote_with`](/rust/router/quote#quote_with).

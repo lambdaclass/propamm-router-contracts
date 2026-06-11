@@ -45,11 +45,10 @@ export const router = new PropAmmRouter(client, "0x..."); // router proxy
 
 ## Returns
 
-`Quote`
+[`Quote`](/typescript/types#quote)
 
-The best output amount and the venue that produced it:
-`{ amountOut: bigint; venue: Address }`. `venue` can be passed to
-[`swapViaVenue`](/typescript/router/swapViaVenue).
+The best output amount and the venue that produced it; `venue` can be
+passed to [`swapViaVenue`](/typescript/router/swapViaVenue).
 
 ## Parameters
 
@@ -73,7 +72,7 @@ Exact input amount, in atomic units.
 
 ### opts (optional)
 
-- **Type:** `QuoteOptions`
+- **Type:** [`QuoteOptions`](/typescript/types#quoteoptions)
 
 Per-call quote options.
 
@@ -82,9 +81,3 @@ const stale = await router.quote(ETH_SENTINEL, USDC, parseEther("1"), {
   overrides: null, // [!code focus]
 });
 ```
-
-- `overrides?: OverridesSource | OverridesSnapshot | null` — replace the
-  router's attached overrides source for this call; `null` quotes against raw
-  on-chain state.
-- `bebopDefault?: boolean` — set `false` to keep Bebop's raw on-chain slot
-  instead of zeroing it when the snapshot has no Bebop entry (default `true`).

@@ -17,10 +17,10 @@ let fee = frontend_fee(25, fee_recipient)?; // 0.25% of the output
 
 ## Returns
 
-`Result<FrontendFee>`
+[`Result<FrontendFee>`](/rust/types#frontendfee)
 
-`FrontendFee { bps: u16, recipient: Address }`, ready to pass to a
-`_with_fee` swap. Fails with `Error::InvalidInput` on invalid input.
+Ready to pass to a `_with_fee` swap. Fails with `Error::InvalidInput` on
+invalid input.
 
 ## Parameters
 

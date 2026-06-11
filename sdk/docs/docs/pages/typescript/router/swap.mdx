@@ -68,34 +68,13 @@ const result = await router.swapAndWait({ ...params });
 
 ## Parameters
 
-All swap entrypoints share these `SwapParams` fields.
+### params
 
-### tokenIn
+- **Type:** [`SwapParams`](/typescript/types#swapparams)
 
-- **Type:** `Address`
-
-Token being sold. Pass `ETH_SENTINEL` for native ETH — the SDK attaches
-`msg.value = amountIn` automatically. ERC-20 input requires a prior
-allowance for the router (see [`approve`](/typescript/router/approve)).
-
-### tokenOut
-
-- **Type:** `Address`
-
-Token being bought; `ETH_SENTINEL` delivers native ETH.
-
-### amountIn
-
-- **Type:** `bigint`
-
-Exact input amount, in atomic units.
-
-### amountOutMin
-
-- **Type:** `bigint`
-
-Minimum acceptable output; the swap reverts with `InsufficientOutput` below
-it. Derive from a quote with `applySlippage`.
+The parameters shared by every swap entrypoint — see the type for
+field-by-field docs. Derive `amountOutMin` from a quote with
+`applySlippage`, and `deadline` with `deadlineIn`.
 
 ```ts
 const hash = await router.swap({
@@ -103,16 +82,3 @@ const hash = await router.swap({
   amountOutMin: applySlippage(amountOut, 50), // quote - 0.5% // [!code focus]
 });
 ```
-
-### recipient
-
-- **Type:** `Address`
-
-Receiver of `tokenOut`.
-
-### deadline
-
-- **Type:** `bigint`
-
-Unix timestamp after which the swap is invalid (reverts with `Expired`).
-Build with `deadlineIn(seconds)`.

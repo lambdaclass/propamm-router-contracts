@@ -40,7 +40,7 @@ export const router = new PropAmmRouter(client, "0x...");
 
 ## Returns
 
-`Quote`
+[`Quote`](/typescript/types#quote)
 
 The best output amount among `venues` and the venue that produced it. Venues
 that revert while quoting are skipped; when none can be priced the router
@@ -74,6 +74,6 @@ Exact input amount, in atomic units.
 
 ### opts (optional)
 
-- **Type:** `QuoteOptions`
+- **Type:** [`QuoteOptions`](/typescript/types#quoteoptions)
 
 Per-call quote options — see [`quote`](/typescript/router/quote#opts-optional).

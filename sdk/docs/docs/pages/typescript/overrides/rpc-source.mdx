@@ -29,7 +29,7 @@ await router.quote(WETH, USDC, amountIn, { overrides: source });
 getOverrides(): Promise<OverridesSnapshot>
 ```
 
-**Returns** `Promise<OverridesSnapshot>` — a fresh snapshot fetched from the
+**Returns** [`Promise<OverridesSnapshot>`](/typescript/types#overridessnapshot) — a fresh snapshot fetched from the
 endpoint. Throws on HTTP or JSON-RPC errors.
 
 ## Options
