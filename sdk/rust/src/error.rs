@@ -45,10 +45,6 @@ pub enum Error {
     /// Invalid caller-supplied input (addresses, fee bounds, keys, URLs, ...).
     #[error("invalid input: {0}")]
     InvalidInput(String),
-
-    /// Anything else.
-    #[error("{0}")]
-    Other(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
