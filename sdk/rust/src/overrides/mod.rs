@@ -265,7 +265,12 @@ fn parse_rpc_response(body: &Value) -> Result<OverridesSnapshot> {
     if let Some(error) = body.get("error").filter(|error| !error.is_null()) {
         return Err(Error::Overrides(format!("overrides RPC error: {error}")));
     }
-    parse_overrides_message(body.get("result").unwrap_or(&Value::Null))
+    match body.get("result") {
+        Some(result) if !result.is_null() => parse_overrides_message(result),
+        _ => Err(Error::Overrides(
+            "overrides RPC response had neither a result nor an error".into(),
+        )),
+    }
 }
 
 /// Configuration for [`OverridesWsSource`].
@@ -543,6 +548,17 @@ mod tests {
         });
         let err = parse_rpc_response(&body).expect_err("non-null error must fail");
         assert!(matches!(err, Error::Overrides(_)));
+    }
+
+    #[test]
+    fn rpc_response_errors_clearly_without_result_or_error() {
+        let body = serde_json::json!({ "jsonrpc": "2.0", "id": 1 });
+        match parse_rpc_response(&body) {
+            Err(Error::Overrides(msg)) => {
+                assert!(msg.contains("neither a result nor an error"), "got: {msg}")
+            }
+            other => panic!("expected an Overrides error, got {other:?}"),
+        }
     }
 
     fn slot(n: u64) -> H256 {
