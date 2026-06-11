@@ -6,8 +6,8 @@ export const BEBOP: Address = "0x160141A205F5dDcf096BA3F48B7eD21EB52c62EA";
 export const KIPSELI: Address = "0x71e790dd841c8A9061487cb3E78C288E75cE0B3d";
 
 /**
- * Curated propAMM name → venue address mapping, for the venue arguments of
- * `quoteVenue` / `swapViaVenue` / `quoteSelectedVenues` / `swapViaSelectedVenues`.
+ * Curated propAMM name → venue address mapping, for the `venues` option of
+ * quotes and swaps.
  *
  * The Uniswap V3 fallback is intentionally absent: its address is router
  * configuration, read it via `PropAmmRouter.fallbackSwapRouter()`.
