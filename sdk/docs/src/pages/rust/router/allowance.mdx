@@ -11,8 +11,7 @@ pub async fn allowance(&self, token: Address, owner: Address) -> Result<U256>
 ```rust
 use propamm_sdk::common::tokens::USDC;
 
-let allowance = router.allowance(USDC, me).await?;
-// 100000000
+let allowance: U256 = router.allowance(USDC, me).await?; // [!code focus]
 ```
 
 ## Returns

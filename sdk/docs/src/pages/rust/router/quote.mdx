@@ -20,9 +20,7 @@ pub async fn quote_with(&self, token_in: Address, token_out: Address, amount_in:
 use propamm_sdk::common::helpers::parse_ether;
 use propamm_sdk::common::tokens::{ETH_SENTINEL, USDC};
 
-let quote = router.quote(ETH_SENTINEL, USDC, parse_ether("1")?).await?;
-// quote.amount_out: 1626397384 (1626.39 USDC)
-// quote.venue: the best-quoting venue, or the Uniswap fallback router
+let quote: Quote = router.quote(ETH_SENTINEL, USDC, parse_ether("1")?).await?; // [!code focus]
 ```
 
 ```rust [setup.rs]
@@ -73,7 +71,7 @@ let opts = QuoteOptions {
     overrides: QuoteOverrides::Skip, // [!code focus]
     ..Default::default()
 };
-let stale = router.quote_with(ETH_SENTINEL, USDC, amount_in, &opts).await?;
+let stale = router.quote_with(ETH_SENTINEL, USDC, amount_in, &opts).await?; // [!code focus]
 ```
 
 `venues` restricts the quote: a single entry quotes that venue directly,
@@ -88,5 +86,5 @@ let opts = QuoteOptions {
     venues: Some(vec![FERMI, BEBOP]), // [!code focus]
     ..Default::default()
 };
-let subset = router.quote_with(ETH_SENTINEL, USDC, amount_in, &opts).await?;
+let subset = router.quote_with(ETH_SENTINEL, USDC, amount_in, &opts).await?; // [!code focus]
 ```

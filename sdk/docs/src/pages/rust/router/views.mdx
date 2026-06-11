@@ -12,8 +12,7 @@ The Uniswap fallback "venue" address — dynamic router configuration, which
 is why it isn't in the static `PAMMS` constants.
 
 ```rust
-let fallback = router.fallback_swap_router().await?;
-// 0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45
+let fallback: Address = router.fallback_swap_router().await?;
 ```
 
 **Returns** `Result<Address>`
@@ -48,8 +47,7 @@ The raw per-pair fee tier override — `0` means unset. Order-independent:
 `get_pair_fee(a, b) == get_pair_fee(b, a)`.
 
 ```rust
-let fee = router.get_pair_fee(USDC, WETH).await?;
-// 500
+let fee: u32 = router.get_pair_fee(USDC, WETH).await?;
 ```
 
 **Returns** `Result<u32>`
@@ -86,7 +84,7 @@ Every whitelisted pAMM venue (excludes the Uniswap fallback). Order is not
 guaranteed.
 
 ```rust
-let venues = router.get_whitelisted_venues().await?;
+let venues: Vec<Address> = router.get_whitelisted_venues().await?;
 ```
 
 **Returns** `Result<Vec<Address>>`

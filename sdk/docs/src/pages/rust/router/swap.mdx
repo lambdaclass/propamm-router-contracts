@@ -24,16 +24,16 @@ use propamm_sdk::router::SwapParams;
 let amount_in = parse_ether("1")?;
 let quote = router.quote(ETH_SENTINEL, USDC, amount_in).await?;
 
-let hash = router
-    .swap(&SwapParams {
-        token_in: ETH_SENTINEL,
-        token_out: USDC,
-        amount_in,
-        amount_out_min: apply_slippage(quote.amount_out, 50)?,
-        recipient: me,
-        deadline: deadline_in(300),
-    })
-    .await?;
+let hash = router // [!code focus]
+    .swap(&SwapParams { // [!code focus]
+        token_in: ETH_SENTINEL, // [!code focus]
+        token_out: USDC, // [!code focus]
+        amount_in, // [!code focus]
+        amount_out_min: apply_slippage(quote.amount_out, 50)?, // [!code focus]
+        recipient: me, // [!code focus]
+        deadline: deadline_in(300), // [!code focus]
+    }) // [!code focus]
+    .await?; // [!code focus]
 ```
 
 ```rust [setup.rs]
@@ -72,7 +72,7 @@ let opts = SwapOptions {
     venues: Some(vec![KIPSELI]), // exactly this venue // [!code focus]
     ..Default::default()
 };
-let hash = router.swap_with(&params, &opts).await?;
+let hash = router.swap_with(&params, &opts).await?; // [!code focus]
 ```
 
 `frontend_fee` skims a fee from the output token, paid to its `recipient`.
@@ -89,7 +89,7 @@ let opts = SwapOptions {
     frontend_fee: Some(FrontendFee { bps: 25, recipient: fee_recipient }), // 0.25% // [!code focus]
     ..Default::default()
 };
-let hash = router.swap_with(&params, &opts).await?;
+let hash = router.swap_with(&params, &opts).await?; // [!code focus]
 ```
 
 ## swap_and_wait
@@ -99,8 +99,7 @@ Returns [`SwapResult`](/rust/router/wait_for_swap#returns) —
 `swap_and_wait_with` is the options-taking twin.
 
 ```rust
-let result = router.swap_and_wait(&params).await?;
-// SwapResult { hash, receipt, amount_in, amount_out, executed_venue, recipient, fee }
+let result: SwapResult = router.swap_and_wait(&params).await?;
 ```
 
 ## Parameters
