@@ -247,11 +247,22 @@ impl OverridesSource for OverridesRpcSource {
             .json()
             .await
             .map_err(|e| Error::Overrides(format!("overrides RPC response is not JSON: {e}")))?;
-        if let Some(error) = body.get("error") {
-            return Err(Error::Overrides(format!("overrides RPC error: {error}")));
-        }
-        parse_overrides_message(body.get("result").unwrap_or(&Value::Null))
+        parse_rpc_response(&body)
     }
+}
+
+/// Parse a `titan_getPammStateOverrides` JSON-RPC response body into a snapshot.
+///
+/// A present-but-null `"error"` is treated as success: many JSON-RPC servers
+/// send `{"result": {...}, "error": null}`, and the field's mere presence must
+/// not be read as a failure (this mirrors the reference SDK's truthiness check
+/// — `serde_json` returns `Some(Value::Null)`, not `None`, for an explicit
+/// null).
+fn parse_rpc_response(body: &Value) -> Result<OverridesSnapshot> {
+    if let Some(error) = body.get("error").filter(|error| !error.is_null()) {
+        return Err(Error::Overrides(format!("overrides RPC error: {error}")));
+    }
+    parse_overrides_message(body.get("result").unwrap_or(&Value::Null))
 }
 
 /// Configuration for [`OverridesWsSource`].
@@ -485,4 +496,40 @@ async fn idle_expired(state: &WsState, idle_timeout: Duration) -> bool {
         shared.has_frame = false;
     }
     expired
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rpc_response_treats_null_error_as_success() {
+        // Servers that send `"error": null` alongside a result must not be read
+        // as failures — the field is present but null.
+        let body = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "error": null,
+            "result": { "blockNumber": 100 },
+        });
+        let snapshot = parse_rpc_response(&body).expect("null error is success");
+        assert_eq!(snapshot.block_number, Some(100));
+    }
+
+    #[test]
+    fn rpc_response_parses_result_when_error_key_absent() {
+        let body = serde_json::json!({ "result": { "blockNumber": 5 } });
+        let snapshot = parse_rpc_response(&body).expect("missing error key is success");
+        assert_eq!(snapshot.block_number, Some(5));
+        assert!(snapshot.per_pamm.is_empty());
+    }
+
+    #[test]
+    fn rpc_response_surfaces_a_real_error_object() {
+        let body = serde_json::json!({
+            "error": { "code": -32000, "message": "boom" },
+        });
+        let err = parse_rpc_response(&body).expect_err("non-null error must fail");
+        assert!(matches!(err, Error::Overrides(_)));
+    }
 }
