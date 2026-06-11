@@ -436,7 +436,10 @@ impl PropAmmRouter {
     pub async fn wait_for_swap(&self, hash: H256) -> Result<SwapResult> {
         let receipt = self.client.wait_for_transaction(hash).await?;
         if !receipt.receipt.status {
-            return Err(Error::Other(format!("swap transaction {hash:#x} reverted")));
+            return Err(Error::TransactionReverted {
+                hash,
+                receipt: Box::new(receipt),
+            });
         }
 
         let swapped_topic = abi::event_topic(abi::SWAPPED_EVENT);
@@ -477,12 +480,11 @@ impl PropAmmRouter {
             }
         }
 
-        let (amount_in, amount_out, recipient, market_maker) = swapped.ok_or_else(|| {
-            Error::Other(format!(
-                "transaction {hash:#x} emitted no Swapped event from {:#x}",
-                self.address
-            ))
-        })?;
+        let (amount_in, amount_out, recipient, market_maker) =
+            swapped.ok_or(Error::MissingEvent {
+                hash,
+                event: "Swapped",
+            })?;
 
         Ok(SwapResult {
             hash,
