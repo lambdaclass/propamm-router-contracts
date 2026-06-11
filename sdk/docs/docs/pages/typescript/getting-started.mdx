@@ -1,17 +1,9 @@
 # Getting started
 
-The TypeScript SDK lives in `sdk/typescript` (`@propamm/sdk`), built on
-[viem](https://viem.sh). ESM-only; viem is the single runtime dependency.
+Once the SDK is [installed](/typescript/installation), a quote and swap is a
+client, a router, and two calls.
 
-```sh
-cd sdk/typescript
-pnpm install
-pnpm build
-```
-
-Imports are hierarchical — each module has its own subpath, and viem
-essentials (chains, account builders) are re-exported so basic usage needs no
-direct viem import:
+## Quote and swap
 
 ```ts
 import { ContractClient } from "@propamm/sdk/client";
@@ -20,11 +12,7 @@ import { ETH_SENTINEL, USDC } from "@propamm/sdk/common/tokens";
 import { applySlippage, deadlineIn, formatUnits, parseEther } from "@propamm/sdk/common/helpers";
 import { mainnet } from "@propamm/sdk/common/chains";
 import { privateKeyToAccount } from "@propamm/sdk/common/accounts";
-```
 
-## Quote and swap
-
-```ts
 const account = privateKeyToAccount("0x...");
 const client = new ContractClient({
   rpcUrl: "https://...",
@@ -50,20 +38,3 @@ console.log(`received ${formatUnits(result.amountOut, 6)} USDC via ${result.exec
 The quote already reflects fresh off-chain liquidity — pAMM state overrides
 are applied automatically. Native ETH input is signalled with `ETH_SENTINEL`
 (no ERC-20 approval needed; `msg.value` is attached automatically).
-
-## Runnable example
-
-```sh
-pnpm build
-node examples/getting-started.ts   # Node >= 22.18 runs TypeScript directly
-```
-
-It defaults to a local anvil mainnet fork with anvil's funded account and the
-mainnet router deployment; override with `RPC_URL` / `PRIVATE_KEY` /
-`ROUTER_ADDRESS` / `SLIPPAGE_BPS`.
-
-## Checks
-
-```sh
-pnpm check   # typecheck + lint (ESLint) + format check (Prettier)
-```

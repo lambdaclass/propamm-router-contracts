@@ -1,17 +1,7 @@
 # Getting started
 
-The Rust SDK lives in `sdk/rust` (`propamm-sdk`), built entirely on
-[rex](https://github.com/lambdaclass/rex) /
-[ethrex](https://github.com/lambdaclass/ethrex): `EthClient` transport,
-signing, `eth_call` overrides, and ABI encoding/decoding via ethrex's
-calldata codec. Same surface as the TypeScript SDK, in snake_case, without
-the on-chain `V1` suffix.
-
-```sh
-cd sdk/rust
-cargo build
-cargo test   # incl. ABI parity tests against the compiled contract
-```
+Once the SDK is [installed](/rust/installation), a quote and swap is a client,
+a router, and two calls.
 
 ## Quote and swap
 
@@ -51,27 +41,3 @@ println!(
 The quote already reflects fresh off-chain liquidity — pAMM state overrides
 are applied automatically. Native ETH input is signalled with `ETH_SENTINEL`
 (no ERC-20 approval needed; `msg.value` is attached automatically).
-
-## Runnable example
-
-```sh
-cargo run --example getting_started
-```
-
-It defaults to a local anvil mainnet fork with anvil's funded account and the
-mainnet router deployment; override with `RPC_URL` / `PRIVATE_KEY` /
-`ROUTER_ADDRESS` / `SLIPPAGE_BPS`.
-
-## Checks
-
-```sh
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo test
-```
-
-The test suite includes a two-direction ABI parity test against the Foundry
-artifact: every SDK signature must exist in the contract, and every contract
-function/event/error must be bound or explicitly allowlisted. Run
-`forge build` at the repo root first so the artifact exists (the test skips
-with a notice otherwise; CI requires it).

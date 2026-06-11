@@ -20,6 +20,7 @@ export default defineConfig({
       text: "TypeScript SDK",
       collapsed: false,
       items: [
+        { text: "Installation", link: "/typescript/installation" },
         { text: "Getting started", link: "/typescript/getting-started" },
         {
           text: "Quotes",
@@ -74,6 +75,7 @@ export default defineConfig({
       text: "Rust SDK",
       collapsed: false,
       items: [
+        { text: "Installation", link: "/rust/installation" },
         { text: "Getting started", link: "/rust/getting-started" },
         {
           text: "Quotes",
