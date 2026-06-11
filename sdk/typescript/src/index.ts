@@ -9,6 +9,7 @@ export type {
   PropAmmRouterOptions,
   Quote,
   QuoteOptions,
+  SwapOptions,
   SwapParams,
   SwapResult,
 } from "./router/index.js";

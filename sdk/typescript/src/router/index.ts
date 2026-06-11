@@ -32,7 +32,7 @@ export interface SwapParams {
   tokenOut: Address;
   /** Exact amount of `tokenIn` to sell, in atomic units. */
   amountIn: bigint;
-  /** Minimum acceptable amount of `tokenOut` (net of fee, on the `WithFee` paths). */
+  /** Minimum acceptable amount of `tokenOut` (net of the frontend fee, when one is passed). */
   amountOutMin: bigint;
   /** Address that receives `tokenOut`. */
   recipient: Address;
@@ -40,7 +40,7 @@ export interface SwapParams {
   deadline: bigint;
 }
 
-/** Frontend fee for the `swap*WithFee` entrypoints — build with `frontendFee()`. */
+/** Frontend fee skimmed from a swap's output — pass via `SwapOptions.frontendFee`. */
 export interface FrontendFee {
   bps: number;
   recipient: Address;
@@ -68,6 +68,31 @@ export interface QuoteOptions {
   overrides?: OverridesSource | OverridesSnapshot | null;
   /** Inject the Bebop default slot when no Bebop entry is present (default true). */
   bebopDefault?: boolean;
+  /**
+   * Restrict the quote to these venues: a single entry quotes that venue
+   * directly, several pick the best among them. Must be non-empty when
+   * present; omit to quote across every whitelisted venue.
+   */
+  venues?: readonly Address[];
+}
+
+/** Per-swap options. */
+export interface SwapOptions {
+  /**
+   * Restrict the swap to these venues: a single entry executes through that
+   * venue directly (reverting `UnknownVenue` on a bad address), several
+   * re-quote on-chain and fill via the best of them (unpriceable entries are
+   * skipped). Must be non-empty when present; omit to swap through the
+   * best-quoting venue overall.
+   */
+  venues?: readonly Address[];
+  /**
+   * Optional frontend fee skimmed from the output. When present the swap is
+   * routed through the contract's `WithFee` selector; `bps` must be an
+   * integer in [1, `MAX_FEE_BPS`] and the recipient non-zero (validated
+   * before sending).
+   */
+  frontendFee?: FrontendFee;
 }
 
 /** Decoded outcome of a mined swap (from the `Swapped` event). */
@@ -83,19 +108,8 @@ export interface SwapResult {
   fee?: { recipient: Address; amount: bigint };
 }
 
-/** Maximum frontend fee accepted by the `swap*WithFee` entrypoints, in bps. */
+/** Maximum frontend fee accepted by the router, in bps. */
 export const MAX_FEE_BPS = 100;
-
-/** Validated `FrontendFee` builder. Throws if `bps` exceeds `MAX_FEE_BPS` or the recipient is zero. */
-export function frontendFee(bps: number, recipient: Address): FrontendFee {
-  if (!Number.isInteger(bps) || bps < 0 || bps > MAX_FEE_BPS) {
-    throw new RangeError(`fee bps must be an integer in [0, ${MAX_FEE_BPS}], got ${bps}`);
-  }
-  if (isAddressEqual(recipient, zeroAddress)) {
-    throw new RangeError("fee recipient must not be the zero address");
-  }
-  return { bps, recipient };
-}
 
 export class PropAmmRouter {
   readonly address: Address;
@@ -117,62 +131,25 @@ export class PropAmmRouter {
   // default the simulation carries the latest pAMM state overrides (plus
   // their block number) so venues quote fresh off-chain liquidity.
 
-  /** Best quote across all whitelisted venues and the Uniswap V3 fallback. */
+  /**
+   * Best quote across all whitelisted venues and the Uniswap V3 fallback, or
+   * across `opts.venues` only. Restricted quotes fall back to the Uniswap V3
+   * quote (reporting the fallback router as `venue`) when no listed venue can
+   * be priced.
+   */
   async quote(
     tokenIn: Address,
     tokenOut: Address,
     amountIn: bigint,
     opts?: QuoteOptions,
   ): Promise<Quote> {
+    const { mode, venueArgs } = venueDispatch(opts?.venues);
     const [amountOut, venue] = await this.callRouter<[bigint, Address]>(
-      "quoteV1",
-      [tokenIn, tokenOut, amountIn],
+      QUOTE_SELECTORS[mode],
+      [...venueArgs, tokenIn, tokenOut, amountIn],
       await this.resolveOverrides(opts),
     );
     return { amountOut, venue };
-  }
-
-  /**
-   * Quote a specific venue. Falls back to the Uniswap V3 quote (reporting the
-   * fallback router as `venue`) when the venue cannot be priced.
-   */
-  async quoteVenue(
-    venue: Address,
-    tokenIn: Address,
-    tokenOut: Address,
-    amountIn: bigint,
-    opts?: QuoteOptions,
-  ): Promise<Quote> {
-    const [amountOut, quotedVenue] = await this.callRouter<[bigint, Address]>(
-      "quoteVenueV1",
-      [venue, tokenIn, tokenOut, amountIn],
-      await this.resolveOverrides(opts),
-    );
-    return { amountOut, venue: quotedVenue };
-  }
-
-  /** Best quote among a caller-supplied set of venues. */
-  async quoteSelectedVenues(
-    venues: readonly Address[],
-    tokenIn: Address,
-    tokenOut: Address,
-    amountIn: bigint,
-    opts?: QuoteOptions,
-  ): Promise<Quote> {
-    const [amountOut, venue] = await this.callRouter<[bigint, Address]>(
-      "quoteSelectedVenuesV1",
-      [venues, tokenIn, tokenOut, amountIn],
-      await this.resolveOverrides(opts),
-    );
-    return { amountOut, venue };
-  }
-
-  /**
-   * Quote the Uniswap V3 fallback route directly. Never applies overrides —
-   * the fallback quoter only reads live on-chain pool state.
-   */
-  async quoteUniswapV3(tokenIn: Address, tokenOut: Address, amountIn: bigint): Promise<bigint> {
-    return this.callRouter<bigint>("quoteUniswapV3", [tokenIn, tokenOut, amountIn]);
   }
 
   //-------//
@@ -182,151 +159,41 @@ export class PropAmmRouter {
   // `msg.value == amountIn`; the bindings attach it automatically. ERC-20
   // input requires a prior allowance for the router (see `approve`).
 
-  /** Swap through the best-quoting venue. */
-  async swap(params: SwapParams): Promise<Hash> {
-    return this.sendSwap(
-      "swapV1",
-      [
+  /**
+   * Swap through the best-quoting venue, or through `opts.venues` only (see
+   * `SwapOptions.venues` for the single- vs multi-entry semantics).
+   * `opts.frontendFee` routes the call through the contract's `WithFee`
+   * selector, which skims the fee from the output.
+   */
+  async swap(params: SwapParams, opts: SwapOptions = {}): Promise<Hash> {
+    const { mode, venueArgs } = venueDispatch(opts.venues);
+    const fee = opts.frontendFee;
+    if (fee) validateFee(fee);
+
+    const selectors = SWAP_SELECTORS[mode];
+    return this.client.write({
+      address: this.address,
+      abi: propAmmRouterAbi,
+      // The `WithFee` selectors take the same tuple plus the fee struct last.
+      functionName: fee ? selectors.withFee : selectors.plain,
+      args: [
+        ...venueArgs,
         params.tokenIn,
         params.tokenOut,
         params.amountIn,
         params.amountOutMin,
         params.recipient,
         params.deadline,
+        ...(fee ? [fee] : []),
       ],
-      params,
-    );
+      // Native-ETH input is signalled by the sentinel and paid via msg.value.
+      value: isAddressEqual(params.tokenIn, ETH_SENTINEL) ? params.amountIn : undefined,
+    });
   }
 
-  /** Best-venue swap that skims a frontend fee from the output. */
-  async swapWithFee(params: SwapParams, fee: FrontendFee): Promise<Hash> {
-    return this.sendSwap(
-      "swapWithFeeV1",
-      [
-        params.tokenIn,
-        params.tokenOut,
-        params.amountIn,
-        params.amountOutMin,
-        params.recipient,
-        params.deadline,
-        fee,
-      ],
-      params,
-    );
-  }
-
-  /** Swap through an explicit venue (a whitelisted propAMM or the fallback router). */
-  async swapViaVenue(venue: Address, params: SwapParams): Promise<Hash> {
-    return this.sendSwap(
-      "swapViaVenueV1",
-      [
-        venue,
-        params.tokenIn,
-        params.tokenOut,
-        params.amountIn,
-        params.amountOutMin,
-        params.recipient,
-        params.deadline,
-      ],
-      params,
-    );
-  }
-
-  /** Explicit-venue swap that skims a frontend fee from the output. */
-  async swapViaVenueWithFee(venue: Address, params: SwapParams, fee: FrontendFee): Promise<Hash> {
-    return this.sendSwap(
-      "swapViaVenueWithFeeV1",
-      [
-        venue,
-        params.tokenIn,
-        params.tokenOut,
-        params.amountIn,
-        params.amountOutMin,
-        params.recipient,
-        params.deadline,
-        fee,
-      ],
-      params,
-    );
-  }
-
-  /** Swap through the best of a caller-supplied set of venues. */
-  async swapViaSelectedVenues(venues: readonly Address[], params: SwapParams): Promise<Hash> {
-    return this.sendSwap(
-      "swapViaSelectedVenuesV1",
-      [
-        venues,
-        params.tokenIn,
-        params.tokenOut,
-        params.amountIn,
-        params.amountOutMin,
-        params.recipient,
-        params.deadline,
-      ],
-      params,
-    );
-  }
-
-  /** Selected-venues swap that skims a frontend fee from the output. */
-  async swapViaSelectedVenuesWithFee(
-    venues: readonly Address[],
-    params: SwapParams,
-    fee: FrontendFee,
-  ): Promise<Hash> {
-    return this.sendSwap(
-      "swapViaSelectedVenuesWithFeeV1",
-      [
-        venues,
-        params.tokenIn,
-        params.tokenOut,
-        params.amountIn,
-        params.amountOutMin,
-        params.recipient,
-        params.deadline,
-        fee,
-      ],
-      params,
-    );
-  }
-
-  //-----------------//
-  // Combined swaps  //
-  //-----------------//
-  // Same as the methods above, but wait for the receipt and decode the result.
-
-  async swapAndWait(params: SwapParams): Promise<SwapResult> {
-    return this.waitForSwap(await this.swap(params));
-  }
-
-  async swapWithFeeAndWait(params: SwapParams, fee: FrontendFee): Promise<SwapResult> {
-    return this.waitForSwap(await this.swapWithFee(params, fee));
-  }
-
-  async swapViaVenueAndWait(venue: Address, params: SwapParams): Promise<SwapResult> {
-    return this.waitForSwap(await this.swapViaVenue(venue, params));
-  }
-
-  async swapViaVenueWithFeeAndWait(
-    venue: Address,
-    params: SwapParams,
-    fee: FrontendFee,
-  ): Promise<SwapResult> {
-    return this.waitForSwap(await this.swapViaVenueWithFee(venue, params, fee));
-  }
-
-  async swapViaSelectedVenuesAndWait(
-    venues: readonly Address[],
-    params: SwapParams,
-  ): Promise<SwapResult> {
-    return this.waitForSwap(await this.swapViaSelectedVenues(venues, params));
-  }
-
-  async swapViaSelectedVenuesWithFeeAndWait(
-    venues: readonly Address[],
-    params: SwapParams,
-    fee: FrontendFee,
-  ): Promise<SwapResult> {
-    return this.waitForSwap(await this.swapViaSelectedVenuesWithFee(venues, params, fee));
+  /** Same as `swap`, but waits for the receipt and decodes the result. */
+  async swapAndWait(params: SwapParams, opts: SwapOptions = {}): Promise<SwapResult> {
+    return this.waitForSwap(await this.swap(params, opts));
   }
 
   /**
@@ -493,23 +360,49 @@ export class PropAmmRouter {
         snapshot.timestampNs !== undefined ? snapshot.timestampNs / 1_000_000_000n : undefined,
     };
   }
+}
 
-  private async sendSwap(
-    functionName: string,
-    args: readonly unknown[],
-    params: SwapParams,
-  ): Promise<Hash> {
-    return this.client.write({
-      address: this.address,
-      abi: propAmmRouterAbi,
-      functionName,
-      args,
-      // Native-ETH input is signalled by the sentinel and paid via msg.value.
-      value: isAddressEqual(params.tokenIn, ETH_SENTINEL) ? params.amountIn : undefined,
-    });
+/** Quote selector per venue-restriction mode. */
+const QUOTE_SELECTORS = {
+  all: "quoteV1",
+  single: "quoteVenueV1",
+  selected: "quoteSelectedVenuesV1",
+} as const;
+
+/** Swap selector pairs (plain / frontend-fee) per venue-restriction mode. */
+const SWAP_SELECTORS = {
+  all: { plain: "swapV1", withFee: "swapWithFeeV1" },
+  single: { plain: "swapViaVenueV1", withFee: "swapViaVenueWithFeeV1" },
+  selected: { plain: "swapViaSelectedVenuesV1", withFee: "swapViaSelectedVenuesWithFeeV1" },
+} as const;
+
+/**
+ * Resolve a venue restriction into the selector mode and its leading args: a
+ * single venue targets the direct `Venue` entrypoint, several the
+ * `SelectedVenues` one. Empty restrictions throw — omit `venues` instead.
+ */
+function venueDispatch(venues: readonly Address[] | undefined): {
+  mode: keyof typeof QUOTE_SELECTORS;
+  venueArgs: readonly unknown[];
+} {
+  if (venues === undefined) return { mode: "all", venueArgs: [] };
+  if (venues.length === 0) {
+    throw new RangeError("venues must not be empty — omit it to use every whitelisted venue");
   }
+  if (venues.length === 1) return { mode: "single", venueArgs: [venues[0]] };
+  return { mode: "selected", venueArgs: [venues] };
 }
 
 function isOverridesSource(value: OverridesSource | OverridesSnapshot): value is OverridesSource {
   return typeof (value as OverridesSource).getOverrides === "function";
+}
+
+/** Throws unless the fee has an integer bps in [1, MAX_FEE_BPS] and a non-zero recipient. */
+function validateFee(fee: FrontendFee): void {
+  if (!Number.isInteger(fee.bps) || fee.bps < 1 || fee.bps > MAX_FEE_BPS) {
+    throw new RangeError(`fee bps must be an integer in [1, ${MAX_FEE_BPS}], got ${fee.bps}`);
+  }
+  if (isAddressEqual(fee.recipient, zeroAddress)) {
+    throw new RangeError("fee recipient must not be the zero address");
+  }
 }
