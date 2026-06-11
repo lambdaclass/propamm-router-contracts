@@ -636,7 +636,7 @@ impl PropAmmRouter {
             QuoteOverrides::Skip => return Ok(CallOverrides::default()),
             QuoteOverrides::Attached => self.overrides.get_overrides().await?,
             QuoteOverrides::Source(source) => source.get_overrides().await?,
-            QuoteOverrides::Snapshot(snapshot) => snapshot.clone(),
+            QuoteOverrides::Snapshot(snapshot) => Arc::new(snapshot.clone()),
         };
 
         let state = to_state_override(

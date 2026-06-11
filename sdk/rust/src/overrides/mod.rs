@@ -66,9 +66,12 @@ pub struct OverridesSnapshot {
 }
 
 /// Anything quotes can pull override snapshots from.
+///
+/// Snapshots are handed out behind an [`Arc`] so the hot quote path clones a
+/// pointer rather than deep-copying the nested per-pAMM slot maps.
 #[async_trait]
 pub trait OverridesSource: Send + Sync {
-    async fn get_overrides(&self) -> Result<OverridesSnapshot>;
+    async fn get_overrides(&self) -> Result<Arc<OverridesSnapshot>>;
     /// Immediate, permanent teardown. Default: no-op.
     fn close(&self) {}
 }
@@ -222,7 +225,7 @@ impl OverridesRpcSource {
 
 #[async_trait]
 impl OverridesSource for OverridesRpcSource {
-    async fn get_overrides(&self) -> Result<OverridesSnapshot> {
+    async fn get_overrides(&self) -> Result<Arc<OverridesSnapshot>> {
         let response = self
             .client
             .post(&self.url)
@@ -247,7 +250,7 @@ impl OverridesSource for OverridesRpcSource {
             .json()
             .await
             .map_err(|e| Error::Overrides(format!("overrides RPC response is not JSON: {e}")))?;
-        parse_rpc_response(&body)
+        parse_rpc_response(&body).map(Arc::new)
     }
 }
 
@@ -304,7 +307,7 @@ pub struct OverridesWsSource {
 
 #[derive(Default)]
 struct WsShared {
-    snapshot: OverridesSnapshot,
+    snapshot: Arc<OverridesSnapshot>,
     has_frame: bool,
     closed: bool,
     last_use: Option<Instant>,
@@ -334,7 +337,10 @@ impl OverridesWsSource {
         }
     }
 
-    async fn wait_for_snapshot(&self, deadline: tokio::time::Instant) -> Result<OverridesSnapshot> {
+    async fn wait_for_snapshot(
+        &self,
+        deadline: tokio::time::Instant,
+    ) -> Result<Arc<OverridesSnapshot>> {
         loop {
             // Register for notification BEFORE checking state, so a frame
             // landing in between can't be missed.
@@ -345,6 +351,7 @@ impl OverridesWsSource {
                     return Err(Error::Overrides("overrides source is closed".into()));
                 }
                 if shared.has_frame {
+                    // Arc clone: one refcount bump, not a deep map copy.
                     return Ok(shared.snapshot.clone());
                 }
             }
@@ -356,36 +363,33 @@ impl OverridesWsSource {
             }
         }
     }
-
-    /// Spawn the read loop if it isn't running. Must be called with demand
-    /// registered (`last_use` set) so the loop doesn't idle out immediately.
-    async fn ensure_running(&self) -> Result<()> {
-        let mut shared = self.state.shared.lock().await;
-        if shared.closed {
-            return Err(Error::Overrides("overrides source is closed".into()));
-        }
-        let running = shared.task.as_ref().is_some_and(|t| !t.is_finished());
-        if !running {
-            shared.task = Some(tokio::spawn(run_ws_loop(
-                self.state.clone(),
-                self.config.clone(),
-            )));
-        }
-        Ok(())
-    }
 }
 
 #[async_trait]
 impl OverridesSource for OverridesWsSource {
-    async fn get_overrides(&self) -> Result<OverridesSnapshot> {
+    async fn get_overrides(&self) -> Result<Arc<OverridesSnapshot>> {
+        // Warm path: a single lock acquisition. Record demand, and if a fresh
+        // frame is already buffered hand out its Arc immediately. Otherwise
+        // (re)spawn the read loop under the same lock — `tokio::spawn` is
+        // synchronous, so the spawn decision can't race a concurrent idle
+        // teardown.
         {
             let mut shared = self.state.shared.lock().await;
             if shared.closed {
                 return Err(Error::Overrides("overrides source is closed".into()));
             }
             shared.last_use = Some(Instant::now());
+            if shared.has_frame {
+                return Ok(shared.snapshot.clone());
+            }
+            let running = shared.task.as_ref().is_some_and(|t| !t.is_finished());
+            if !running {
+                shared.task = Some(tokio::spawn(run_ws_loop(
+                    self.state.clone(),
+                    self.config.clone(),
+                )));
+            }
         }
-        self.ensure_running().await?;
 
         let deadline = tokio::time::Instant::now() + self.config.first_frame_timeout;
         self.state.waiters.fetch_add(1, Ordering::SeqCst);
@@ -457,14 +461,20 @@ async fn handle_frame(state: &WsState, text: &str) {
     };
 
     let mut shared = state.shared.lock().await;
-    // A frame only carries the pAMMs it updates; entries for other pAMMs
-    // stay cached from earlier frames.
-    shared.snapshot.per_pamm.extend(frame.per_pamm);
-    if frame.block_number.is_some() {
-        shared.snapshot.block_number = frame.block_number;
-    }
-    if frame.timestamp_ns.is_some() {
-        shared.snapshot.timestamp_ns = frame.timestamp_ns;
+    {
+        // `make_mut` clones only when a reader still holds the Arc; readers keep
+        // it only transiently (across one quote), so frames usually mutate in
+        // place rather than deep-copying.
+        let snapshot = Arc::make_mut(&mut shared.snapshot);
+        // A frame only carries the pAMMs it updates; entries for other pAMMs
+        // stay cached from earlier frames.
+        snapshot.per_pamm.extend(frame.per_pamm);
+        if frame.block_number.is_some() {
+            snapshot.block_number = frame.block_number;
+        }
+        if frame.timestamp_ns.is_some() {
+            snapshot.timestamp_ns = frame.timestamp_ns;
+        }
     }
     shared.has_frame = true;
     drop(shared);
