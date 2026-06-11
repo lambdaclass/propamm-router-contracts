@@ -152,14 +152,6 @@ export class PropAmmRouter {
     return { amountOut, venue };
   }
 
-  /**
-   * Quote the Uniswap V3 fallback route directly. Never applies overrides —
-   * the fallback quoter only reads live on-chain pool state.
-   */
-  async quoteUniswapV3(tokenIn: Address, tokenOut: Address, amountIn: bigint): Promise<bigint> {
-    return this.callRouter<bigint>("quoteUniswapV3", [tokenIn, tokenOut, amountIn]);
-  }
-
   //-------//
   // Swaps //
   //-------//
