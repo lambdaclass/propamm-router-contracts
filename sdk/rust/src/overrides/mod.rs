@@ -368,26 +368,28 @@ impl OverridesWsSource {
 #[async_trait]
 impl OverridesSource for OverridesWsSource {
     async fn get_overrides(&self) -> Result<Arc<OverridesSnapshot>> {
-        // Warm path: a single lock acquisition. Record demand, and if a fresh
-        // frame is already buffered hand out its Arc immediately. Otherwise
-        // (re)spawn the read loop under the same lock — `tokio::spawn` is
-        // synchronous, so the spawn decision can't race a concurrent idle
-        // teardown.
+        // Warm path: a single lock acquisition. Record demand, ensure the read
+        // loop is alive (respawn if it died — checked even when a frame is
+        // buffered, so an unexpectedly-dead loop can't leave us serving a
+        // forever-stale snapshot), then hand out a buffered frame's Arc
+        // immediately if present. Spawning under the lock is safe: `tokio::spawn`
+        // is synchronous, so it can neither race a concurrent idle teardown nor
+        // deadlock on the lock the spawned loop will later take.
         {
             let mut shared = self.state.shared.lock().await;
             if shared.closed {
                 return Err(Error::Overrides("overrides source is closed".into()));
             }
             shared.last_use = Some(Instant::now());
-            if shared.has_frame {
-                return Ok(shared.snapshot.clone());
-            }
             let running = shared.task.as_ref().is_some_and(|t| !t.is_finished());
             if !running {
                 shared.task = Some(tokio::spawn(run_ws_loop(
                     self.state.clone(),
                     self.config.clone(),
                 )));
+            }
+            if shared.has_frame {
+                return Ok(shared.snapshot.clone());
             }
         }
 
