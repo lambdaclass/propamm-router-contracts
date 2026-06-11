@@ -16,10 +16,10 @@ swapWithFeeAndWait(params: SwapParams, fee: FrontendFee): Promise<SwapResult>
 import { frontendFee } from "@propamm/sdk/router";
 import { router } from "./config";
 
-const hash = await router.swapWithFee(
-  params,
-  frontendFee(25, "0x..."), // 0.25% to the fee recipient
-);
+const hash = await router.swapWithFee( // [!code focus]
+  params, // [!code focus]
+  frontendFee(25, "0x..."), // 0.25% to the fee recipient // [!code focus]
+); // [!code focus]
 ```
 
 ```ts [config.ts]

@@ -11,16 +11,7 @@ waitForSwap(hash: Hash): Promise<SwapResult>
 
 ```ts
 const hash = await router.swap(params);
-const result = await router.waitForSwap(hash);
-// {
-//   hash: "0x...",
-//   amountIn: 1000000000000000000n,
-//   amountOut: 1626397384n,
-//   executedVenue: "0x...",
-//   recipient: "0x...",
-//   fee: undefined,
-//   receipt: { ... },
-// }
+await router.waitForSwap(hash);
 ```
 
 ## Returns

@@ -16,7 +16,7 @@ swapViaVenueAndWait(venue: Address, params: SwapParams): Promise<SwapResult>
 import { PAMMS } from "@propamm/sdk/common/pamms";
 import { router } from "./config";
 
-const hash = await router.swapViaVenue(PAMMS.kipseli, params);
+const hash = await router.swapViaVenue(PAMMS.kipseli, params); // [!code focus]
 ```
 
 ```ts [config.ts]

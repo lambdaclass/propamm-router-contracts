@@ -14,7 +14,7 @@ Shave basis points off an amount — derive `amountOutMin` from a quote.
 ```ts
 import { applySlippage } from "@propamm/sdk/common/helpers";
 
-const minOut = applySlippage(amountOut, 50); // quote - 0.5%
+const minOut = applySlippage(amountOut, 50); // quote - 0.5% // [!code focus]
 ```
 
 **Parameters:** `amount: bigint`, `bps: number` (integer in `[0, 10000]`;
@@ -32,7 +32,7 @@ Unix-timestamp deadline some seconds from now, for swap `deadline` params.
 ```ts
 import { deadlineIn } from "@propamm/sdk/common/helpers";
 
-const deadline = deadlineIn(300); // now + 5 min
+const deadline = deadlineIn(300); // now + 5 min // [!code focus]
 ```
 
 **Parameters:** `seconds: number`. **Returns** `bigint`.
@@ -51,8 +51,8 @@ viem's unit conversion, re-exported.
 ```ts
 import { parseUnits, formatUnits } from "@propamm/sdk/common/helpers";
 
-parseUnits("1.5", 6);      // 1500000n
-formatUnits(1500000n, 6);  // "1.5"
+parseUnits("1.5", 6);      // 1500000n // [!code focus]
+formatUnits(1500000n, 6);  // "1.5" // [!code focus]
 ```
 
 ## Constants

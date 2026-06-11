@@ -22,18 +22,3 @@ bun add @propamm/sdk
 ```
 
 :::
-
-## Imports
-
-Imports are hierarchical — each module has its own subpath, and viem
-essentials (chains, account builders) are re-exported so basic usage needs no
-direct viem import:
-
-```ts
-import { ContractClient } from "@propamm/sdk/client";
-import { PropAmmRouter } from "@propamm/sdk/router";
-import { ETH_SENTINEL, USDC } from "@propamm/sdk/common/tokens";
-import { applySlippage, deadlineIn, formatUnits, parseEther } from "@propamm/sdk/common/helpers";
-import { mainnet } from "@propamm/sdk/common/chains";
-import { privateKeyToAccount } from "@propamm/sdk/common/accounts";
-```

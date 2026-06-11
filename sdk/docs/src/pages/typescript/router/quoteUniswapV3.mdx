@@ -17,8 +17,7 @@ import { parseEther } from "@propamm/sdk/common/helpers";
 import { USDC, WETH } from "@propamm/sdk/common/tokens";
 import { router } from "./config";
 
-const amountOut = await router.quoteUniswapV3(WETH, USDC, parseEther("1"));
-// 1645288352n (1645.28 USDC)
+const amountOut = await router.quoteUniswapV3(WETH, USDC, parseEther("1")); // [!code focus]
 ```
 
 ```ts [config.ts]

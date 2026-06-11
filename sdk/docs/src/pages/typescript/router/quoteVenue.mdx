@@ -16,12 +16,12 @@ import { PAMMS } from "@propamm/sdk/common/pamms";
 import { USDC, WETH } from "@propamm/sdk/common/tokens";
 import { router } from "./config";
 
-const { amountOut, venue } = await router.quoteVenue(
-  PAMMS.fermi,
-  USDC,
-  WETH,
-  parseUnits("100", 6),
-);
+const { amountOut, venue } = await router.quoteVenue( // [!code focus]
+  PAMMS.fermi, // [!code focus]
+  USDC, // [!code focus]
+  WETH, // [!code focus]
+  parseUnits("100", 6), // [!code focus]
+); // [!code focus]
 ```
 
 ```ts [config.ts]

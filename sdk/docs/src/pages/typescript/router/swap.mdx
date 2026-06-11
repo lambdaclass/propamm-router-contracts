@@ -22,14 +22,14 @@ import { account, router } from "./config";
 const amountIn = parseEther("1");
 const { amountOut } = await router.quote(ETH_SENTINEL, USDC, amountIn);
 
-const hash = await router.swap({
-  tokenIn: ETH_SENTINEL,
-  tokenOut: USDC,
-  amountIn,
-  amountOutMin: applySlippage(amountOut, 50),
-  recipient: account.address,
-  deadline: deadlineIn(300),
-});
+const hash = await router.swap({ // [!code focus]
+  tokenIn: ETH_SENTINEL, // [!code focus]
+  tokenOut: USDC, // [!code focus]
+  amountIn, // [!code focus]
+  amountOutMin: applySlippage(amountOut, 50), // [!code focus]
+  recipient: account.address, // [!code focus]
+  deadline: deadlineIn(300), // [!code focus]
+}); // [!code focus]
 ```
 
 ```ts [config.ts]
@@ -63,7 +63,6 @@ Returns [`SwapResult`](/typescript/router/waitForSwap#returns).
 
 ```ts
 const result = await router.swapAndWait({ ...params });
-// { hash, receipt, amountIn, amountOut, executedVenue, recipient, fee? }
 ```
 
 ## Parameters

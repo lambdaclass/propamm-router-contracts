@@ -11,8 +11,7 @@ frontendFee(bps: number, recipient: Address): FrontendFee
 ```ts
 import { frontendFee, MAX_FEE_BPS } from "@propamm/sdk/router";
 
-const fee = frontendFee(25, "0x..."); // 0.25% of the output
-// { bps: 25, recipient: "0x..." }
+const fee = frontendFee(25, "0x..."); // 0.25% of the output // [!code focus]
 ```
 
 ## Returns

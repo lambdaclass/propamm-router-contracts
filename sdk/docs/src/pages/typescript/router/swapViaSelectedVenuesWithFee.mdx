@@ -15,11 +15,11 @@ swapViaSelectedVenuesWithFeeAndWait(venues: Address[], params: SwapParams, fee: 
 import { frontendFee } from "@propamm/sdk/router";
 import { PAMMS } from "@propamm/sdk/common/pamms";
 
-const hash = await router.swapViaSelectedVenuesWithFee(
-  [PAMMS.fermi, PAMMS.bebop],
-  params,
-  frontendFee(25, "0x..."),
-);
+const hash = await router.swapViaSelectedVenuesWithFee( // [!code focus]
+  [PAMMS.fermi, PAMMS.bebop], // [!code focus]
+  params, // [!code focus]
+  frontendFee(25, "0x..."), // [!code focus]
+); // [!code focus]
 ```
 
 ## Returns

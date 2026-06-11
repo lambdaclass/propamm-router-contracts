@@ -20,13 +20,11 @@ import { parseEther } from "@propamm/sdk/common/helpers";
 import { ETH_SENTINEL, USDC } from "@propamm/sdk/common/tokens";
 import { router } from "./config";
 
-const { amountOut, venue } = await router.quote(
-  ETH_SENTINEL,
-  USDC,
-  parseEther("1"),
-);
-// amountOut: 1626397384n (1626.39 USDC)
-// venue: the best-quoting venue, or the Uniswap fallback router
+const { amountOut, venue } = await router.quote( // [!code focus]
+  ETH_SENTINEL, // [!code focus]
+  USDC, // [!code focus]
+  parseEther("1"), // [!code focus]
+); // [!code focus]
 ```
 
 ```ts [config.ts]

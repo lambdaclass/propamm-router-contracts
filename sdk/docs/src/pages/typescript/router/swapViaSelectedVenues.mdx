@@ -14,10 +14,10 @@ swapViaSelectedVenuesAndWait(venues: Address[], params: SwapParams): Promise<Swa
 ```ts
 import { PAMMS } from "@propamm/sdk/common/pamms";
 
-const hash = await router.swapViaSelectedVenues(
-  [PAMMS.fermi, PAMMS.bebop],
-  params,
-);
+const hash = await router.swapViaSelectedVenues( // [!code focus]
+  [PAMMS.fermi, PAMMS.bebop], // [!code focus]
+  params, // [!code focus]
+); // [!code focus]
 ```
 
 ## Returns

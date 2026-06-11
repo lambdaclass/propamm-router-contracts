@@ -13,7 +13,6 @@ is why it isn't in the static `PAMMS` mapping.
 
 ```ts
 const fallback = await router.fallbackSwapRouter();
-// "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45"
 ```
 
 **Returns** `Address`
@@ -48,8 +47,7 @@ The raw per-pair fee tier override — `0` means unset. Order-independent:
 `getPairFee(a, b) === getPairFee(b, a)`.
 
 ```ts
-const fee = await router.getPairFee(USDC, WETH);
-// 500
+await router.getPairFee(USDC, WETH);
 ```
 
 **Returns** `number`
@@ -87,7 +85,6 @@ guaranteed.
 
 ```ts
 const venues = await router.getWhitelistedVenues();
-// ["0xb107...", "0x71e7...", ...]
 ```
 
 **Returns** `Address[]`

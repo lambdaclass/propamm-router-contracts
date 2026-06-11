@@ -11,8 +11,7 @@ allowance(token: Address, owner: Address): Promise<bigint>
 ```ts
 import { USDC } from "@propamm/sdk/common/tokens";
 
-const allowance = await router.allowance(USDC, account.address);
-// 100000000n
+await router.allowance(USDC, account.address); // [!code focus]
 ```
 
 ## Returns
