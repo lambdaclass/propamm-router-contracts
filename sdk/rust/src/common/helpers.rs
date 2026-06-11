@@ -94,3 +94,90 @@ pub fn parse_ether(amount: &str) -> Result<U256> {
 pub fn format_ether(value: U256) -> String {
     format_units(value, 18)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn apply_slippage_shaves_bps_and_floors_in_the_users_favor() {
+        // 0.5% off 1_000_000 -> 5_000 fee.
+        assert_eq!(
+            apply_slippage(U256::from(1_000_000u64), 50).unwrap(),
+            U256::from(995_000u64)
+        );
+        // 0 bps is a no-op; the full denominator zeroes the amount.
+        let amount = U256::from(123_456u64);
+        assert_eq!(apply_slippage(amount, 0).unwrap(), amount);
+        assert_eq!(apply_slippage(amount, 10_000).unwrap(), U256::zero());
+        // The fee floors, so the min-out rounds UP (stricter for the user):
+        // 10_001 * 1bps = 1.0001 -> fee 1 -> 10_000.
+        assert_eq!(
+            apply_slippage(U256::from(10_001u64), 1).unwrap(),
+            U256::from(10_000u64)
+        );
+    }
+
+    #[test]
+    fn apply_slippage_rejects_bps_above_denominator() {
+        assert!(apply_slippage(U256::from(1u64), 10_001).is_err());
+    }
+
+    #[test]
+    fn apply_slippage_does_not_overflow_for_huge_amounts() {
+        // full_mul widens to U512, so amounts near U256::MAX are safe.
+        let out = apply_slippage(U256::MAX, 100).unwrap();
+        assert!(out < U256::MAX && out > U256::zero());
+    }
+
+    #[test]
+    fn parse_units_handles_integers_fractions_and_leading_zeros() {
+        assert_eq!(parse_units("1.5", 6).unwrap(), U256::from(1_500_000u64));
+        assert_eq!(parse_units("1", 6).unwrap(), U256::from(1_000_000u64));
+        assert_eq!(parse_units("0.0015", 6).unwrap(), U256::from(1_500u64));
+        assert_eq!(parse_ether("1").unwrap(), U256::exp10(18));
+    }
+
+    #[test]
+    fn parse_units_rejects_excess_precision() {
+        assert!(parse_units("1.9999995", 6).is_err());
+    }
+
+    #[test]
+    fn format_units_trims_zeros_and_round_trips_parse_units() {
+        assert_eq!(format_units(U256::from(1_500_000u64), 6), "1.5");
+        assert_eq!(format_units(U256::from(1_000_000u64), 6), "1");
+        assert_eq!(format_units(U256::from(1_500u64), 6), "0.0015");
+        assert_eq!(format_units(U256::zero(), 6), "0");
+        assert_eq!(format_ether(U256::exp10(18)), "1");
+        let value = parse_units("1234.567", 6).unwrap();
+        assert_eq!(format_units(value, 6), "1234.567");
+    }
+
+    #[test]
+    fn parse_address_validates_length_and_hex() {
+        let mut bytes = [0u8; 20];
+        bytes[19] = 1;
+        let one = Address::from_slice(&bytes);
+        assert_eq!(
+            parse_address("0x0000000000000000000000000000000000000001").unwrap(),
+            one
+        );
+        // The 0x prefix is optional.
+        assert_eq!(
+            parse_address("0000000000000000000000000000000000000001").unwrap(),
+            one
+        );
+        // Wrong length and non-hex are rejected.
+        assert!(parse_address("0x1234").is_err());
+        assert!(parse_address("0xZZ00000000000000000000000000000000000001").is_err());
+    }
+
+    #[test]
+    fn deadline_in_returns_future_unix_seconds() {
+        let base = deadline_in(0);
+        // Well past the 2023 epoch, and a positive offset only grows it.
+        assert!(base >= U256::from(1_700_000_000u64));
+        assert!(deadline_in(1_000) > base);
+    }
+}

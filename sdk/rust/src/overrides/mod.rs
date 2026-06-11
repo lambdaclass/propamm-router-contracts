@@ -542,4 +542,139 @@ mod tests {
         let err = parse_rpc_response(&body).expect_err("non-null error must fail");
         assert!(matches!(err, Error::Overrides(_)));
     }
+
+    fn slot(n: u64) -> H256 {
+        H256(U256::from(n).to_big_endian())
+    }
+
+    fn snapshot_with(
+        pamm: Address,
+        contract: Address,
+        slot: H256,
+        value: U256,
+        block_number: Option<u64>,
+    ) -> OverridesSnapshot {
+        let mut slots = SlotDiffs::new();
+        slots.insert(slot, value);
+        let mut contracts = ContractDiffs::new();
+        contracts.insert(contract, slots);
+        let mut per_pamm = HashMap::new();
+        per_pamm.insert(pamm, contracts);
+        OverridesSnapshot {
+            block_number,
+            timestamp_ns: None,
+            per_pamm,
+        }
+    }
+
+    #[test]
+    fn parse_word_accepts_padded_and_unpadded_hex() {
+        assert_eq!(parse_word("0x2a"), Some(U256::from(42u64)));
+        assert_eq!(parse_word("0x1"), Some(U256::from(1u64)));
+        assert_eq!(parse_word("2a"), None); // missing 0x prefix
+        assert_eq!(parse_word("0xzz"), None); // non-hex
+    }
+
+    #[test]
+    fn parse_block_number_accepts_int_hex_and_decimal_forms() {
+        assert_eq!(parse_block_number(&serde_json::json!(100)), Some(100));
+        assert_eq!(parse_block_number(&serde_json::json!("0x64")), Some(100));
+        assert_eq!(parse_block_number(&serde_json::json!("100")), Some(100));
+        assert_eq!(parse_block_number(&serde_json::json!("oops")), None);
+    }
+
+    #[test]
+    fn parse_overrides_message_extracts_diffs_and_skips_metadata() {
+        let pamm = "0x0000000000000000000000000000000000000abc";
+        let contract = "0x0000000000000000000000000000000000000011";
+        let raw = format!(
+            r#"{{
+                "blockNumber": 24285034,
+                "timestamp": 1700000000000000000,
+                "slot": "meta-key-ignored",
+                "{pamm}": {{ "stateOverride": {{
+                    "{contract}": {{ "stateDiff": {{ "0x1": "0x2a" }} }}
+                }} }}
+            }}"#
+        );
+        let message: Value = serde_json::from_str(&raw).unwrap();
+        let snapshot = parse_overrides_message(&message).unwrap();
+
+        assert_eq!(snapshot.block_number, Some(24_285_034));
+        assert_eq!(snapshot.timestamp_ns, Some(1_700_000_000_000_000_000));
+        assert_eq!(snapshot.per_pamm.len(), 1);
+        let pamm = parse_address(pamm).unwrap();
+        let contract = parse_address(contract).unwrap();
+        assert_eq!(
+            snapshot.per_pamm[&pamm][&contract].get(&slot(1)),
+            Some(&U256::from(42u64))
+        );
+    }
+
+    #[test]
+    fn parse_overrides_message_drops_empty_and_invalid_entries() {
+        let raw = r#"{
+            "not-an-address": { "stateOverride": {} },
+            "0x00000000000000000000000000000000000000ff": {
+                "stateOverride": { "0x0000000000000000000000000000000000000011": { "stateDiff": {} } }
+            }
+        }"#;
+        let message: Value = serde_json::from_str(raw).unwrap();
+        assert!(
+            parse_overrides_message(&message)
+                .unwrap()
+                .per_pamm
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn to_state_override_zeroes_the_bebop_default_slot_when_absent() {
+        let pamm = parse_address("0x0000000000000000000000000000000000000abc").unwrap();
+        let contract = parse_address("0x0000000000000000000000000000000000000011").unwrap();
+        let snapshot = snapshot_with(pamm, contract, slot(7), U256::from(99u64), Some(1));
+
+        let set = to_state_override(&snapshot, &ToStateOverrideOptions::default());
+        // The real diff survives...
+        assert_eq!(
+            set.0[&contract].state_diff.get(&slot(7)),
+            Some(&U256::from(99u64))
+        );
+        // ...and the Bebop registry slot is zeroed because no Bebop entry exists,
+        // so a stale on-chain Bebop price can't win a quote it could never fill.
+        assert_eq!(
+            set.0[&BEBOP].state_diff.get(&BEBOP_DEFAULT_SLOT),
+            Some(&U256::zero())
+        );
+    }
+
+    #[test]
+    fn to_state_override_can_skip_the_bebop_default() {
+        let pamm = parse_address("0x0000000000000000000000000000000000000abc").unwrap();
+        let contract = parse_address("0x0000000000000000000000000000000000000011").unwrap();
+        let snapshot = snapshot_with(pamm, contract, slot(7), U256::from(99u64), None);
+
+        let set = to_state_override(
+            &snapshot,
+            &ToStateOverrideOptions {
+                pamms: None,
+                skip_bebop_default: true,
+            },
+        );
+        assert!(!set.0.contains_key(&BEBOP));
+    }
+
+    #[test]
+    fn to_state_override_keeps_real_bebop_diffs_without_injecting_default() {
+        let contract = parse_address("0x0000000000000000000000000000000000000011").unwrap();
+        // pAMM IS Bebop, so the default-slot injection is skipped.
+        let snapshot = snapshot_with(BEBOP, contract, slot(7), U256::from(99u64), None);
+
+        let set = to_state_override(&snapshot, &ToStateOverrideOptions::default());
+        assert_eq!(
+            set.0[&contract].state_diff.get(&slot(7)),
+            Some(&U256::from(99u64))
+        );
+        assert!(!set.0.contains_key(&BEBOP));
+    }
 }
