@@ -39,8 +39,8 @@ let router = PropAmmRouter::new(client, parse_address("0x...")?);
 
 [`Result<Quote>`](/rust/types#quote)
 
-The best output amount and the venue that produced it; `venue` can be
-passed to [`swap_via_venue`](/rust/router/swap_via_venue).
+The best output amount and the venue that produced it; pin `venue` in a
+follow-up [`swap_with`](/rust/router/swap) via `SwapOptions::venues`.
 
 ## Parameters
 
@@ -74,4 +74,19 @@ let opts = QuoteOptions {
     ..Default::default()
 };
 let stale = router.quote_with(ETH_SENTINEL, USDC, amount_in, &opts).await?;
+```
+
+`venues` restricts the quote: a single entry quotes that venue directly,
+several pick the best among them (must be non-empty when present). When no
+listed venue can be priced, the call does **not** fail: it falls back to
+the Uniswap V3 quote and reports the fallback router as `venue`.
+
+```rust
+use propamm_sdk::common::pamms::{BEBOP, FERMI};
+
+let opts = QuoteOptions {
+    venues: Some(vec![FERMI, BEBOP]), // [!code focus]
+    ..Default::default()
+};
+let subset = router.quote_with(ETH_SENTINEL, USDC, amount_in, &opts).await?;
 ```

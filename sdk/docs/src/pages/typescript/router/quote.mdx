@@ -45,8 +45,8 @@ export const router = new PropAmmRouter(client, "0x..."); // router proxy
 
 [`Quote`](/typescript/types#quote)
 
-The best output amount and the venue that produced it; `venue` can be
-passed to [`swapViaVenue`](/typescript/router/swapViaVenue).
+The best output amount and the venue that produced it; pin `venue` in a
+follow-up [`swap`](/typescript/router/swap) via its `venues` option.
 
 ## Parameters
 
@@ -77,5 +77,21 @@ Per-call quote options.
 ```ts
 const stale = await router.quote(ETH_SENTINEL, USDC, parseEther("1"), {
   overrides: null, // [!code focus]
+});
+```
+
+`venues` restricts the quote: a single entry quotes that venue directly,
+several pick the best among them (must be non-empty when present). When no
+listed venue can be priced, the call does **not** revert: it falls back to
+the Uniswap V3 quote and reports the fallback router as `venue`.
+
+```ts
+import { PAMMS } from "@propamm/sdk/common/pamms";
+
+const pinned = await router.quote(ETH_SENTINEL, USDC, parseEther("1"), {
+  venues: [PAMMS.fermi], // [!code focus]
+});
+const subset = await router.quote(ETH_SENTINEL, USDC, parseEther("1"), {
+  venues: [PAMMS.fermi, PAMMS.bebop], // [!code focus]
 });
 ```

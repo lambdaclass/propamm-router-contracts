@@ -23,8 +23,8 @@ pub struct SwapParams {
   `msg.value` automatically).
 - `token_out` — token being bought; `ETH_SENTINEL` delivers native ETH.
 - `amount_in` — exact input amount, in atomic units.
-- `amount_out_min` — minimum acceptable output (net of fee on the `_with_fee`
-  paths); derive from a quote with `apply_slippage`.
+- `amount_out_min` — minimum acceptable output (net of the frontend fee,
+  when one is passed); derive from a quote with `apply_slippage`.
 - `recipient` — receiver of `token_out`.
 - `deadline` — unix timestamp after which the swap is invalid; build with
   `deadline_in`.
@@ -42,13 +42,13 @@ pub struct Quote {
 
 - `amount_out` — the quoted output amount, in atomic units.
 - `venue` — the venue that produced the quote (or the Uniswap fallback
-  router); pass to [`swap_via_venue`](/rust/router/swap_via_venue) to
-  execute against it.
+  router); pin it in a follow-up [`swap_with`](/rust/router/swap) via
+  [`SwapOptions::venues`](#swapoptions) to execute against it.
 
 ## SwapResult
 
 Decoded outcome of a mined swap, from
-[`wait_for_swap`](/rust/router/wait_for_swap) or any `_and_wait` method.
+[`wait_for_swap`](/rust/router/wait_for_swap) or `swap_and_wait`(`_with`).
 
 ```rust
 pub struct SwapResult {
@@ -82,10 +82,30 @@ pub struct FeeCharged {
 }
 ```
 
+## SwapOptions
+
+Per-swap options, accepted by [`swap_with`](/rust/router/swap) and
+`swap_and_wait_with`; `Default` mirrors the plain `swap`.
+
+```rust
+pub struct SwapOptions {
+    pub venues: Option<Vec<Address>>,
+    pub frontend_fee: Option<FrontendFee>,
+}
+```
+
+- `venues` — restrict the swap to these venues: a single entry executes
+  through that venue directly, several re-quote on-chain and fill via the
+  best of them. Must be non-empty when present; `None` swaps through the
+  best-quoting venue overall.
+- `frontend_fee` — skim a [frontend fee](#frontendfee) from the output;
+  routes the call through the contract's `WithFee` selector.
+
 ## FrontendFee
 
-Fee taken by the `_with_fee` swap variants; build with
-[`frontend_fee`](/rust/router/frontend_fee).
+Frontend fee skimmed from a swap's output; pass via
+[`SwapOptions::frontend_fee`](#swapoptions). Validated before the swap is
+sent.
 
 ```rust
 pub struct FrontendFee {
@@ -94,24 +114,29 @@ pub struct FrontendFee {
 }
 ```
 
-- `bps` — fee in basis points of the output token, capped at
-  `MAX_FEE_BPS = 100` (1%).
-- `recipient` — receives the fee in `token_out`.
+- `bps` — fee in basis points of the output token, in `[1, MAX_FEE_BPS]`
+  (`MAX_FEE_BPS = 100`, i.e. 1%).
+- `recipient` — receives the fee in `token_out`; must not be the zero
+  address.
 
 ## QuoteOptions
 
-Per-call options accepted by every `_with` quote variant.
+Per-call options accepted by [`quote_with`](/rust/router/quote).
 
 ```rust
 pub struct QuoteOptions {
     pub overrides: QuoteOverrides,
     pub skip_bebop_default: bool,
+    pub venues: Option<Vec<Address>>,
 }
 ```
 
 - `overrides` — which override source this call uses (see below).
 - `skip_bebop_default` — set `true` to keep Bebop's raw on-chain slot instead
   of zeroing it when the snapshot has no Bebop entry.
+- `venues` — restrict the quote to these venues: a single entry quotes that
+  venue directly, several pick the best among them. Must be non-empty when
+  present.
 
 ## QuoteOverrides
 

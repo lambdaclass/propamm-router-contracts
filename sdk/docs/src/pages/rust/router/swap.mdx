@@ -7,7 +7,9 @@ both in one call.
 
 ```rust
 pub async fn swap(&self, params: &SwapParams) -> Result<H256>
+pub async fn swap_with(&self, params: &SwapParams, opts: &SwapOptions) -> Result<H256>
 pub async fn swap_and_wait(&self, params: &SwapParams) -> Result<SwapResult>
+pub async fn swap_and_wait_with(&self, params: &SwapParams, opts: &SwapOptions) -> Result<SwapResult>
 ```
 
 ## Usage
@@ -52,10 +54,49 @@ let router = PropAmmRouter::new(client, parse_address("0x...")?);
 The transaction hash. Requires a signing client
 (`ContractClient::connect_with_signer`).
 
+## swap_with
+
+Same, plus [`opts: &SwapOptions`](/rust/types#swapoptions) — restrict the
+venues and/or charge a frontend fee.
+
+`venues` restricts the swap: a single entry executes through that venue
+directly (failing `UnknownVenue` on a non-venue address), several re-quote
+on-chain and fill via the best of them. Must be non-empty when present;
+`None` swaps through the best-quoting venue overall.
+
+```rust
+use propamm_sdk::common::pamms::KIPSELI;
+use propamm_sdk::router::SwapOptions;
+
+let opts = SwapOptions {
+    venues: Some(vec![KIPSELI]), // exactly this venue // [!code focus]
+    ..Default::default()
+};
+let hash = router.swap_with(&params, &opts).await?;
+```
+
+`frontend_fee` skims a fee from the output token, paid to its `recipient`.
+`bps` must be in `[1, MAX_FEE_BPS]` (100 = 1%) — validated before sending.
+With a fee, `amount_out_min` is the **net** minimum the recipient must
+receive after the fee, and the decoded result's `fee` field (via
+[`wait_for_swap`](/rust/router/wait_for_swap)) carries the charged amount
+and recipient.
+
+```rust
+use propamm_sdk::router::{FrontendFee, SwapOptions};
+
+let opts = SwapOptions {
+    frontend_fee: Some(FrontendFee { bps: 25, recipient: fee_recipient }), // 0.25% // [!code focus]
+    ..Default::default()
+};
+let hash = router.swap_with(&params, &opts).await?;
+```
+
 ## swap_and_wait
 
 Same parameters; additionally waits for the receipt and decodes the outcome.
-Returns [`SwapResult`](/rust/router/wait_for_swap#returns).
+Returns [`SwapResult`](/rust/router/wait_for_swap#returns) —
+`swap_and_wait_with` is the options-taking twin.
 
 ```rust
 let result = router.swap_and_wait(&params).await?;

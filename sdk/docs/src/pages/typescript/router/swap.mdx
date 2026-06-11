@@ -6,8 +6,8 @@ venue fails to fill. Returns the transaction hash — pair with
 both in one call.
 
 ```ts
-swap(params: SwapParams): Promise<Hash>
-swapAndWait(params: SwapParams): Promise<SwapResult>
+swap(params: SwapParams, opts?: SwapOptions): Promise<Hash>
+swapAndWait(params: SwapParams, opts?: SwapOptions): Promise<SwapResult>
 ```
 
 ## Usage
@@ -79,5 +79,39 @@ field-by-field docs. Derive `amountOutMin` from a quote with
 const hash = await router.swap({
   // ...
   amountOutMin: applySlippage(amountOut, 50), // quote - 0.5% // [!code focus]
+});
+```
+
+### opts (optional)
+
+- **Type:** [`SwapOptions`](/typescript/types#swapoptions)
+
+Per-swap options: restrict the venues and/or charge a frontend fee.
+
+`venues` restricts the swap: a single entry executes through that venue
+directly (reverting `UnknownVenue` on a non-venue address), several
+re-quote on-chain and fill via the best of them. Must be non-empty when
+present; omit to swap through the best-quoting venue overall.
+
+```ts
+import { PAMMS } from "@propamm/sdk/common/pamms";
+
+// exactly this venue
+const hash = await router.swap(params, { venues: [PAMMS.kipseli] }); // [!code focus]
+
+// best of a subset
+const hash2 = await router.swap(params, { venues: [PAMMS.fermi, PAMMS.bebop] }); // [!code focus]
+```
+
+`frontendFee` skims a fee from the output token, paid to its `recipient`.
+`bps` must be an integer in `[1, MAX_FEE_BPS]` (100 = 1%) — validated
+before sending. With a fee, `amountOutMin` is the **net** minimum the
+recipient must receive after the fee, and the decoded result's `fee` field
+(via [`waitForSwap`](/typescript/router/waitForSwap)) carries the charged
+amount and recipient.
+
+```ts
+const hash = await router.swap(params, {
+  frontendFee: { bps: 25, recipient: "0x..." }, // 0.25% to the fee recipient // [!code focus]
 });
 ```
