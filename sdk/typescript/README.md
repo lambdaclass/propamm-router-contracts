@@ -56,7 +56,7 @@ mainnet router deployment; override with `RPC_URL` / `PRIVATE_KEY` /
 
 ```ts
 import { ContractClient } from "@propamm/sdk/client";
-import { PropAmmRouter, frontendFee } from "@propamm/sdk/router";
+import { PropAmmRouter } from "@propamm/sdk/router";
 import { ETH_SENTINEL, USDC, WETH } from "@propamm/sdk/common/tokens";
 import { PAMMS } from "@propamm/sdk/common/pamms";
 import { applySlippage, deadlineIn, parseEther, parseUnits } from "@propamm/sdk/common/helpers";
@@ -87,15 +87,18 @@ const hash = await router.swap({
 const result = await router.waitForSwap(hash);
 // { hash, receipt, amountIn, amountOut, executedVenue, recipient, fee? }
 
-// One-shot: swap + wait combined
-const res = await router.swapViaVenueAndWait(PAMMS.kipseli, {
-  tokenIn: USDC,
-  tokenOut: WETH,
-  amountIn,
-  amountOutMin: minOut,
-  recipient: me,
-  deadline: deadlineIn(300),
-});
+// One-shot: swap + wait combined, pinned to a single venue
+const res = await router.swapAndWait(
+  {
+    tokenIn: USDC,
+    tokenOut: WETH,
+    amountIn,
+    amountOutMin: minOut,
+    recipient: me,
+    deadline: deadlineIn(300),
+  },
+  { venues: [PAMMS.kipseli] },
+);
 
 // Native ETH input: sentinel token, msg.value attached automatically
 await router.swapAndWait({
@@ -107,12 +110,12 @@ await router.swapAndWait({
   deadline: deadlineIn(300),
 });
 
-// Frontend fee variants (bps validated against MAX_FEE_BPS)
-await router.swapWithFee(params, frontendFee(25, feeRecipient));
+// Frontend fee: optional, bps validated in [1, MAX_FEE_BPS]
+await router.swap(params, { frontendFee: { bps: 25, recipient: feeRecipient } });
 
 // Pinned / selected-venue quotes
-const pinned = await router.quoteVenue(PAMMS.fermi, USDC, WETH, amountIn);
-const subset = await router.quoteSelectedVenues([PAMMS.fermi, PAMMS.bebop], USDC, WETH, amountIn);
+const pinned = await router.quote(USDC, WETH, amountIn, { venues: [PAMMS.fermi] });
+const subset = await router.quote(USDC, WETH, amountIn, { venues: [PAMMS.fermi, PAMMS.bebop] });
 
 // Views
 await router.getWhitelistedVenues();
@@ -176,7 +179,7 @@ await client.write({
 Source modules map 1:1 to import paths (`src/<path>.ts` → `@propamm/sdk/<path>`):
 
 - `src/client.ts` — generic viem-based contract client (`read`/`call`/`write`/`waitForTransaction`); `call` accepts state and block overrides.
-- `src/router/index.ts` — `PropAmmRouter` bindings (quotes, swaps, `*AndWait` variants, `waitForSwap`, `approve`/`allowance`, views) plus `frontendFee` and `MAX_FEE_BPS`.
+- `src/router/index.ts` — `PropAmmRouter` bindings (`quote`, `swap`, `swapAndWait`, `waitForSwap`, `approve`/`allowance`, views) plus `MAX_FEE_BPS`.
 - `src/router/abi.ts` — human-readable `PropAMMRouter` ABI (functions, events, errors).
 - `src/overrides/index.ts` — pAMM state-override sources (`OverridesWsSource`, `OverridesRpcSource`), payload parsing, and `toStateOverride`.
 - `src/common/tokens.ts` — `ETH_SENTINEL` and mainnet token addresses.
