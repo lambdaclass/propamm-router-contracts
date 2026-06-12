@@ -6,6 +6,10 @@ import type { PathsForPages } from 'waku/router'
 // prettier-ignore
 type Page =
   | { path: '/'; render: 'static' }
+  | { path: '/propamms'; render: 'static' }
+  | { path: '/propamms/makers'; render: 'static' }
+  | { path: '/propamms/router'; render: 'static' }
+  | { path: '/propamms/takers'; render: 'static' }
   | { path: '/rust/getting-started'; render: 'static' }
   | { path: '/rust/helpers'; render: 'static' }
   | { path: '/rust/installation'; render: 'static' }

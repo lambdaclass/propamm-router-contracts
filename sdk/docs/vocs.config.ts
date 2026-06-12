@@ -17,6 +17,16 @@ export default defineConfig({
   sidebar: [
     { text: "Introduction", link: "/" },
     {
+      text: "PropAMMs",
+      collapsed: false,
+      items: [
+        { text: "What is a PropAMM?", link: "/propamms" },
+        { text: "Makers", link: "/propamms/makers" },
+        { text: "Takers", link: "/propamms/takers" },
+        { text: "PropAMMRouter", link: "/propamms/router" },
+      ],
+    },
+    {
       text: "TypeScript SDK",
       collapsed: false,
       items: [
