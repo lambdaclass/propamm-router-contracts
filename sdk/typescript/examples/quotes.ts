@@ -1,8 +1,6 @@
 /**
  * Quotes: how much ETH you get for $100, $1,000, and $10,000 USDC.
- *
- * Shows the simplest read-only use of the SDK — no account or private key is
- * needed for quotes. Larger trades typically get a worse rate, so the per-USDC
+ * Larger trades typically get a worse rate, so the per-USDC
  * output drifts down as the size grows. Re-quotes every 5 seconds until you
  * stop it with Ctrl-C.
  *
