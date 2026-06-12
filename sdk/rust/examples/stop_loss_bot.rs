@@ -7,8 +7,9 @@
 //!
 //! We hold ETH and poll the router for how much USDC `AMOUNT_IN` ETH would fetch
 //! right now. The first time that quote falls below `THRESHOLD` USDC we sell the
-//! whole amount and exit. Configure with AMOUNT_IN / THRESHOLD / POLL_SECS (and
-//! the usual RPC_URL / PRIVATE_KEY / ROUTER_ADDRESS / SLIPPAGE_BPS).
+//! whole amount and exit. Set THRESHOLD (required, USDC floor to sell at);
+//! optionally tune AMOUNT_IN / POLL_SECS (and the usual RPC_URL / PRIVATE_KEY /
+//! ROUTER_ADDRESS / SLIPPAGE_BPS).
 //!
 //! Defaults target a local anvil mainnet fork (`anvil --fork-url <mainnet rpc>`)
 //! with anvil's default funded account and the mainnet router deployment.
@@ -50,7 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Bot strategy: sell AMOUNT_IN ETH once a quote dips below THRESHOLD USDC.
     let amount_in = parse_ether(&std::env::var("AMOUNT_IN").unwrap_or_else(|_| "1".into()))?;
     let threshold = parse_units(
-        &std::env::var("THRESHOLD").unwrap_or_else(|_| "1600".into()),
+        &std::env::var("THRESHOLD").map_err(|_| "THRESHOLD is required (USDC floor to sell at)")?,
         USDC_DECIMALS,
     )?;
     let poll = Duration::from_secs(
