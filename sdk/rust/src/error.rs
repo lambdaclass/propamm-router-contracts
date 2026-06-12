@@ -1,4 +1,7 @@
+use ethrex_common::H256;
 use thiserror::Error;
+
+use crate::client::TransactionReceipt;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -13,6 +16,19 @@ pub enum Error {
         message: String,
         data: Option<Vec<u8>>,
     },
+
+    /// A mined transaction reverted on-chain. Carries the receipt so callers
+    /// can inspect status, gas, and logs without another RPC round-trip.
+    #[error("transaction {hash:#x} reverted")]
+    TransactionReverted {
+        hash: H256,
+        receipt: Box<TransactionReceipt>,
+    },
+
+    /// A mined, successful transaction emitted no expected event (e.g. a swap
+    /// with no `Swapped` log — usually the wrong router address or ABI drift).
+    #[error("transaction {hash:#x} emitted no {event} event")]
+    MissingEvent { hash: H256, event: &'static str },
 
     /// ABI encoding/decoding failure.
     #[error("abi error: {0}")]
@@ -29,10 +45,6 @@ pub enum Error {
     /// Invalid caller-supplied input (addresses, fee bounds, keys, URLs, ...).
     #[error("invalid input: {0}")]
     InvalidInput(String),
-
-    /// Anything else.
-    #[error("{0}")]
-    Other(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

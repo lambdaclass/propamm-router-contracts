@@ -237,6 +237,85 @@ fn format_value(value: &Value) -> String {
 mod tests {
     use super::*;
 
+    fn u256_word(n: u64) -> [u8; 32] {
+        U256::from(n).to_big_endian()
+    }
+
+    fn address_word(address: Address) -> [u8; 32] {
+        let mut word = [0u8; 32];
+        word[12..].copy_from_slice(address.as_bytes());
+        word
+    }
+
+    fn address_with_last_byte(byte: u8) -> Address {
+        let mut bytes = [0u8; 20];
+        bytes[19] = byte;
+        Address::from_slice(&bytes)
+    }
+
+    #[test]
+    fn decode_values_handles_narrow_integer_widths() {
+        // ethrex maps every uintN to a 256-bit Value::Uint; pin that for the
+        // uint24/uint16 return + error decodes the SDK relies on.
+        let values = decode_values("uint24", &u256_word(42)).unwrap();
+        assert_eq!(as_u256(&values[0]).unwrap(), U256::from(42u64));
+
+        let mut data = u256_word(7).to_vec();
+        data.extend_from_slice(&u256_word(16));
+        let values = decode_values("uint16,uint16", &data).unwrap();
+        assert_eq!(as_u256(&values[0]).unwrap(), U256::from(7u64));
+        assert_eq!(as_u256(&values[1]).unwrap(), U256::from(16u64));
+    }
+
+    #[test]
+    fn decode_error_names_narrow_width_custom_errors() {
+        let mut fallback = keccak("InvalidFallbackFee(uint24)".as_bytes()).as_bytes()[..4].to_vec();
+        fallback.extend_from_slice(&u256_word(3000));
+        assert_eq!(
+            decode_error(&fallback).as_deref(),
+            Some("InvalidFallbackFee(3000)")
+        );
+
+        let mut fee = keccak("FeeBpsTooHigh(uint16,uint16)".as_bytes()).as_bytes()[..4].to_vec();
+        fee.extend_from_slice(&u256_word(150));
+        fee.extend_from_slice(&u256_word(100));
+        assert_eq!(
+            decode_error(&fee).as_deref(),
+            Some("FeeBpsTooHigh(150, 100)")
+        );
+    }
+
+    #[test]
+    fn decode_error_returns_none_for_unknown_selector() {
+        assert_eq!(decode_error(&[0xde, 0xad, 0xbe, 0xef]), None);
+    }
+
+    #[test]
+    fn swapped_event_data_decodes_in_the_layout_wait_for_swap_expects() {
+        // Swapped data fields (after the 3 indexed leading addresses):
+        // (amountIn, amountOut, recipient, marketMaker).
+        let recipient = address_with_last_byte(0xaa);
+        let market_maker = address_with_last_byte(0xbb);
+        let mut data = u256_word(1000).to_vec();
+        data.extend_from_slice(&u256_word(950));
+        data.extend_from_slice(&address_word(recipient));
+        data.extend_from_slice(&address_word(market_maker));
+
+        let values = decode_values("uint256,uint256,address,address", &data).unwrap();
+        assert_eq!(as_u256(&values[0]).unwrap(), U256::from(1000u64));
+        assert_eq!(as_u256(&values[1]).unwrap(), U256::from(950u64));
+        assert_eq!(as_address(&values[2]).unwrap(), recipient);
+        assert_eq!(as_address(&values[3]).unwrap(), market_maker);
+    }
+
+    #[test]
+    fn topic_as_address_reads_the_low_20_bytes() {
+        // FrontendFeeCharged's feeRecipient arrives as an indexed topic.
+        let recipient = address_with_last_byte(0xcd);
+        let topic = H256(address_word(recipient));
+        assert_eq!(topic_as_address(&topic), recipient);
+    }
+
     /// Selectors verified against `forge inspect PropAMMRouter methodIdentifiers`.
     /// Guards the signature strings — with runtime ABI, a typo here is the
     /// only thing the compiler can't catch.
