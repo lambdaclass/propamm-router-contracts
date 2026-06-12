@@ -1,0 +1,21 @@
+{
+  "name": "propamm-docs",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.4",
+  "type": "module",
+  "scripts": {
+    "dev": "vocs dev",
+    "build": "vocs build",
+    "preview": "vocs preview"
+  },
+  "dependencies": {
+    "vite": "^8.0.16",
+    "vocs": "^2.0.12",
+    "waku": "1.0.0-beta.1"
+  },
+  "devDependencies": {
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  }
+}
