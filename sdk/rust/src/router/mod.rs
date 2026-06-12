@@ -634,15 +634,26 @@ impl PropAmmRouter {
     /// overrides — venues revert when the simulated block context doesn't
     /// match their pushed state.
     async fn resolve_overrides(&self, opts: &QuoteOptions) -> Result<CallOverrides> {
-        let snapshot = match &opts.overrides {
+        // Source-backed arms own an Arc (a cheap pointer clone); the
+        // caller-supplied snapshot is borrowed in place. `owned` keeps the Arc
+        // alive so both resolve to a single `&OverridesSnapshot`, with no deep
+        // copy of the caller's snapshot.
+        let owned;
+        let snapshot: &OverridesSnapshot = match &opts.overrides {
             QuoteOverrides::Skip => return Ok(CallOverrides::default()),
-            QuoteOverrides::Attached => self.overrides.get_overrides().await?,
-            QuoteOverrides::Source(source) => source.get_overrides().await?,
-            QuoteOverrides::Snapshot(snapshot) => Arc::new(snapshot.clone()),
+            QuoteOverrides::Attached => {
+                owned = self.overrides.get_overrides().await?;
+                &owned
+            }
+            QuoteOverrides::Source(source) => {
+                owned = source.get_overrides().await?;
+                &owned
+            }
+            QuoteOverrides::Snapshot(snapshot) => snapshot,
         };
 
         let state = to_state_override(
-            &snapshot,
+            snapshot,
             &ToStateOverrideOptions {
                 pamms: None,
                 skip_bebop_default: opts.skip_bebop_default,
