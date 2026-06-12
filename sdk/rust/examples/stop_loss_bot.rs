@@ -61,7 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let client = ContractClient::connect_with_signer(&rpc_url, &private_key)?;
     let me = client.signer_address().expect("signer configured");
-    
+
     // `PropAmmRouter::new` attaches Titan's streaming overrides source by default, so quotes
     // price against fresh off-chain pAMM liquidity
     let router = PropAmmRouter::new(client, router_address);
