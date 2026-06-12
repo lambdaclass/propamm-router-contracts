@@ -11,9 +11,8 @@
  *   pnpm build
  *   RPC_URL=https://... node examples/quotes.ts
  *
- * RPC_URL is required (e.g. a mainnet node or a local anvil mainnet fork:
- * `anvil --fork-url <mainnet rpc>`). ROUTER_ADDRESS defaults to the mainnet
- * router deployment.
+ * The RPC_URL environment variable is required (e.g. a mainnet node).
+ * ROUTER_ADDRESS defaults to the mainnet router deployment.
  */
 import { ContractClient } from "@propamm/sdk/client";
 import { PropAmmRouter } from "@propamm/sdk/router";
