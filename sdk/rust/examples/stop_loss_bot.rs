@@ -56,7 +56,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     let poll = Duration::from_secs(
         std::env::var("POLL_SECS")
-            .unwrap_or_else(|_| "1".into())
+            .unwrap_or_else(|_| "2".into())
             .parse()?,
     );
 
