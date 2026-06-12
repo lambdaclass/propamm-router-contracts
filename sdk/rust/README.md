@@ -101,9 +101,11 @@ let stale = router.quote_with(WETH, USDC, amount_in, &opts).await?;
 
 When a snapshot has no Bebop entry, a default slot override zeroes Bebop's
 price so a stale on-chain quote can't win venue selection (disable with
-`skip_bebop_default`). `quote_uniswap_v3` never applies overrides — the
-fallback quoter only reads live pool state. Custom state diffs go through
-`ContractClient::call` with `CallOverrides` directly.
+`skip_bebop_default`). The Uniswap V3 fallback quoter only reads live pool
+state, so pAMM overrides never affect it (pin it via
+`venues: Some(vec![router.fallback_swap_router().await?])` if needed).
+Custom state diffs go through `ContractClient::call` with `CallOverrides`
+directly.
 
 Admin functions (`addVenue`, `pause`, `setPairFee`, ...) have no typed
 methods, but their signatures are in the ABI module — encode and send them
@@ -120,7 +122,7 @@ let hash = client.send(router_address, calldata, None).await?;
 ## Layout
 
 - `src/client.rs` — rex/ethrex-based contract client (`call` with state/block overrides, `send`, `wait_for_transaction`).
-- `src/router/mod.rs` — `PropAmmRouter` bindings (quotes, swaps, `*_and_wait` variants, `wait_for_swap`, `approve`/`allowance`, views) plus `frontend_fee` and `MAX_FEE_BPS`.
+- `src/router/mod.rs` — `PropAmmRouter` bindings (`quote`/`quote_with`, `swap`/`swap_with`, `swap_and_wait`(`_with`), `wait_for_swap`, `approve`/`allowance`, views) plus `MAX_FEE_BPS`.
 - `src/router/abi.rs` — hand-rolled `PropAMMRouter` ABI: signature constants (selector-tested), return/event decoding, and the custom-error table.
 - `src/overrides/mod.rs` — pAMM state-override sources (`OverridesWsSource`, `OverridesRpcSource`), payload parsing, and `to_state_override`.
 - `src/common/tokens.rs` — `ETH_SENTINEL` and mainnet token addresses.

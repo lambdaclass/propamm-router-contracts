@@ -18,11 +18,11 @@ use crate::overrides::{
 };
 use abi::Value;
 
-/// Maximum frontend fee accepted by the `swap_*_with_fee` entrypoints, in bps.
+/// Maximum frontend fee accepted by the router, in bps.
 pub const MAX_FEE_BPS: u16 = 100;
 
-/// Frontend fee for the `swap_*_with_fee` entrypoints — build with
-/// [`frontend_fee`]. Encodes as the contract's `FrontendFee` struct.
+/// Frontend fee skimmed from a swap's output — pass via
+/// [`SwapOptions::frontend_fee`]. Encodes as the contract's `FrontendFee` struct.
 #[derive(Debug, Clone, Copy)]
 pub struct FrontendFee {
     pub bps: u16,
@@ -38,22 +38,6 @@ impl FrontendFee {
     }
 }
 
-/// Validated [`FrontendFee`] builder. Fails if `bps` exceeds [`MAX_FEE_BPS`]
-/// or the recipient is the zero address.
-pub fn frontend_fee(bps: u16, recipient: Address) -> Result<FrontendFee> {
-    if bps > MAX_FEE_BPS {
-        return Err(Error::InvalidInput(format!(
-            "fee bps must be in [0, {MAX_FEE_BPS}], got {bps}"
-        )));
-    }
-    if recipient == Address::zero() {
-        return Err(Error::InvalidInput(
-            "fee recipient must not be the zero address".into(),
-        ));
-    }
-    Ok(FrontendFee { bps, recipient })
-}
-
 /// Common parameters shared by every swap entrypoint.
 #[derive(Debug, Clone)]
 pub struct SwapParams {
@@ -63,7 +47,7 @@ pub struct SwapParams {
     pub token_out: Address,
     /// Exact amount of `token_in` to sell, in atomic units.
     pub amount_in: U256,
-    /// Minimum acceptable amount of `token_out` (net of fee, on the `with_fee` paths).
+    /// Minimum acceptable amount of `token_out` (net of the frontend fee, when one is passed).
     pub amount_out_min: U256,
     /// Address that receives `token_out`.
     pub recipient: Address,
@@ -127,12 +111,32 @@ pub enum QuoteOverrides {
     Snapshot(OverridesSnapshot),
 }
 
-/// Per-call quote options; `Default` mirrors the plain quote methods.
+/// Per-call quote options; `Default` mirrors the plain [`PropAmmRouter::quote`].
 #[derive(Default)]
 pub struct QuoteOptions {
     pub overrides: QuoteOverrides,
     /// Skip injecting the Bebop default slot when no Bebop entry is present.
     pub skip_bebop_default: bool,
+    /// Restrict the quote to these venues: a single entry quotes that venue
+    /// directly, several pick the best among them. Must be non-empty when
+    /// present; `None` quotes across every whitelisted venue.
+    pub venues: Option<Vec<Address>>,
+}
+
+/// Per-swap options; `Default` mirrors the plain [`PropAmmRouter::swap`].
+#[derive(Default)]
+pub struct SwapOptions {
+    /// Restrict the swap to these venues: a single entry executes through
+    /// that venue directly (failing `UnknownVenue` on a bad address), several
+    /// re-quote on-chain and fill via the best of them (unpriceable entries
+    /// are skipped). Must be non-empty when present; `None` swaps through the
+    /// best-quoting venue overall.
+    pub venues: Option<Vec<Address>>,
+    /// Optional frontend fee skimmed from the output. When present the swap
+    /// is routed through the contract's `WithFee` selector; `bps` must be in
+    /// [1, [`MAX_FEE_BPS`]] and the recipient non-zero (validated before
+    /// sending).
+    pub frontend_fee: Option<FrontendFee>,
 }
 
 /// Typed `PropAMMRouter` bindings. Quotes apply pAMM state overrides from the
@@ -196,7 +200,10 @@ impl PropAmmRouter {
             .await
     }
 
-    /// [`Self::quote`] with explicit per-call options.
+    /// [`Self::quote`] with explicit per-call options: `opts.venues` restricts
+    /// the quote (see [`QuoteOptions::venues`]). Restricted quotes fall back
+    /// to the Uniswap V3 quote (reporting the fallback router as `venue`)
+    /// when no listed venue can be priced.
     pub async fn quote_with(
         &self,
         token_in: Address,
@@ -204,105 +211,13 @@ impl PropAmmRouter {
         amount_in: U256,
         opts: &QuoteOptions,
     ) -> Result<Quote> {
-        let args = [
+        let (mode, mut args) = venue_dispatch(opts.venues.as_deref())?;
+        args.extend([
             Value::Address(token_in),
             Value::Address(token_out),
             Value::Uint(amount_in),
-        ];
-        self.quote_call(abi::QUOTE, &args, opts).await
-    }
-
-    /// Quote a specific venue. Falls back to the Uniswap V3 quote (reporting
-    /// the fallback router as `venue`) when the venue cannot be priced.
-    pub async fn quote_venue(
-        &self,
-        venue: Address,
-        token_in: Address,
-        token_out: Address,
-        amount_in: U256,
-    ) -> Result<Quote> {
-        self.quote_venue_with(
-            venue,
-            token_in,
-            token_out,
-            amount_in,
-            &QuoteOptions::default(),
-        )
-        .await
-    }
-
-    /// [`Self::quote_venue`] with explicit per-call options.
-    pub async fn quote_venue_with(
-        &self,
-        venue: Address,
-        token_in: Address,
-        token_out: Address,
-        amount_in: U256,
-        opts: &QuoteOptions,
-    ) -> Result<Quote> {
-        let args = [
-            Value::Address(venue),
-            Value::Address(token_in),
-            Value::Address(token_out),
-            Value::Uint(amount_in),
-        ];
-        self.quote_call(abi::QUOTE_VENUE, &args, opts).await
-    }
-
-    /// Best quote among a caller-supplied set of venues.
-    pub async fn quote_selected_venues(
-        &self,
-        venues: Vec<Address>,
-        token_in: Address,
-        token_out: Address,
-        amount_in: U256,
-    ) -> Result<Quote> {
-        self.quote_selected_venues_with(
-            venues,
-            token_in,
-            token_out,
-            amount_in,
-            &QuoteOptions::default(),
-        )
-        .await
-    }
-
-    /// [`Self::quote_selected_venues`] with explicit per-call options.
-    pub async fn quote_selected_venues_with(
-        &self,
-        venues: Vec<Address>,
-        token_in: Address,
-        token_out: Address,
-        amount_in: U256,
-        opts: &QuoteOptions,
-    ) -> Result<Quote> {
-        let args = [
-            address_array(venues),
-            Value::Address(token_in),
-            Value::Address(token_out),
-            Value::Uint(amount_in),
-        ];
-        self.quote_call(abi::QUOTE_SELECTED_VENUES, &args, opts)
-            .await
-    }
-
-    /// Quote the Uniswap V3 fallback route directly. Never applies overrides —
-    /// the fallback quoter only reads live on-chain pool state.
-    pub async fn quote_uniswap_v3(
-        &self,
-        token_in: Address,
-        token_out: Address,
-        amount_in: U256,
-    ) -> Result<U256> {
-        let args = [
-            Value::Address(token_in),
-            Value::Address(token_out),
-            Value::Uint(amount_in),
-        ];
-        let data = self
-            .call_router(abi::QUOTE_UNISWAP_V3, &args, &CallOverrides::default())
-            .await?;
-        abi::as_u256(&abi::decode_values("uint256", &data)?[0])
+        ]);
+        self.quote_call(mode.quote_selector(), &args, opts).await
     }
 
     //-------//
@@ -314,120 +229,42 @@ impl PropAmmRouter {
 
     /// Swap through the best-quoting venue.
     pub async fn swap(&self, params: &SwapParams) -> Result<H256> {
-        self.send_swap(abi::SWAP, params.values(), params).await
+        self.swap_with(params, &SwapOptions::default()).await
     }
 
-    /// Best-venue swap that skims a frontend fee from the output.
-    pub async fn swap_with_fee(&self, params: &SwapParams, fee: FrontendFee) -> Result<H256> {
-        let mut args = params.values();
-        args.push(fee.to_value());
-        self.send_swap(abi::SWAP_WITH_FEE, args, params).await
-    }
-
-    /// Swap through an explicit venue (a whitelisted propAMM or the fallback router).
-    pub async fn swap_via_venue(&self, venue: Address, params: &SwapParams) -> Result<H256> {
-        let mut args = vec![Value::Address(venue)];
+    /// [`Self::swap`] with explicit per-call options: `opts.venues` restricts
+    /// the swap (see [`SwapOptions::venues`]) and `opts.frontend_fee` routes
+    /// the call through the contract's `WithFee` selector, which skims the
+    /// fee from the output.
+    pub async fn swap_with(&self, params: &SwapParams, opts: &SwapOptions) -> Result<H256> {
+        let (mode, mut args) = venue_dispatch(opts.venues.as_deref())?;
         args.extend(params.values());
-        self.send_swap(abi::SWAP_VIA_VENUE, args, params).await
-    }
-
-    /// Explicit-venue swap that skims a frontend fee from the output.
-    pub async fn swap_via_venue_with_fee(
-        &self,
-        venue: Address,
-        params: &SwapParams,
-        fee: FrontendFee,
-    ) -> Result<H256> {
-        let mut args = vec![Value::Address(venue)];
-        args.extend(params.values());
-        args.push(fee.to_value());
-        self.send_swap(abi::SWAP_VIA_VENUE_WITH_FEE, args, params)
+        if let Some(fee) = &opts.frontend_fee {
+            validate_fee(fee)?;
+            // The `WithFee` selectors take the same tuple plus the fee struct last.
+            args.push(fee.to_value());
+        }
+        let signature = mode.swap_selector(opts.frontend_fee.is_some());
+        // Native-ETH input is signalled by the sentinel and paid via msg.value.
+        let value = (params.token_in == ETH_SENTINEL).then_some(params.amount_in);
+        self.client
+            .send(self.address, encode(signature, &args)?, value)
             .await
     }
 
-    /// Swap through the best of a caller-supplied set of venues.
-    pub async fn swap_via_selected_venues(
-        &self,
-        venues: Vec<Address>,
-        params: &SwapParams,
-    ) -> Result<H256> {
-        let mut args = vec![address_array(venues)];
-        args.extend(params.values());
-        self.send_swap(abi::SWAP_VIA_SELECTED_VENUES, args, params)
-            .await
-    }
-
-    /// Selected-venues swap that skims a frontend fee from the output.
-    pub async fn swap_via_selected_venues_with_fee(
-        &self,
-        venues: Vec<Address>,
-        params: &SwapParams,
-        fee: FrontendFee,
-    ) -> Result<H256> {
-        let mut args = vec![address_array(venues)];
-        args.extend(params.values());
-        args.push(fee.to_value());
-        self.send_swap(abi::SWAP_VIA_SELECTED_VENUES_WITH_FEE, args, params)
-            .await
-    }
-
-    //----------------//
-    // Combined swaps //
-    //----------------//
-    // Same as the methods above, but wait for the receipt and decode the result.
-
+    /// Same as [`Self::swap`], but waits for the receipt and decodes the result.
     pub async fn swap_and_wait(&self, params: &SwapParams) -> Result<SwapResult> {
         self.wait_for_swap(self.swap(params).await?).await
     }
 
-    pub async fn swap_with_fee_and_wait(
+    /// Same as [`Self::swap_with`], but waits for the receipt and decodes the result.
+    pub async fn swap_and_wait_with(
         &self,
         params: &SwapParams,
-        fee: FrontendFee,
+        opts: &SwapOptions,
     ) -> Result<SwapResult> {
-        self.wait_for_swap(self.swap_with_fee(params, fee).await?)
+        self.wait_for_swap(self.swap_with(params, opts).await?)
             .await
-    }
-
-    pub async fn swap_via_venue_and_wait(
-        &self,
-        venue: Address,
-        params: &SwapParams,
-    ) -> Result<SwapResult> {
-        self.wait_for_swap(self.swap_via_venue(venue, params).await?)
-            .await
-    }
-
-    pub async fn swap_via_venue_with_fee_and_wait(
-        &self,
-        venue: Address,
-        params: &SwapParams,
-        fee: FrontendFee,
-    ) -> Result<SwapResult> {
-        self.wait_for_swap(self.swap_via_venue_with_fee(venue, params, fee).await?)
-            .await
-    }
-
-    pub async fn swap_via_selected_venues_and_wait(
-        &self,
-        venues: Vec<Address>,
-        params: &SwapParams,
-    ) -> Result<SwapResult> {
-        self.wait_for_swap(self.swap_via_selected_venues(venues, params).await?)
-            .await
-    }
-
-    pub async fn swap_via_selected_venues_with_fee_and_wait(
-        &self,
-        venues: Vec<Address>,
-        params: &SwapParams,
-        fee: FrontendFee,
-    ) -> Result<SwapResult> {
-        self.wait_for_swap(
-            self.swap_via_selected_venues_with_fee(venues, params, fee)
-                .await?,
-        )
-        .await
     }
 
     /// Wait until a swap transaction is mined and decode its outcome from the
@@ -672,19 +509,65 @@ impl PropAmmRouter {
             }),
         })
     }
+}
 
-    async fn send_swap(
-        &self,
-        signature: &str,
-        args: Vec<Value>,
-        params: &SwapParams,
-    ) -> Result<H256> {
-        // Native-ETH input is signalled by the sentinel and paid via msg.value.
-        let value = (params.token_in == ETH_SENTINEL).then_some(params.amount_in);
-        self.client
-            .send(self.address, encode(signature, &args)?, value)
-            .await
+/// Venue-restriction mode resolved from an options' `venues` field.
+#[derive(Clone, Copy)]
+enum VenueMode {
+    All,
+    Single,
+    Selected,
+}
+
+impl VenueMode {
+    fn quote_selector(self) -> &'static str {
+        match self {
+            Self::All => abi::QUOTE,
+            Self::Single => abi::QUOTE_VENUE,
+            Self::Selected => abi::QUOTE_SELECTED_VENUES,
+        }
     }
+
+    fn swap_selector(self, with_fee: bool) -> &'static str {
+        match (self, with_fee) {
+            (Self::All, false) => abi::SWAP,
+            (Self::All, true) => abi::SWAP_WITH_FEE,
+            (Self::Single, false) => abi::SWAP_VIA_VENUE,
+            (Self::Single, true) => abi::SWAP_VIA_VENUE_WITH_FEE,
+            (Self::Selected, false) => abi::SWAP_VIA_SELECTED_VENUES,
+            (Self::Selected, true) => abi::SWAP_VIA_SELECTED_VENUES_WITH_FEE,
+        }
+    }
+}
+
+/// Resolve a venue restriction into the selector mode and its leading args: a
+/// single venue targets the direct `Venue` entrypoint, several the
+/// `SelectedVenues` one. Empty restrictions fail — omit `venues` instead.
+fn venue_dispatch(venues: Option<&[Address]>) -> Result<(VenueMode, Vec<Value>)> {
+    match venues {
+        None => Ok((VenueMode::All, vec![])),
+        Some([]) => Err(Error::InvalidInput(
+            "venues must not be empty — omit it to use every whitelisted venue".into(),
+        )),
+        Some([venue]) => Ok((VenueMode::Single, vec![Value::Address(*venue)])),
+        Some(venues) => Ok((VenueMode::Selected, vec![address_array(venues.to_vec())])),
+    }
+}
+
+/// Fails unless the fee has bps in [1, [`MAX_FEE_BPS`]] and a non-zero recipient.
+fn validate_fee(fee: &FrontendFee) -> Result<()> {
+    if !(1..=MAX_FEE_BPS).contains(&fee.bps) {
+        return Err(Error::InvalidInput(format!(
+            "fee bps must be in [1, {MAX_FEE_BPS}], got {}",
+            fee.bps
+        )));
+    }
+    if fee.recipient == Address::zero() {
+        return Err(Error::InvalidInput(
+            "fee recipient must not be the zero address".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn encode(signature: &str, args: &[Value]) -> Result<Vec<u8>> {
