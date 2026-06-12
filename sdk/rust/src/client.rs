@@ -94,16 +94,21 @@ impl ContractClient {
             from: self.signer_address(),
             ..Default::default()
         };
-        let state = overrides.state.clone().unwrap_or_default();
-        let block = overrides.block.clone().unwrap_or_default();
+        // Borrow the caller's override sets directly — cloning would deep-copy
+        // the merged slot-diff map on every call. Empty defaults are cheap
+        // (no heap allocation) and only used when an override is absent.
+        let default_state = StateOverrideSet::default();
+        let default_block = BlockOverrideSet::default();
+        let state = overrides.state.as_ref().unwrap_or(&default_state);
+        let block = overrides.block.as_ref().unwrap_or(&default_block);
 
         let raw = call_with_overrides(
             &self.client,
             to,
             calldata.into(),
             tx_overrides,
-            &state,
-            &block,
+            state,
+            block,
         )
         .await
         .map_err(parse_call_error)?;

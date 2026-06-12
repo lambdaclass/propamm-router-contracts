@@ -273,7 +273,10 @@ impl PropAmmRouter {
     pub async fn wait_for_swap(&self, hash: H256) -> Result<SwapResult> {
         let receipt = self.client.wait_for_transaction(hash).await?;
         if !receipt.receipt.status {
-            return Err(Error::Other(format!("swap transaction {hash:#x} reverted")));
+            return Err(Error::TransactionReverted {
+                hash,
+                receipt: Box::new(receipt),
+            });
         }
 
         let swapped_topic = abi::event_topic(abi::SWAPPED_EVENT);
@@ -314,12 +317,11 @@ impl PropAmmRouter {
             }
         }
 
-        let (amount_in, amount_out, recipient, market_maker) = swapped.ok_or_else(|| {
-            Error::Other(format!(
-                "transaction {hash:#x} emitted no Swapped event from {:#x}",
-                self.address
-            ))
-        })?;
+        let (amount_in, amount_out, recipient, market_maker) =
+            swapped.ok_or(Error::MissingEvent {
+                hash,
+                event: "Swapped",
+            })?;
 
         Ok(SwapResult {
             hash,
@@ -469,15 +471,26 @@ impl PropAmmRouter {
     /// overrides — venues revert when the simulated block context doesn't
     /// match their pushed state.
     async fn resolve_overrides(&self, opts: &QuoteOptions) -> Result<CallOverrides> {
-        let snapshot = match &opts.overrides {
+        // Source-backed arms own an Arc (a cheap pointer clone); the
+        // caller-supplied snapshot is borrowed in place. `owned` keeps the Arc
+        // alive so both resolve to a single `&OverridesSnapshot`, with no deep
+        // copy of the caller's snapshot.
+        let owned;
+        let snapshot: &OverridesSnapshot = match &opts.overrides {
             QuoteOverrides::Skip => return Ok(CallOverrides::default()),
-            QuoteOverrides::Attached => self.overrides.get_overrides().await?,
-            QuoteOverrides::Source(source) => source.get_overrides().await?,
-            QuoteOverrides::Snapshot(snapshot) => snapshot.clone(),
+            QuoteOverrides::Attached => {
+                owned = self.overrides.get_overrides().await?;
+                &owned
+            }
+            QuoteOverrides::Source(source) => {
+                owned = source.get_overrides().await?;
+                &owned
+            }
+            QuoteOverrides::Snapshot(snapshot) => snapshot,
         };
 
         let state = to_state_override(
-            &snapshot,
+            snapshot,
             &ToStateOverrideOptions {
                 pamms: None,
                 skip_bebop_default: opts.skip_bebop_default,
