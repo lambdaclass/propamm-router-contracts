@@ -7,7 +7,7 @@
  * Build the SDK first, then run (Node >= 22.18 runs TypeScript directly):
  *
  *   pnpm build
- *   RPC_URL=https://... node examples/quotes.ts
+ *   RPC_URL=https://... node examples/price-feed.ts
  *
  * The RPC_URL environment variable is required (e.g. a mainnet node).
  * ROUTER_ADDRESS defaults to the mainnet router deployment.
