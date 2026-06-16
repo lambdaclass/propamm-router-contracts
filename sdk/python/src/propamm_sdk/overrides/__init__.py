@@ -263,9 +263,11 @@ class OverridesWsSource(OverridesSource):
         self.first_frame_timeout = first_frame_timeout
         self.idle_timeout = idle_timeout
 
-        # The background listener is the only writer of `_snapshot`/`_has_frame`;
-        # readers only `copy()` (no await), so single-threaded asyncio keeps these
-        # consistent without a lock.
+        # No lock guards this shared state: asyncio is single-threaded and only
+        # switches coroutines at `await`, so a block with no `await` is already
+        # atomic. The writer (`_handle_frame`) is fully synchronous, and the
+        # reader's snapshot read (`copy()`) is synchronous too, i.e. neither holds a
+        # half-updated view across an `await`, so no inconsistent reads are possible.
         self._snapshot = OverridesSnapshot()
         self._has_frame = False
         self._closed = False
@@ -310,7 +312,7 @@ class OverridesWsSource(OverridesSource):
         """Spawn the listener if it isn't running (never started, or exited on idle/error)."""
         if self._task is None or self._task.done():
             self._frame_event.clear()
-            self._task = asyncio.ensure_future(self._run())
+            self._task = asyncio.create_task(self._run())
 
     async def _run(self) -> None:
         """Background listener: connect, accumulate frames, reconnect, exit when idle."""
