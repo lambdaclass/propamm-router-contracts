@@ -10,7 +10,7 @@ import {FERMI_ROUTER} from "../src/interfaces/IFermiSwapper.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockV3SwapRouter} from "./mocks/MockV3SwapRouter.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
-import {MockFermi} from "./mocks/MockFermi.sol";
+import {MockFermi, MockFermiReverting} from "./mocks/MockFermi.sol";
 
 /// @title PropAMMRouterFermiTest
 /// @notice Covers the bespoke FermiSwap dispatch (`fermiSwapWithAllowances` /
@@ -124,5 +124,78 @@ contract PropAMMRouterFermiTest is Test {
         assertEq(tokenOut.balanceOf(user), net);
         assertEq(tokenOut.balanceOf(feeRecipient), fee);
         assertEq(tokenOut.balanceOf(address(router)), 0);
+    }
+
+    /// A reverting Fermi (venue down / wrong interface) must NOT bubble up:
+    /// `_coreSwap` wraps `_dispatchVenue` in a try/catch so the bespoke
+    /// `venue == FERMI_ROUTER` arm degrades to the always-available Uniswap
+    /// fallback. `executedVenue == address(swapRouter)` (not `FERMI_ROUTER`)
+    /// proves the catch arm engaged.
+    function test_swapViaVenueV1_fermiReverts_fallsBackToUniswap() public {
+        // Replace the happy-path mock with one whose entrypoints revert.
+        vm.etch(FERMI_ROUTER, address(new MockFermiReverting()).code);
+
+        uint256 amountIn = 1_000e18;
+        uint256 fallbackOut = 990e18;
+        tokenIn.mint(user, amountIn);
+        vm.prank(user);
+        tokenIn.approve(address(router), amountIn);
+
+        // Fund + arm the Uniswap fallback (the swap router) to deliver `fallbackOut`.
+        tokenOut.mint(address(swapRouter), fallbackOut);
+        swapRouter.setAmountOut(fallbackOut);
+
+        vm.prank(user);
+        (uint256 amountOut, address executedVenue) = router.swapViaVenueV1(
+            FERMI_ROUTER, address(tokenIn), address(tokenOut), amountIn, fallbackOut, user, block.timestamp + 1
+        );
+
+        assertEq(executedVenue, address(swapRouter), "fell back to the Uniswap venue, not fermi");
+        assertEq(amountOut, fallbackOut, "delivered the fallback amount");
+        assertEq(tokenOut.balanceOf(user), fallbackOut, "user received the fallback output");
+        // The reverting venue pulled nothing; the fallback consumed the tokenIn.
+        assertEq(tokenIn.balanceOf(FERMI_ROUTER), 0, "reverting fermi pulled no tokenIn");
+        assertEq(tokenIn.balanceOf(address(swapRouter)), amountIn, "fallback pulled the tokenIn");
+        assertEq(tokenIn.balanceOf(address(router)), 0, "router holds no tokenIn");
+        assertEq(tokenIn.allowance(address(router), FERMI_ROUTER), 0, "no residual fermi allowance");
+        assertEq(tokenOut.balanceOf(address(router)), 0, "router holds no tokenOut");
+    }
+
+    /// Fermi filling BELOW `amountOutMin` must also fall back: `_dispatchVenue`
+    /// re-checks the delivered delta and reverts, and the same `_coreSwap`
+    /// try/catch turns that into the Uniswap fallback. The revert rolls back BOTH
+    /// the under-delivered `tokenOut` and the `tokenIn` the venue pulled, so the
+    /// router is left whole for the fallback — asserted via the restored balances.
+    function test_swapViaVenueV1_fermiUnderDelivers_fallsBackToUniswap() public {
+        uint256 amountIn = 1_000e18;
+        uint256 fermiShort = 500e18; // below amountOutMin -> _dispatchVenue reverts
+        uint256 amountOutMin = 990e18;
+        uint256 fallbackOut = 990e18;
+
+        tokenIn.mint(user, amountIn);
+        vm.prank(user);
+        tokenIn.approve(address(router), amountIn);
+
+        // The happy-path mock (etched in setUp) delivers its whole tokenOut
+        // balance; fund it short so the delivered delta misses `amountOutMin`.
+        tokenOut.mint(FERMI_ROUTER, fermiShort);
+
+        // Arm the fallback to clear `amountOutMin`.
+        tokenOut.mint(address(swapRouter), fallbackOut);
+        swapRouter.setAmountOut(fallbackOut);
+
+        vm.prank(user);
+        (uint256 amountOut, address executedVenue) = router.swapViaVenueV1(
+            FERMI_ROUTER, address(tokenIn), address(tokenOut), amountIn, amountOutMin, user, block.timestamp + 1
+        );
+
+        assertEq(executedVenue, address(swapRouter), "under-fill fell back to Uniswap");
+        assertEq(amountOut, fallbackOut, "delivered the fallback amount");
+        assertEq(tokenOut.balanceOf(user), fallbackOut, "user received only the fallback output");
+        // The under-delivery (and the venue's tokenIn pull) were rolled back.
+        assertEq(tokenOut.balanceOf(FERMI_ROUTER), fermiShort, "fermi's tokenOut roll back intact");
+        assertEq(tokenIn.balanceOf(FERMI_ROUTER), 0, "fermi's tokenIn pull rolled back");
+        assertEq(tokenIn.balanceOf(address(router)), 0, "router holds no tokenIn");
+        assertEq(tokenOut.balanceOf(address(router)), 0, "router holds no tokenOut");
     }
 }

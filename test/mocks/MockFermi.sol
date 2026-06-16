@@ -34,3 +34,24 @@ contract MockFermi {
         return (uint256(amountSpecified), IERC20(tokenOut).balanceOf(address(this)));
     }
 }
+
+/// @notice FermiSwap stand-in whose entrypoints always revert — a "venue is down
+/// / wrong interface" stub. Etched at `FERMI_ROUTER` in place of `MockFermi` to
+/// drive the `_coreSwap` try/catch into the Uniswap fallback for the bespoke
+/// `venue == FERMI_ROUTER` dispatch (the catch arm the live fork test can't reach,
+/// since its deployed bytecode dispatches the migrated Fermi venue generically).
+contract MockFermiReverting {
+    error FermiDown();
+
+    function fermiSwapWithAllowances(address, address, int256, uint256, address)
+        external
+        pure
+        returns (uint256, uint256)
+    {
+        revert FermiDown();
+    }
+
+    function quoteAmounts(address, address, int256) external pure returns (uint256, uint256) {
+        revert FermiDown();
+    }
+}
