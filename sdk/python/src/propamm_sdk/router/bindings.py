@@ -13,6 +13,7 @@ from typing import Any
 from eth_abi import decode as abi_decode
 from eth_typing import ChecksumAddress
 from eth_utils import to_checksum_address
+from web3.constants import ADDRESS_ZERO
 from web3.logs import DISCARD
 
 from ..client import ContractClient
@@ -185,7 +186,6 @@ class PropAmmRouter:
         function = getattr(self._contract.functions, _QUOTE_FUNCS[mode])(
             *venue_args, token_in, token_out, amount_in
         )
-
         overrides = await self._resolve_overrides(opts)
         if overrides is None:
             amount_out, venue = await function.call()
@@ -365,7 +365,7 @@ def _validate_fee(fee: FrontendFee) -> None:
     """Raises unless the fee has bps in [1, MAX_FEE_BPS] and a non-zero recipient."""
     if not isinstance(fee.bps, int) or fee.bps < 1 or fee.bps > MAX_FEE_BPS:
         raise InvalidInputError(f"fee bps must be an integer in [1, {MAX_FEE_BPS}], got {fee.bps}")
-    if int(fee.recipient, 16) == 0:
+    if fee.recipient.lower() == ADDRESS_ZERO:
         raise InvalidInputError("fee recipient must not be the zero address")
 
 
