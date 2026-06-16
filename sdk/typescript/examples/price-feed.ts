@@ -15,6 +15,7 @@
 import { ContractClient } from "@propamm/sdk/client";
 import { PropAmmRouter } from "@propamm/sdk/router";
 import { ETH_SENTINEL, USDC } from "@propamm/sdk/common/tokens";
+import { PAMMS } from "@propamm/sdk/common/pamms";
 import { formatUnits, parseUnits } from "@propamm/sdk/common/helpers";
 import { anvil } from "@propamm/sdk/common/chains";
 import type { Address } from "@propamm/sdk";
@@ -37,17 +38,35 @@ const INTERVAL_MS = 5000;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Map venue addresses back to readable names. PAMMS covers the pAMM venues;
+// the Uniswap V3 fallback isn't in it, so fetch its address once and label it.
+const venueNames: Record<string, string> = {};
+for (const [name, address] of Object.entries(PAMMS)) {
+  venueNames[address.toLowerCase()] = name;
+}
+venueNames[(await router.fallbackSwapRouter()).toLowerCase()] = "uniswap";
+// Additional deployments not covered by PAMMS.
+venueNames["0xb1076fE3AB5e28005C7c323Bac5AC06a680d452e".toLowerCase()] = "fermi";
+venueNames["0x042b83b4043019D8f2a83C77240a50793FF7420d".toLowerCase()] = "fermi";
+venueNames["0xdB13ad0fcD134E9c48f2fDaEa8f6751a0F5349ca".toLowerCase()] = "bebop";
+venueNames["0xcCdda3258aA079ce45E6aa6F35829a6612eb7C45".toLowerCase()] = "kipseli";
+
+// Returns the venue's name, or its raw address if we don't have one.
+const venueName = (address: Address) => venueNames[address.toLowerCase()] ?? address;
+
 // Re-quote every 5 seconds until interrupted (Ctrl-C).
 while (true) {
   for (const dollars of [100, 1000, 10000]) {
     const amountIn = parseUnits(String(dollars), USDC_DECIMALS);
     // `quote` is an eth_call simulation; ETH_SENTINEL as `tokenOut` asks for
     // native ETH out. It returns the best venue's output and that venue.
-    const { amountOut } = await router.quote(USDC, ETH_SENTINEL, amountIn);
+    const { amountOut, venue } = await router.quote(USDC, ETH_SENTINEL, amountIn);
     const eth = Number(formatUnits(amountOut, ETH_DECIMALS));
     // Implied ETH price in dollars: USDC paid divided by ETH received.
     const price = dollars / eth;
-    console.log(`${dollars} USDC -> ${eth} ETH @ ${price.toFixed(2)} USDC/ETH`);
+    console.log(
+      `${dollars} USDC -> ${eth} ETH @ ${price.toFixed(2)} USDC/ETH via ${venueName(venue)}`,
+    );
   }
   console.log(); // blank line between rounds for readability
   await sleep(INTERVAL_MS);
