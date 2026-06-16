@@ -3,7 +3,7 @@
 Install the SDK first, then run:
 
     pip install -e .
-    python examples/getting_started.py
+    python3 examples/getting_started.py
 
 Defaults target a local anvil mainnet fork (`anvil --fork-url <mainnet rpc>`)
 with anvil's default funded account and the mainnet router deployment.

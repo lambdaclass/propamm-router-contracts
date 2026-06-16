@@ -21,10 +21,13 @@ import abc
 import asyncio
 import copy
 import json
+import ssl
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any
 
 import aiohttp
+import certifi
 import websockets
 
 from ..common.pamms import BEBOP
@@ -32,6 +35,17 @@ from ..error import OverridesError, TimeoutError
 
 DEFAULT_OVERRIDES_RPC_URL = "https://rpc.titanbuilder.xyz"
 DEFAULT_OVERRIDES_WS_URL = "wss://rpc.titanbuilder.xyz/ws/pamm_quote_stream"
+
+
+@lru_cache(maxsize=1)
+def _ssl_context() -> ssl.SSLContext:
+    """TLS context backed by certifi's CA bundle.
+
+    Avoids relying on the system cert store, which is empty on some Python
+    builds (e.g. python.org installers on macOS) and would otherwise make every
+    secure connection fail to verify.
+    """
+    return ssl.create_default_context(cafile=certifi.where())
 
 #: Bebop prices from a single registry slot. When a snapshot carries no Bebop
 #: entry, :func:`to_state_override` zeroes this slot by default so a stale
@@ -205,9 +219,10 @@ class OverridesRpcSource(OverridesSource):
 
     async def get_overrides(self) -> OverridesSnapshot:
         request = {"jsonrpc": "2.0", "id": 1, "method": "titan_getPammStateOverrides", "params": []}
+        ssl_ctx = _ssl_context() if self.url.startswith("https") else None
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.post(self.url, json=request) as response:
+                async with session.post(self.url, json=request, ssl=ssl_ctx) as response:
                     if response.status != 200:
                         raise OverridesError(
                             f"overrides RPC request failed with status {response.status}"
@@ -304,9 +319,10 @@ class OverridesWsSource(OverridesSource):
     async def _run(self) -> None:
         """Background read loop: connect, merge frames, exit when idle."""
         backoff = _RECONNECT_INITIAL
+        ssl_ctx = _ssl_context() if self.url.startswith("wss") else None
         while not self._closed:
             try:
-                async with websockets.connect(self.url) as ws:
+                async with websockets.connect(self.url, ssl=ssl_ctx) as ws:
                     backoff = _RECONNECT_INITIAL
                     while not self._closed:
                         idle_remaining = self._idle_remaining()

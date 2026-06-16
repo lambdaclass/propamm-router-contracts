@@ -105,8 +105,11 @@ class ContractClient:
             raise ClientError(
                 "ContractClient was created without a signer; sends are unavailable"
             )
+        # web3 fills gas, fees, and chain id in `build_transaction`, but not the
+        # nonce — supply it ourselves (pending, so back-to-back sends don't collide).
+        nonce = await self.w3.eth.get_transaction_count(self.account.address, "pending")
         tx = await function.build_transaction(
-            {"from": self.account.address, "value": value or 0}
+            {"from": self.account.address, "value": value or 0, "nonce": nonce}
         )
         signed = self.account.sign_transaction(tx)
         raw = getattr(signed, "raw_transaction", None) or signed.rawTransaction
