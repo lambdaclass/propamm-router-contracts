@@ -26,7 +26,9 @@ contract MockFermi {
         IERC20(tokenOut).transfer(recipient, amountOut);
     }
 
-    function quoteAmounts(address, /* tokenIn */ address tokenOut, int256 amountSpecified)
+    /// @dev First arg (`tokenIn`) is unused; the quote is derived from the mock's
+    /// own `tokenOut` balance.
+    function quoteAmounts(address, address tokenOut, int256 amountSpecified)
         external
         view
         returns (uint256 amountIn, uint256 amountOut)
