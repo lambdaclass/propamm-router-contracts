@@ -47,6 +47,7 @@ def _ssl_context() -> ssl.SSLContext:
     """
     return ssl.create_default_context(cafile=certifi.where())
 
+
 #: Bebop prices from a single registry slot. When a snapshot carries no Bebop
 #: entry, :func:`to_state_override` zeroes this slot by default so a stale
 #: on-chain Bebop price cannot win a best-quote selection it could never fill.
@@ -204,8 +205,7 @@ class OverridesSource(abc.ABC):
     """Anything quotes can pull override snapshots from."""
 
     @abc.abstractmethod
-    async def get_overrides(self) -> OverridesSnapshot | None:
-        ...
+    async def get_overrides(self) -> OverridesSnapshot | None: ...
 
     async def close(self) -> None:
         """Immediate, permanent teardown. Default: no-op."""

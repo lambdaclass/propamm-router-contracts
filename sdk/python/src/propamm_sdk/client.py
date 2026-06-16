@@ -102,9 +102,7 @@ class ContractClient:
         web3 fills nonce, gas, fees, and chain id via ``build_transaction``.
         """
         if self.account is None:
-            raise ClientError(
-                "ContractClient was created without a signer; sends are unavailable"
-            )
+            raise ClientError("ContractClient was created without a signer; sends are unavailable")
         # web3 fills gas, fees, and chain id in `build_transaction`, but not the
         # nonce — supply it ourselves (pending, so back-to-back sends don't collide).
         nonce = await self.w3.eth.get_transaction_count(self.account.address, "pending")

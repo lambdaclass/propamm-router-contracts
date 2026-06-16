@@ -104,3 +104,41 @@ jobs:
         env:
           REQUIRE_CONTRACT_ABI: "1"
         run: cargo test
+
+  sdk-python:
+    name: SDK Python (lint / format / tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    defaults:
+      run:
+        working-directory: sdk/python
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: sdk/python/pyproject.toml
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Build contract ABI artifact
+        working-directory: .
+        run: forge build src/PropAMMRouter.sol
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Check formatting
+        run: ruff format --check .
+
+      - name: Run tests
+        run: pytest

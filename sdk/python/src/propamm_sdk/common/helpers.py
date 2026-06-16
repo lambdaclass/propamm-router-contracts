@@ -44,9 +44,7 @@ def parse_address(value: str) -> ChecksumAddress:
     except ValueError as exc:
         raise InvalidInputError(f"invalid address {value}: {exc}") from exc
     if len(data) != 20:
-        raise InvalidInputError(
-            f"invalid address {value}: expected 20 bytes, got {len(data)}"
-        )
+        raise InvalidInputError(f"invalid address {value}: expected 20 bytes, got {len(data)}")
     return to_checksum_address(data)
 
 

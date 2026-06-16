@@ -224,7 +224,9 @@ class PropAmmRouter:
         value = params.amount_in if _eq(params.token_in, ETH_SENTINEL) else None
         return await self.client.send(function, value)
 
-    async def swap_and_wait(self, params: SwapParams, opts: SwapOptions | None = None) -> SwapResult:
+    async def swap_and_wait(
+        self, params: SwapParams, opts: SwapOptions | None = None
+    ) -> SwapResult:
         """Same as :meth:`swap`, but waits for the receipt and decodes the result."""
         return await self.wait_for_swap(await self.swap(params, opts))
 
@@ -353,9 +355,7 @@ def _venue_dispatch(venues: list[str] | None) -> tuple[str, list]:
     if venues is None:
         return "all", []
     if len(venues) == 0:
-        raise InvalidInputError(
-            "venues must not be empty — omit it to use every whitelisted venue"
-        )
+        raise InvalidInputError("venues must not be empty — omit it to use every whitelisted venue")
     if len(venues) == 1:
         return "single", [to_checksum_address(venues[0])]
     return "selected", [[to_checksum_address(v) for v in venues]]

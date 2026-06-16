@@ -73,9 +73,7 @@ def test_parse_overrides_message_drops_empty_and_invalid_entries():
     raw = {
         "not-an-address": {"stateOverride": {}},
         "0x00000000000000000000000000000000000000ff": {
-            "stateOverride": {
-                "0x0000000000000000000000000000000000000011": {"stateDiff": {}}
-            }
+            "stateOverride": {"0x0000000000000000000000000000000000000011": {"stateDiff": {}}}
         },
     }
     assert parse_overrides_message(raw).per_pamm == {}
@@ -113,11 +111,15 @@ def test_to_state_override_keeps_real_bebop_diffs_without_injecting_default():
 
 
 def test_parse_word_accepts_padded_and_unpadded_hex():
-    raw = {"0x0000000000000000000000000000000000000abc": {
-        "stateOverride": {"0x0000000000000000000000000000000000000011": {
-            "stateDiff": {"0x1": "0x2a", "0x2": "0x1"}
-        }}
-    }}
+    raw = {
+        "0x0000000000000000000000000000000000000abc": {
+            "stateOverride": {
+                "0x0000000000000000000000000000000000000011": {
+                    "stateDiff": {"0x1": "0x2a", "0x2": "0x1"}
+                }
+            }
+        }
+    }
     snapshot = parse_overrides_message(raw)
     contract = "0x0000000000000000000000000000000000000011"
     slots = snapshot.per_pamm["0x0000000000000000000000000000000000000abc"][contract]

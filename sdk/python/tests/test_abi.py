@@ -20,7 +20,11 @@ def test_name_error_names_narrow_width_custom_errors():
     fallback = function_signature_to_4byte_selector("InvalidFallbackFee(uint24)") + _u256(3000)
     assert abi.name_error(fallback) == "InvalidFallbackFee(3000)"
 
-    fee = function_signature_to_4byte_selector("FeeBpsTooHigh(uint16,uint16)") + _u256(150) + _u256(100)
+    fee = (
+        function_signature_to_4byte_selector("FeeBpsTooHigh(uint16,uint16)")
+        + _u256(150)
+        + _u256(100)
+    )
     assert abi.name_error(fee) == "FeeBpsTooHigh(150, 100)"
 
 
