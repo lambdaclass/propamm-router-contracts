@@ -245,14 +245,13 @@ class PropAmmRouter:
             raise MissingEventError(tx_hash, "Swapped")
 
         fee_event = self._extract_event_from_receipt("FrontendFeeCharged", receipt)
-        fee = (
-            FeeCharged(
+        if fee_event is not None:
+            fee = FeeCharged(
                 recipient=to_checksum_address(fee_event["args"]["feeRecipient"]),
                 amount=fee_event["args"]["feeAmount"],
             )
-            if fee_event is not None
-            else None
-        )
+        else:
+            fee = None
 
         args = swapped["args"]
         return SwapResult(
