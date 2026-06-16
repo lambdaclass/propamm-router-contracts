@@ -30,6 +30,7 @@ import websockets
 from .._tls import ssl_context as _ssl_context
 from ..common.pamms import BEBOP
 from ..error import OverridesError, TimeoutError
+from eth_utils import to_checksum_address
 
 DEFAULT_OVERRIDES_RPC_URL = "https://rpc.titanbuilder.xyz"
 DEFAULT_OVERRIDES_WS_URL = "wss://rpc.titanbuilder.xyz/ws/pamm_quote_stream"
@@ -177,8 +178,6 @@ def to_state_override(
 
     if bebop_default and not has_bebop:
         merged.setdefault(_BEBOP_LOWER, {})[int(BEBOP_DEFAULT_SLOT, 16)] = 0
-
-    from eth_utils import to_checksum_address
 
     return {
         to_checksum_address(address): {
