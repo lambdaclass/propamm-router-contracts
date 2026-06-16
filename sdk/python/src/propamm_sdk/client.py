@@ -18,6 +18,7 @@ from web3 import AsyncWeb3
 from web3.contract import AsyncContract
 from web3.contract.async_contract import AsyncContractFunction
 
+from ._tls import ssl_context
 from .common.accounts import account_from_key
 from .error import ClientError, RevertError
 
@@ -34,7 +35,10 @@ class ContractClient:
     """
 
     def __init__(self, rpc_url: str, account: LocalAccount | None = None) -> None:
-        self.w3 = AsyncWeb3(AsyncWeb3.AsyncHTTPProvider(rpc_url))
+        # Verify TLS against certifi's CA bundle rather than the (sometimes empty)
+        # system store, so an https RPC works regardless of how Python was installed.
+        request_kwargs = {"ssl": ssl_context()} if rpc_url.startswith("https") else {}
+        self.w3 = AsyncWeb3(AsyncWeb3.AsyncHTTPProvider(rpc_url, request_kwargs=request_kwargs))
         self.account = account
 
     @classmethod

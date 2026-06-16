@@ -21,31 +21,18 @@ import abc
 import asyncio
 import copy
 import json
-import ssl
 from dataclasses import dataclass, field
-from functools import lru_cache
 from typing import Any
 
 import aiohttp
-import certifi
 import websockets
 
+from .._tls import ssl_context as _ssl_context
 from ..common.pamms import BEBOP
 from ..error import OverridesError, TimeoutError
 
 DEFAULT_OVERRIDES_RPC_URL = "https://rpc.titanbuilder.xyz"
 DEFAULT_OVERRIDES_WS_URL = "wss://rpc.titanbuilder.xyz/ws/pamm_quote_stream"
-
-
-@lru_cache(maxsize=1)
-def _ssl_context() -> ssl.SSLContext:
-    """TLS context backed by certifi's CA bundle.
-
-    Avoids relying on the system cert store, which is empty on some Python
-    builds (e.g. python.org installers on macOS) and would otherwise make every
-    secure connection fail to verify.
-    """
-    return ssl.create_default_context(cafile=certifi.where())
 
 
 #: Bebop prices from a single registry slot. When a snapshot carries no Bebop
@@ -276,74 +263,85 @@ class OverridesWsSource(OverridesSource):
         self.first_frame_timeout = first_frame_timeout
         self.idle_timeout = idle_timeout
 
+        # The background listener is the only writer of `_snapshot`/`_has_frame`;
+        # readers only `copy()` (no await), so single-threaded asyncio keeps these
+        # consistent without a lock.
         self._snapshot = OverridesSnapshot()
         self._has_frame = False
         self._closed = False
         self._last_use = 0.0
+        self._last_error: Exception | None = None
         self._task: asyncio.Task | None = None
         self._frame_event = asyncio.Event()
-        self._lock = asyncio.Lock()
 
     async def get_overrides(self) -> OverridesSnapshot:
-        async with self._lock:
-            if self._closed:
-                raise OverridesError("overrides source is closed")
-            self._last_use = asyncio.get_event_loop().time()
-            if self._task is None or self._task.done():
-                self._frame_event.clear()
-                self._task = asyncio.ensure_future(self._run())
-            if self._has_frame:
-                return self._snapshot.copy()
+        """Return the latest accumulated snapshot.
 
-        try:
-            await asyncio.wait_for(self._frame_event.wait(), self.first_frame_timeout)
-        except asyncio.TimeoutError as exc:
-            raise TimeoutError(
-                f"no overrides frame received within {self.first_frame_timeout}s"
-            ) from exc
+        Reads the buffered frame if the listener already has one; otherwise
+        ensures the listener is running and waits for the first frame.
+        """
+        if self._closed:
+            raise OverridesError("overrides source is closed")
+        self._last_use = asyncio.get_event_loop().time()
+        self._ensure_running()
 
-        async with self._lock:
-            if self._closed:
-                raise OverridesError("overrides source is closed")
-            return self._snapshot.copy()
+        if not self._has_frame:
+            try:
+                await asyncio.wait_for(self._frame_event.wait(), self.first_frame_timeout)
+            except asyncio.TimeoutError as exc:
+                detail = f": {self._last_error}" if self._last_error else ""
+                raise TimeoutError(
+                    f"no overrides frame received within {self.first_frame_timeout}s{detail}"
+                ) from exc
+
+        if self._closed:
+            raise OverridesError("overrides source is closed")
+        return self._snapshot.copy()
 
     async def close(self) -> None:
-        async with self._lock:
-            self._closed = True
-            task = self._task
-            self._task = None
-            self._frame_event.set()
+        """Immediate, permanent teardown."""
+        self._closed = True
+        self._frame_event.set()
+        task, self._task = self._task, None
         if task is not None:
             task.cancel()
 
+    def _ensure_running(self) -> None:
+        """Spawn the listener if it isn't running (never started, or exited on idle/error)."""
+        if self._task is None or self._task.done():
+            self._frame_event.clear()
+            self._task = asyncio.ensure_future(self._run())
+
     async def _run(self) -> None:
-        """Background read loop: connect, merge frames, exit when idle."""
+        """Background listener: connect, accumulate frames, reconnect, exit when idle."""
         backoff = _RECONNECT_INITIAL
         ssl_ctx = _ssl_context() if self.url.startswith("wss") else None
-        while not self._closed:
+        while not self._closed and self._idle_remaining() > 0:
             try:
                 async with websockets.connect(self.url, ssl=ssl_ctx) as ws:
                     backoff = _RECONNECT_INITIAL
                     while not self._closed:
-                        idle_remaining = self._idle_remaining()
-                        if idle_remaining <= 0:
-                            self._has_frame = False
-                            return
+                        timeout = self._idle_remaining()
+                        if timeout <= 0:
+                            break
                         try:
-                            message = await asyncio.wait_for(ws.recv(), idle_remaining)
+                            message = await asyncio.wait_for(ws.recv(), timeout)
                         except asyncio.TimeoutError:
-                            continue
+                            continue  # re-check idle, then keep listening
                         self._handle_frame(message)
             except asyncio.CancelledError:
                 raise
-            except Exception:  # noqa: BLE001 - reconnect on any transport error
-                pass
+            except Exception as exc:  # noqa: BLE001 - reconnect on any transport error
+                self._last_error = exc
 
             if self._closed or self._idle_remaining() <= 0:
-                self._has_frame = False
-                return
+                break
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, _RECONNECT_MAX)
+
+        # Keep accumulated entries (frames are deltas) but require a fresh frame
+        # after a respawn, so a stale snapshot isn't served as current.
+        self._has_frame = False
 
     def _idle_remaining(self) -> float:
         elapsed = asyncio.get_event_loop().time() - self._last_use
