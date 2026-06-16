@@ -38,7 +38,7 @@ contract SetupRouterVariables is Script {
     /// retune it later via `setFallbackFee`.
     uint24 public constant FALLBACK_FEE = 3000;
 
-    /// @notice The pairs/tiers to seed. Edit here; both `run()` and the test use this.
+    /// @notice The pairs/tiers to seed. Both `run()` and the test use this.
     function seedData() public pure returns (address[] memory tokenA, address[] memory tokenB, uint24[] memory fees) {
         tokenA = new address[](3);
         tokenB = new address[](3);
@@ -59,8 +59,8 @@ contract SetupRouterVariables is Script {
     }
 
     /// @notice The default propAMM venues to whitelist — the same set `initialize`
-    /// adds on a fresh deploy via its inline `_addVenue` calls. Edit here; both
-    /// `run()` and the test use this.
+    /// adds on a fresh deploy via its inline `_addVenue` calls. Both `run()` and
+    /// the test use this.
     function venues() public pure returns (address[] memory list) {
         list = new address[](3);
         list[0] = FERMI_ROUTER;
