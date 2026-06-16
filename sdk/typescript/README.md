@@ -15,12 +15,12 @@ pnpm typecheck
 Quote and swap 1 ETH for USDC through the best venue:
 
 ```ts
-import { ContractClient } from "@propamm/sdk/client";
-import { PropAmmRouter } from "@propamm/sdk/router";
-import { ETH_SENTINEL, USDC } from "@propamm/sdk/common/tokens";
-import { applySlippage, deadlineIn, formatUnits, parseEther } from "@propamm/sdk/common/helpers";
-import { mainnet } from "@propamm/sdk/common/chains";
-import { privateKeyToAccount } from "@propamm/sdk/common/accounts";
+import { ContractClient } from "propamm/client";
+import { PropAmmRouter } from "propamm/router";
+import { ETH_SENTINEL, USDC } from "propamm/common/tokens";
+import { applySlippage, deadlineIn, formatUnits, parseEther } from "propamm/common/helpers";
+import { mainnet } from "propamm/common/chains";
+import { privateKeyToAccount } from "propamm/common/accounts";
 
 const account = privateKeyToAccount("0x...");
 const client = new ContractClient({ rpcUrl: "https://...", chain: mainnet, account });
@@ -55,13 +55,13 @@ mainnet router deployment; override with `RPC_URL` / `PRIVATE_KEY` /
 ## Usage
 
 ```ts
-import { ContractClient } from "@propamm/sdk/client";
-import { PropAmmRouter } from "@propamm/sdk/router";
-import { ETH_SENTINEL, USDC, WETH } from "@propamm/sdk/common/tokens";
-import { PAMMS } from "@propamm/sdk/common/pamms";
-import { applySlippage, deadlineIn, parseEther, parseUnits } from "@propamm/sdk/common/helpers";
-import { mainnet } from "@propamm/sdk/common/chains";
-import { privateKeyToAccount } from "@propamm/sdk/common/accounts";
+import { ContractClient } from "propamm/client";
+import { PropAmmRouter } from "propamm/router";
+import { ETH_SENTINEL, USDC, WETH } from "propamm/common/tokens";
+import { PAMMS } from "propamm/common/pamms";
+import { applySlippage, deadlineIn, parseEther, parseUnits } from "propamm/common/helpers";
+import { mainnet } from "propamm/common/chains";
+import { privateKeyToAccount } from "propamm/common/accounts";
 
 const client = new ContractClient({
   rpcUrl: "http://localhost:8545",
@@ -144,7 +144,7 @@ Two sources are available; both need no authentication:
   each quote. No connection to manage.
 
 ```ts
-import { OverridesRpcSource, OverridesWsSource } from "@propamm/sdk/overrides";
+import { OverridesRpcSource, OverridesWsSource } from "propamm/overrides";
 
 // default: streaming WS source created automatically
 const router = new PropAmmRouter(client, ROUTER);
@@ -164,7 +164,7 @@ methods, but they are in the exported ABI — call them through the generic
 client:
 
 ```ts
-import { propAmmRouterAbi } from "@propamm/sdk/router/abi";
+import { propAmmRouterAbi } from "propamm/router/abi";
 
 await client.write({
   address: router.address,
@@ -176,7 +176,7 @@ await client.write({
 
 ## Layout
 
-Source modules map 1:1 to import paths (`src/<path>.ts` → `@propamm/sdk/<path>`):
+Source modules map 1:1 to import paths (`src/<path>.ts` → `propamm/<path>`):
 
 - `src/client.ts` — generic viem-based contract client (`read`/`call`/`write`/`waitForTransaction`); `call` accepts state and block overrides.
 - `src/router/index.ts` — `PropAmmRouter` bindings (`quote`, `swap`, `swapAndWait`, `waitForSwap`, `approve`/`allowance`, views) plus `MAX_FEE_BPS`.
