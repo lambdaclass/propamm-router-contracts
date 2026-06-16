@@ -106,7 +106,7 @@ contract PropAMMRouter is
 
         _addVenue(FERMI_ROUTER);
         _addVenue(BEBOP_ROUTER);
-        _addVenue(0x71e790dd841c8A9061487cb3E78C288E75cE0B3d); // Kipseli
+        _addVenue(0x342b8458161137d0203605Fa51E4363c1445ADCD); // Kipseli
 
         __AccessManaged_init(authority_);
         __Pausable_init();

@@ -3,8 +3,8 @@ use hex_literal::hex;
 
 // PropAMM venues seeded into the router whitelist at initialization.
 pub const FERMI: Address = H160(hex!("5979458912F80B96d30D4220af8E2e4925A33320"));
-pub const BEBOP: Address = H160(hex!("160141A205F5dDcf096BA3F48B7eD21EB52c62EA"));
-pub const KIPSELI: Address = H160(hex!("71e790dd841c8A9061487cb3E78C288E75cE0B3d"));
+pub const BEBOP: Address = H160(hex!("dB13ad0fcD134E9c48f2fDaEa8f6751a0F5349ca"));
+pub const KIPSELI: Address = H160(hex!("342b8458161137d0203605Fa51E4363c1445ADCD"));
 
 /// Curated propAMM name → venue address mapping, for the `venues` option of
 /// quotes and swaps.

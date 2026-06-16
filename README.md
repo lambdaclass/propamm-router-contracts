@@ -7,9 +7,9 @@ Single-hop router that quotes and executes swaps against a proprietary AMM (Ferm
 The Prop AMM router contract is deployed on mainnet at `0x4ddf368080cd7946db5b459ad591c350158175e1`.
 
 The PropAMMs the router interacts with are deployed at:
-- Bebop: `0x160141a205f5ddcf096ba3f48b7ed21eb52c62ea`
+- Bebop: `0xdb13ad0fcd134e9c48f2fdaea8f6751a0f5349ca`
 - Fermi: `0x5979458912f80b96d30d4220af8e2e4925a33320`
-- Kipseli: `0x71e790dd841c8A9061487cb3E78C288E75cE0B3d`
+- Kipseli: `0x342b8458161137d0203605Fa51E4363c1445ADCD`
 
 ## Overview
 
@@ -117,8 +117,8 @@ The response is keyed by proprietary AMM router address, with one entry per venu
   "result": {
     "blockNumber": "0x...",
     "0x5979458912f80b96d30d4220af8e2e4925a33320": { "stateOverride": { ... } },
-    "0x160141a205f5ddcf096ba3f48b7ed21eb52c62ea": { "stateOverride": { ... } },
-    "0x71e790dd841c8a9061487cb3e78c288e75ce0b3d": { "stateOverride": { ... } }
+    "0xdb13ad0fcd134e9c48f2fdaea8f6751a0f5349ca": { "stateOverride": { ... } },
+    "0x342b8458161137d0203605fa51e4363c1445adcd": { "stateOverride": { ... } }
   }
 }
 ```
@@ -136,7 +136,7 @@ USDC=0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48
 # === Pick the venue to quote (only edit this line) ===
 # Venues are addresses: the Uniswap V3 fallback is the SwapRouter02 address;
 # the three proprietary AMM routers are listed in the table below.
-VENUE_ADDR=0x71e790dd841c8a9061487cb3e78c288e75ce0b3d    # Kipseli
+VENUE_ADDR=0x342b8458161137d0203605fa51e4363c1445adcd    # Kipseli
 
 # WETH stores balances in storage slot 3 (mapping(address => uint)).
 # balanceOf[ROUTER] lives at keccak256(abi.encode(ROUTER, 3)).
@@ -169,8 +169,8 @@ This prints `amountOut`, e.g. `2115659878` (≈ 2115.66 USDC for 1 WETH, with US
 |-------|--------------|
 | Uniswap V3 fallback (SwapRouter02) | `0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45` — skip the Titan call |
 | FermiSwap | `0x5979458912f80b96d30d4220af8e2e4925a33320` |
-| Kipseli | `0x71e790dd841c8a9061487cb3e78c288e75ce0b3d` |
-| Bebop | `0x160141a205f5ddcf096ba3f48b7ed21eb52c62ea` |
+| Kipseli | `0x342b8458161137d0203605fa51e4363c1445adcd` |
+| Bebop | `0xdb13ad0fcd134e9c48f2fdaea8f6751a0f5349ca` |
 
 ### Pausing the contract
 

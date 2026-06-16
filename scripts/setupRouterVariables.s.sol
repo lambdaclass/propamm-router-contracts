@@ -64,7 +64,7 @@ contract SetupRouterVariables is Script {
     function venues() public pure returns (address[] memory list) {
         list = new address[](3);
         list[0] = FERMI_ROUTER;
-        list[1] = 0x71e790dd841c8A9061487cb3E78C288E75cE0B3d;
+        list[1] = 0x342b8458161137d0203605Fa51E4363c1445ADCD;
         list[2] = BEBOP_ROUTER;
     }
 

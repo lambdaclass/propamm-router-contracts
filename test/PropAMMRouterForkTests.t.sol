@@ -27,7 +27,7 @@ contract PropAMMRouterForkTests is Test {
 
     /// @dev A newly deployed Kipseli PAMM, distinct from the built-in
     /// `KIPSELI_PAMM` address.
-    address constant NEW_KIPSELI_PAMM = 0x71e790dd841c8A9061487cb3E78C288E75cE0B3d;
+    address constant NEW_KIPSELI_PAMM = 0x342b8458161137d0203605Fa51E4363c1445ADCD;
     address constant NEW_FERMI_ROUTER = 0x5979458912F80B96d30D4220af8E2e4925A33320;
 
     IPropAMMRouter router;
@@ -80,6 +80,12 @@ contract PropAMMRouterForkTests is Test {
     /// time so it lands inside the registry's freshness window regardless of
     /// which block the fork pins to.
     function _updateNewKipseliPrice() internal {
+        // FIXME(kipseli-migration): NEW_KIPSELI_PAMM was repointed to
+        // 0x342b8458161137d0203605Fa51E4363c1445ADCD, but the price-lane replay
+        // below is still the SUPERSEDED 0x71e790dd… deployment's data. Until the
+        // target/lane/slot are refreshed from the *new* Kipseli's mainnet updater
+        // tx, this venue stays unpriced on the fork, so `test_swapViaVenueV1NewKipseli`
+        // falls back to Uniswap and fails the `executedVenue == venue` assertion.
         // Target, lane, and price slot all taken from the mainnet updater tx
         // 0xf7be932bf666b0fb4d10bbd0cd844876e24f0e75dfd11772907dff94e90513e8.
         // Pricing lane scoped to this target (the account that calls `getState`)
