@@ -240,11 +240,11 @@ class PropAmmRouter:
         if receipt["status"] != 1:
             raise TransactionRevertedError(tx_hash, receipt)
 
-        swapped = self._own_event("Swapped", receipt)
+        swapped = self._extract_event_from_receipt("Swapped", receipt)
         if swapped is None:
             raise MissingEventError(tx_hash, "Swapped")
 
-        fee_event = self._own_event("FrontendFeeCharged", receipt)
+        fee_event = self._extract_event_from_receipt("FrontendFeeCharged", receipt)
         fee = (
             FeeCharged(
                 recipient=to_checksum_address(fee_event["args"]["feeRecipient"]),
@@ -309,10 +309,13 @@ class PropAmmRouter:
 
     # ------ Internals ------
 
-    def _own_event(self, name: str, receipt: Any) -> dict | None:
+    def _extract_event_from_receipt(self, name: str, receipt: Any) -> dict | None:
         """First log of ``name`` emitted by this router (web3 decodes the args)."""
         events = getattr(self._contract.events, name)().process_receipt(receipt, errors=DISCARD)
-        return next((ev for ev in events if _eq(ev["address"], self.address)), None)
+        for event in events:
+            if _eq(event["address"], self.address):
+                return event
+        return None
 
     async def _resolve_overrides(self, opts: QuoteOptions) -> dict[str, Any] | None:
         """Resolve a quote's override options into ``eth_call`` override kwargs.
