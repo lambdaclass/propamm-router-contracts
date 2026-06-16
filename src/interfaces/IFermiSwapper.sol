@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.35;
 
-// Address of the FermiSwap router used for FermiSwap-routed swaps.
-address constant FERMI_ROUTER = 0xb1076fE3AB5e28005C7c323Bac5AC06a680d452e;
+// Address of the FermiSwap router used for FermiSwap-routed swaps. This is the
+// Fermi venue whitelisted on the live mainnet router (see the README "Deployed
+// Contracts" section); `_dispatchVenue` / `_dispatchQuoteVenue` route this venue
+// through the bespoke `IFermiSwapper` interface below.
+address constant FERMI_ROUTER = 0x5979458912F80B96d30D4220af8E2e4925A33320;
 
 interface IFermiSwapper {
     function fermiSwapWithAllowances(
