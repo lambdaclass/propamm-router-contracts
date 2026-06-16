@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 description = "Rust SDK for interacting with the PropAMM contracts"
 license = "MIT"
+repository = "https://github.com/lambdaclass/propamm-router-contracts"
+homepage = "https://github.com/lambdaclass/propamm-router-contracts/tree/main/sdk/rust#readme"
+readme = "README.md"
 
 [dependencies]
 # Transport: rex / ethrex (git deps; ethrex pinned to the tag rex uses).
