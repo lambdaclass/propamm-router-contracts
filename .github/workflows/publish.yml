@@ -40,6 +40,9 @@ jobs:
       (github.event_name == 'workflow_dispatch' && (inputs.package == 'npm' || inputs.package == 'both'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Gated publish: add required reviewers and scope NPM_TOKEN to this
+    # environment under Settings -> Environments -> npm-publish.
+    environment: npm-publish
 
     # id-token: write enables npm provenance (a signed link from the published
     # package back to this workflow run). Public repo + public package only.
@@ -77,9 +80,18 @@ jobs:
         run: pnpm build
 
       - name: Publish to npm
-        run: pnpm publish --no-git-checks --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # Treat an already-published version as success so re-runs don't fail.
+        run: |
+          OUTPUT=$(pnpm publish --no-git-checks --provenance 2>&1) || {
+            if echo "$OUTPUT" | grep -qE "previously published|cannot publish over"; then
+              echo "propamm already published at this version, continuing"
+            else
+              echo "$OUTPUT"
+              exit 1
+            fi
+          }
 
   crate:
     name: crates.io (propamm)
@@ -88,6 +100,9 @@ jobs:
       (github.event_name == 'workflow_dispatch' && (inputs.package == 'crate' || inputs.package == 'both'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Gated publish: add required reviewers and scope CARGO_REGISTRY_TOKEN to
+    # this environment under Settings -> Environments -> crates-io-publish.
+    environment: crates-io-publish
 
     defaults:
       run:
@@ -107,4 +122,13 @@ jobs:
       - name: Publish to crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish
+        # Treat an already-published version as success so re-runs don't fail.
+        run: |
+          OUTPUT=$(cargo publish 2>&1) || {
+            if echo "$OUTPUT" | grep -q "already exists"; then
+              echo "propamm already published at this version, continuing"
+            else
+              echo "$OUTPUT"
+              exit 1
+            fi
+          }
