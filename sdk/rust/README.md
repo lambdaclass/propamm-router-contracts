@@ -29,10 +29,10 @@ cargo fmt --check
 Quote and swap 1 ETH for USDC through the best venue:
 
 ```rust
-use propamm_sdk::common::helpers::{apply_slippage, deadline_in, parse_ether};
-use propamm_sdk::common::tokens::{ETH_SENTINEL, USDC};
-use propamm_sdk::router::SwapParams;
-use propamm_sdk::{ContractClient, PropAmmRouter};
+use propamm::common::helpers::{apply_slippage, deadline_in, parse_ether};
+use propamm::common::tokens::{ETH_SENTINEL, USDC};
+use propamm::router::SwapParams;
+use propamm::{ContractClient, PropAmmRouter};
 
 let client = ContractClient::connect_with_signer("https://...", "0x...")?;
 let me = client.signer_address().unwrap();
@@ -85,8 +85,8 @@ Two sources implement the `OverridesSource` trait; both need no authentication:
 
 ```rust
 use std::sync::Arc;
-use propamm_sdk::overrides::{OverridesRpcSource, OverridesWsSource};
-use propamm_sdk::router::{QuoteOptions, QuoteOverrides};
+use propamm::overrides::{OverridesRpcSource, OverridesWsSource};
+use propamm::router::{QuoteOptions, QuoteOverrides};
 
 // default: streaming WS source created automatically
 let router = PropAmmRouter::new(client, router_address);
@@ -112,7 +112,7 @@ methods, but their signatures are in the ABI module — encode and send them
 through the generic client:
 
 ```rust
-use propamm_sdk::router::abi::{self, Value};
+use propamm::router::abi::{self, Value};
 use ethrex_l2_sdk::calldata::encode_calldata;
 
 let calldata = encode_calldata(abi::ADD_VENUE, &[Value::Address(venue)])?;

@@ -4,7 +4,7 @@ name: Publish
 #
 # Triggered by pushing a version tag (each package versions independently):
 #   npm-v1.2.3    -> publishes sdk/typescript (`propamm`) to npm
-#   crate-v1.2.3  -> publishes sdk/rust (`propamm-sdk`) to crates.io
+#   crate-v1.2.3  -> publishes sdk/rust (`propamm`) to crates.io
 #
 # Or run manually from the Actions tab via "Run workflow" and pick a package.
 #
@@ -82,7 +82,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   crate:
-    name: crates.io (propamm-sdk)
+    name: crates.io (propamm)
     if: |
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/crate-v')) ||
       (github.event_name == 'workflow_dispatch' && (inputs.package == 'crate' || inputs.package == 'both'))
