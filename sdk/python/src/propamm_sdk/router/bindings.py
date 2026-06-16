@@ -1,7 +1,8 @@
-"""``PropAMMRouter`` bindings, built on the generic :class:`ContractClient`.
+"""``PropAMMRouter`` bindings, built on a web3 contract object.
 
-Method names drop the on-chain ``V1`` suffix: ``router.swap(...)`` calls
-``swapV1``, and so on.
+web3 encodes calldata, decodes return values and events, and builds/signs
+transactions. Method names drop the on-chain ``V1`` suffix: ``router.swap(...)``
+calls ``swapV1``, and so on.
 """
 
 from __future__ import annotations
@@ -9,8 +10,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from eth_abi import decode as abi_decode
 from eth_typing import ChecksumAddress
 from eth_utils import to_checksum_address
+from web3.logs import DISCARD
 
 from ..client import ContractClient
 from ..common.tokens import ETH_SENTINEL
@@ -21,7 +24,7 @@ from ..overrides import (
     OverridesWsSource,
     to_state_override,
 )
-from . import abi
+from .abi import ERC20_ABI, ROUTER_ABI, name_error
 
 #: Maximum frontend fee accepted by the router, in bps.
 MAX_FEE_BPS = 100
@@ -124,18 +127,18 @@ class SwapOptions:
     frontend_fee: FrontendFee | None = None
 
 
-# Quote selector per venue-restriction mode.
-_QUOTE_SELECTORS = {
-    "all": abi.QUOTE,
-    "single": abi.QUOTE_VENUE,
-    "selected": abi.QUOTE_SELECTED_VENUES,
+# Quote function name per venue-restriction mode.
+_QUOTE_FUNCS = {
+    "all": "quoteV1",
+    "single": "quoteVenueV1",
+    "selected": "quoteSelectedVenuesV1",
 }
 
-# Swap selector pairs (plain / frontend-fee) per venue-restriction mode.
-_SWAP_SELECTORS = {
-    "all": (abi.SWAP, abi.SWAP_WITH_FEE),
-    "single": (abi.SWAP_VIA_VENUE, abi.SWAP_VIA_VENUE_WITH_FEE),
-    "selected": (abi.SWAP_VIA_SELECTED_VENUES, abi.SWAP_VIA_SELECTED_VENUES_WITH_FEE),
+# Swap function names (plain / frontend-fee) per venue-restriction mode.
+_SWAP_FUNCS = {
+    "all": ("swapV1", "swapWithFeeV1"),
+    "single": ("swapViaVenueV1", "swapViaVenueWithFeeV1"),
+    "selected": ("swapViaSelectedVenuesV1", "swapViaSelectedVenuesWithFeeV1"),
 }
 
 
@@ -155,12 +158,14 @@ class PropAmmRouter:
         self.client = client
         self.address = to_checksum_address(address)
         self.overrides: OverridesSource = overrides or OverridesWsSource()
+        self._contract = client.contract(self.address, ROUTER_ABI)
 
     # ------ Quotes ------
     # The quote functions are nonpayable on-chain, so they go through
-    # `ContractClient.call` (eth_call simulation). By default the simulation
-    # carries the latest pAMM state overrides (plus their block
-    # number/timestamp) so venues quote fresh off-chain liquidity.
+    # `eth_call` simulation. By default the simulation carries the latest pAMM
+    # state overrides (plus their block number/timestamp) so venues quote fresh
+    # off-chain liquidity — and that block override is the one thing web3's
+    # `.call()` can't do, so override-carrying quotes go through the raw path.
 
     async def quote(
         self,
@@ -177,11 +182,20 @@ class PropAmmRouter:
         """
         opts = opts or QuoteOptions()
         mode, venue_args = _venue_dispatch(opts.venues)
-        args = [*venue_args, token_in, token_out, amount_in]
+        function = getattr(self._contract.functions, _QUOTE_FUNCS[mode])(
+            *venue_args, token_in, token_out, amount_in
+        )
+
         overrides = await self._resolve_overrides(opts)
-        data = await self._call_router(_QUOTE_SELECTORS[mode], args, overrides)
-        amount_out, venue = abi.decode_values("uint256,address", data)
-        return Quote(amount_out=amount_out, venue=venue)
+        if overrides is None:
+            amount_out, venue = await function.call()
+        else:
+            try:
+                raw = await self.client.call_with_overrides(function, **overrides)
+            except RevertError as error:
+                raise _named_revert(error) from error
+            amount_out, venue = abi_decode(["uint256", "address"], raw)
+        return Quote(amount_out=amount_out, venue=to_checksum_address(venue))
 
     # ------ Swaps ------
     # ETH input: when `token_in` is `ETH_SENTINEL` the router expects
@@ -204,11 +218,11 @@ class PropAmmRouter:
             # The `WithFee` selectors take the same tuple plus the fee struct last.
             args.append((fee.bps, to_checksum_address(fee.recipient)))
 
-        plain, with_fee = _SWAP_SELECTORS[mode]
-        signature = with_fee if fee is not None else plain
+        plain, with_fee = _SWAP_FUNCS[mode]
+        function = getattr(self._contract.functions, with_fee if fee else plain)(*args)
         # Native-ETH input is signalled by the sentinel and paid via msg.value.
         value = params.amount_in if _eq(params.token_in, ETH_SENTINEL) else None
-        return await self.client.send(self.address, abi.encode_calldata(signature, args), value)
+        return await self.client.send(function, value)
 
     async def swap_and_wait(self, params: SwapParams, opts: SwapOptions | None = None) -> SwapResult:
         """Same as :meth:`swap`, but waits for the receipt and decodes the result."""
@@ -224,41 +238,28 @@ class PropAmmRouter:
         if receipt["status"] != 1:
             raise TransactionRevertedError(tx_hash, receipt)
 
-        swapped_topic = abi.event_topic(abi.SWAPPED_EVENT)
-        fee_topic = abi.event_topic(abi.FRONTEND_FEE_CHARGED_EVENT)
-
-        swapped: tuple[int, int, ChecksumAddress, ChecksumAddress] | None = None
-        fee: FeeCharged | None = None
-        for log in receipt["logs"]:
-            if not _eq(log["address"], self.address):
-                continue
-            topics = log["topics"]
-            if not topics:
-                continue
-            topic0 = bytes(topics[0])
-            if topic0 == swapped_topic and swapped is None:
-                # Swapped data fields: (amountIn, amountOut, recipient, marketMaker).
-                amount_in, amount_out, recipient, market_maker = abi.decode_values(
-                    "uint256,uint256,address,address", bytes(log["data"])
-                )
-                swapped = (amount_in, amount_out, recipient, market_maker)
-            elif topic0 == fee_topic and fee is None and len(topics) > 1:
-                # FrontendFeeCharged: feeRecipient is indexed (topic 1),
-                # feeAmount is the only data field.
-                (amount,) = abi.decode_values("uint256", bytes(log["data"]))
-                fee = FeeCharged(recipient=abi.topic_as_address(topics[1]), amount=amount)
-
+        swapped = self._own_event("Swapped", receipt)
         if swapped is None:
             raise MissingEventError(tx_hash, "Swapped")
 
-        amount_in, amount_out, recipient, market_maker = swapped
+        fee_event = self._own_event("FrontendFeeCharged", receipt)
+        fee = (
+            FeeCharged(
+                recipient=to_checksum_address(fee_event["args"]["feeRecipient"]),
+                amount=fee_event["args"]["feeAmount"],
+            )
+            if fee_event is not None
+            else None
+        )
+
+        args = swapped["args"]
         return SwapResult(
             hash=tx_hash,
             receipt=receipt,
-            amount_in=amount_in,
-            amount_out=amount_out,
-            executed_venue=market_maker,
-            recipient=recipient,
+            amount_in=args["amountIn"],
+            amount_out=args["amountOut"],
+            executed_venue=to_checksum_address(args["marketMaker"]),
+            recipient=to_checksum_address(args["recipient"]),
             fee=fee,
         )
 
@@ -266,87 +267,62 @@ class PropAmmRouter:
 
     async def approve(self, token: str, amount: int) -> str:
         """Approve the router to pull ``amount`` of ``token`` from the signer."""
-        calldata = abi.encode_calldata(abi.ERC20_APPROVE, [self.address, amount])
-        return await self.client.send(token, calldata)
+        erc20 = self.client.contract(token, ERC20_ABI)
+        return await self.client.send(erc20.functions.approve(self.address, amount))
 
     async def allowance(self, token: str, owner: str) -> int:
         """Current router allowance of ``token`` granted by ``owner``."""
-        calldata = abi.encode_calldata(abi.ERC20_ALLOWANCE, [owner, self.address])
-        data = await self.client.call(token, calldata)
-        (value,) = abi.decode_values("uint256", data)
-        return value
+        erc20 = self.client.contract(token, ERC20_ABI)
+        return await erc20.functions.allowance(to_checksum_address(owner), self.address).call()
 
     # ------ Views ------
 
     async def fallback_swap_router(self) -> ChecksumAddress:
         """The Uniswap fallback "venue" address (dynamic router configuration)."""
-        return await self._view_address(abi.FALLBACK_SWAP_ROUTER)
+        return await self._contract.functions.fallbackSwapRouter().call()
 
     async def fallback_quoter(self) -> ChecksumAddress:
-        return await self._view_address(abi.FALLBACK_QUOTER)
+        return await self._contract.functions.fallbackQuoter().call()
 
     async def fallback_fee(self) -> int:
-        return await self._view_uint(abi.FALLBACK_FEE, "uint24")
+        return await self._contract.functions.fallbackFee().call()
 
     async def get_pair_fee(self, token_a: str, token_b: str) -> int:
         """Raw per-pair fee override (0 if unset). Order-independent."""
-        return await self._view_uint(abi.GET_PAIR_FEE, "uint24", [token_a, token_b])
+        return await self._contract.functions.getPairFee(token_a, token_b).call()
 
     async def resolved_fee(self, token_in: str, token_out: str) -> int:
         """Effective Uniswap V3 fallback tier for a pair (override or global)."""
-        return await self._view_uint(abi.RESOLVED_FEE, "uint24", [token_in, token_out])
+        return await self._contract.functions.resolvedFee(token_in, token_out).call()
 
     async def is_whitelisted_venue(self, venue: str) -> bool:
-        data = await self._call_router(abi.IS_WHITELISTED_VENUE, [venue])
-        (value,) = abi.decode_values("bool", data)
-        return value
+        return await self._contract.functions.isWhitelistedVenue(venue).call()
 
     async def get_whitelisted_venues(self) -> list[ChecksumAddress]:
         """Every whitelisted propAMM venue (excludes the Uniswap fallback)."""
-        data = await self._call_router(abi.GET_WHITELISTED_VENUES)
-        (venues,) = abi.decode_values("address[]", data)
-        return venues
+        return await self._contract.functions.getWhitelistedVenues().call()
 
     async def paused(self) -> bool:
-        data = await self._call_router(abi.PAUSED)
-        (value,) = abi.decode_values("bool", data)
-        return value
+        return await self._contract.functions.paused().call()
 
     # ------ Internals ------
 
-    async def _call_router(
-        self,
-        signature: str,
-        args: list | None = None,
-        overrides: dict[str, Any] | None = None,
-    ) -> bytes:
-        """Encode + ``eth_call`` against the router, decoding reverts into named errors."""
-        calldata = abi.encode_calldata(signature, args or [])
-        try:
-            return await self.client.call(self.address, calldata, **(overrides or {}))
-        except RevertError as error:
-            raise _decode_revert(error) from error
+    def _own_event(self, name: str, receipt: Any) -> dict | None:
+        """First log of ``name`` emitted by this router (web3 decodes the args)."""
+        events = getattr(self._contract.events, name)().process_receipt(receipt, errors=DISCARD)
+        return next((ev for ev in events if _eq(ev["address"], self.address)), None)
 
-    async def _view_address(self, signature: str) -> ChecksumAddress:
-        data = await self._call_router(signature)
-        (value,) = abi.decode_values("address", data)
-        return value
+    async def _resolve_overrides(self, opts: QuoteOptions) -> dict[str, Any] | None:
+        """Resolve a quote's override options into ``eth_call`` override kwargs.
 
-    async def _view_uint(self, signature: str, type_name: str, args: list | None = None) -> int:
-        data = await self._call_router(signature, args)
-        (value,) = abi.decode_values(type_name, data)
-        return value
-
-    async def _resolve_overrides(self, opts: QuoteOptions) -> dict[str, Any]:
-        """Resolve a quote's override options into ``eth_call`` parameters.
-
-        The snapshot's block number and timestamp are attached only alongside
-        overrides — venues revert when the simulated block context doesn't
-        match their pushed state.
+        Returns ``None`` when no overrides apply (the quote runs via web3's
+        plain ``.call()``). The snapshot's block number and timestamp are
+        attached only alongside overrides — venues revert when the simulated
+        block context doesn't match their pushed state.
         """
         chosen = opts.overrides
         if chosen is None:
-            return {}
+            return None
         if chosen is _ATTACHED:
             snapshot = await self.overrides.get_overrides()
         elif isinstance(chosen, OverridesSource):
@@ -357,11 +333,10 @@ class PropAmmRouter:
             snapshot = await self.overrides.get_overrides()
 
         if snapshot is None:
-            return {}
-
+            return None
         state = to_state_override(snapshot, bebop_default=opts.bebop_default)
         if not state:
-            return {}
+            return None
 
         overrides: dict[str, Any] = {"state_override": state, "block_number": snapshot.block_number}
         if snapshot.timestamp_ns is not None:
@@ -394,14 +369,14 @@ def _validate_fee(fee: FrontendFee) -> None:
         raise InvalidInputError("fee recipient must not be the zero address")
 
 
-def _decode_revert(error: RevertError) -> RevertError:
-    """Re-shape a raw revert into the contract's named error when the data matches one."""
+def _named_revert(error: RevertError) -> RevertError:
+    """Name a raw-path revert against the contract's custom errors, if possible."""
     if error.data is None:
         return error
-    decoded = abi.decode_error(error.data)
-    if decoded is None:
+    named = name_error(error.data)
+    if named is None:
         return error
-    return RevertError(f"{error.message} ({decoded})", error.data)
+    return RevertError(f"{error.message} ({named})", error.data)
 
 
 def _eq(a: str, b: str) -> bool:

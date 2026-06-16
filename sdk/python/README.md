@@ -1,18 +1,20 @@
 # PropAMM Python SDK
 
 SDK for interacting with the `PropAMMRouter` contract over JSON-RPC, built on
-[web3.py](https://web3py.readthedocs.io/) (`AsyncWeb3` transport, signing,
-`eth_call` with state overrides) and [`eth-abi`](https://github.com/ethereum/eth-abi)
-for ABI encoding/decoding (signature strings; selectors are regression-tested
-against `forge inspect PropAMMRouter methodIdentifiers`). Mirrors the
+[web3.py](https://web3py.readthedocs.io/). web3 does the heavy lifting —
+`AsyncWeb3` transport, the contract object (calldata encoding, return-value and
+event decoding, custom-error decoding), and transaction building/signing — from
+the contract's own ABI (`propamm_router_abi.json`, vendored verbatim from
+`forge inspect PropAMMRouter abi` and regression-tested against it). Mirrors the
 TypeScript (`../typescript`) and Rust (`../rust`) SDKs: same surface,
 snake_case names, no on-chain `V1` suffix. Fully async (`asyncio`).
 
-`eth_call` with a block override (the 4th RPC parameter) is not exposed by
-web3.py's `eth.call`, so override-carrying quote calls go through a raw
-`provider.make_request("eth_call", …)` and decode/handle errors in
-`ContractClient.call`. Reverts are re-shaped into `RevertError` carrying the
-raw payload so the router bindings can decode named contract errors from it.
+The one thing web3 doesn't expose is `eth_call` with a *block* override (the
+4th RPC parameter), which on-chain quotes need so venues see a matching block
+context — so override-carrying quotes go through a raw
+`provider.make_request("eth_call", …)` in `ContractClient.call_with_overrides`.
+Reverts there are re-shaped into `RevertError` and named against the contract's
+custom errors (everything else gets web3's built-in error decoding for free).
 
 ## Setup
 
@@ -73,9 +75,9 @@ with `RPC_URL` / `PRIVATE_KEY` / `ROUTER_ADDRESS` / `SLIPPAGE_BPS`.
 
 | Module | Purpose |
 | --- | --- |
-| `propamm_sdk.client` | `ContractClient`: `AsyncWeb3` wrapper (`call` / `send` / `wait_for_transaction`). |
+| `propamm_sdk.client` | `ContractClient`: `AsyncWeb3` wrapper (`contract` / `call_with_overrides` / `send` / `wait_for_transaction`). |
 | `propamm_sdk.router` | `PropAmmRouter` bindings: quotes, swaps, ERC-20, views. |
-| `propamm_sdk.router.abi` | Router ABI signature strings + custom-error table. |
+| `propamm_sdk.router.abi` | Vendored router ABI + custom-error naming for the raw-call path. |
 | `propamm_sdk.overrides` | pAMM state-override sources (`OverridesRpcSource`, `OverridesWsSource`). |
 | `propamm_sdk.common` | `tokens`, `pamms`, `helpers`, `accounts`. |
 
