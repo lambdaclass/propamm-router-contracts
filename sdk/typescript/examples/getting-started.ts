@@ -15,19 +15,19 @@
  * swap reverts with `InsufficientOutput` there, raise SLIPPAGE_BPS (live
  * chains fill at the quoted state normally).
  */
-import { ContractClient } from "@propamm/sdk/client";
-import { PropAmmRouter } from "@propamm/sdk/router";
-import { ETH_SENTINEL, USDC } from "@propamm/sdk/common/tokens";
+import { ContractClient } from "propamm/client";
+import { PropAmmRouter } from "propamm/router";
+import { ETH_SENTINEL, USDC } from "propamm/common/tokens";
 import {
   applySlippage,
   deadlineIn,
   formatEther,
   formatUnits,
   parseEther,
-} from "@propamm/sdk/common/helpers";
-import { anvil } from "@propamm/sdk/common/chains";
-import { privateKeyToAccount } from "@propamm/sdk/common/accounts";
-import type { Address, Hash } from "@propamm/sdk";
+} from "propamm/common/helpers";
+import { anvil } from "propamm/common/chains";
+import { privateKeyToAccount } from "propamm/common/accounts";
+import type { Address, Hash } from "propamm";
 
 const RPC_URL = process.env.RPC_URL ?? "http://localhost:8545";
 // anvil's default funded account #0

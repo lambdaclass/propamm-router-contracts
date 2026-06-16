@@ -1,5 +1,5 @@
 {
-  "name": "@propamm/sdk",
+  "name": "propamm",
   "version": "0.1.0",
   "packageManager": "pnpm@9.15.4",
   "description": "TypeScript SDK for interacting with the PropAMM contracts",
