@@ -14,13 +14,13 @@ pub async fn quote_with(&self, token_in: Address, token_out: Address, amount_in:
 
 ## Usage
 
-:::code-group
+::: code-group
 
 ```rust [example.rs]
 use propamm_sdk::common::helpers::parse_ether;
 use propamm_sdk::common::tokens::{ETH_SENTINEL, USDC};
 
-let quote: Quote = router.quote(ETH_SENTINEL, USDC, parse_ether("1")?).await?; // [!code focus]
+let quote: Quote = router.quote(ETH_SENTINEL, USDC, parse_ether("1")?).await?;
 ```
 
 ```rust [setup.rs]
@@ -68,10 +68,10 @@ Same, plus [`opts: &QuoteOptions`](/rust/types#quoteoptions):
 use propamm_sdk::router::{QuoteOptions, QuoteOverrides};
 
 let opts = QuoteOptions {
-    overrides: QuoteOverrides::Skip, // [!code focus]
+    overrides: QuoteOverrides::Skip,
     ..Default::default()
 };
-let stale = router.quote_with(ETH_SENTINEL, USDC, amount_in, &opts).await?; // [!code focus]
+let stale = router.quote_with(ETH_SENTINEL, USDC, amount_in, &opts).await?;
 ```
 
 `venues` restricts the quote: a single entry quotes that venue directly,
@@ -83,8 +83,8 @@ the Uniswap V3 quote and reports the fallback router as `venue`.
 use propamm_sdk::common::pamms::{BEBOP, FERMI};
 
 let opts = QuoteOptions {
-    venues: Some(vec![FERMI, BEBOP]), // [!code focus]
+    venues: Some(vec![FERMI, BEBOP]),
     ..Default::default()
 };
-let subset = router.quote_with(ETH_SENTINEL, USDC, amount_in, &opts).await?; // [!code focus]
+let subset = router.quote_with(ETH_SENTINEL, USDC, amount_in, &opts).await?;
 ```

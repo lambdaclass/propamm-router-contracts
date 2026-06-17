@@ -4,7 +4,7 @@ SDKs for interacting with the [`PropAMMRouter`](/propamms/router) contract:
 quote and execute single-hop swaps across proprietary AMM venues, with a
 Uniswap V3 fallback.
 
-New to proprietary AMMs? Start with [What is a PropAMM?](/propamms) for the
+New to proprietary AMMs? Start with [What is a PropAMM?](/propamms/) for the
 concepts: why pAMMs exist, how builder-level sequencing makes them work on
 Ethereum, and how [makers](/propamms/makers) and [takers](/propamms/takers)
 integrate.

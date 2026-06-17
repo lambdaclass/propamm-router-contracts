@@ -3,7 +3,7 @@
 The TypeScript SDK is published as `@propamm/sdk`, built on
 [viem](https://viem.sh).
 
-:::code-group
+::: code-group
 
 ```bash [npm]
 npm install @propamm/sdk

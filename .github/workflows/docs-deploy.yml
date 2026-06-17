@@ -54,7 +54,7 @@ jobs:
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: sdk/docs/dist/public
+          path: sdk/docs/.vitepress/dist
 
   deploy:
     needs: build

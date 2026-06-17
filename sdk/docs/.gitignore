@@ -1,3 +1,3 @@
 node_modules/
-dist/
-.vocs/
+.vitepress/cache/
+.vitepress/dist/

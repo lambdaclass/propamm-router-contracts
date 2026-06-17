@@ -2,21 +2,21 @@
 
 Current allowance an owner has granted the router for an ERC-20 token.
 
-```ts
-allowance(token: Address, owner: Address): Promise<bigint>
+```rust
+pub async fn allowance(&self, token: Address, owner: Address) -> Result<U256>
 ```
 
 ## Usage
 
-```ts
-import { USDC } from "@propamm/sdk/common/tokens";
+```rust
+use propamm_sdk::common::tokens::USDC;
 
-await router.allowance(USDC, account.address); // [!code focus]
+let allowance: U256 = router.allowance(USDC, me).await?;
 ```
 
 ## Returns
 
-`bigint`
+`Result<U256>`
 
 The current allowance, in atomic units.
 

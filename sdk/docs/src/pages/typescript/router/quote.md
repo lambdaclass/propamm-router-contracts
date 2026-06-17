@@ -13,18 +13,18 @@ quote(tokenIn: Address, tokenOut: Address, amountIn: bigint, opts?: QuoteOptions
 
 ## Usage
 
-:::code-group
+::: code-group
 
 ```ts [example.ts]
 import { parseEther } from "@propamm/sdk/common/helpers";
 import { ETH_SENTINEL, USDC } from "@propamm/sdk/common/tokens";
 import { router } from "./config";
 
-const { amountOut, venue } = await router.quote( // [!code focus]
-  ETH_SENTINEL, // [!code focus]
-  USDC, // [!code focus]
-  parseEther("1"), // [!code focus]
-); // [!code focus]
+const { amountOut, venue } = await router.quote(
+  ETH_SENTINEL,
+  USDC,
+  parseEther("1"),
+);
 ```
 
 ```ts [config.ts]
@@ -76,7 +76,7 @@ Per-call quote options.
 
 ```ts
 const stale = await router.quote(ETH_SENTINEL, USDC, parseEther("1"), {
-  overrides: null, // [!code focus]
+  overrides: null,
 });
 ```
 
@@ -89,9 +89,9 @@ the Uniswap V3 quote and reports the fallback router as `venue`.
 import { PAMMS } from "@propamm/sdk/common/pamms";
 
 const pinned = await router.quote(ETH_SENTINEL, USDC, parseEther("1"), {
-  venues: [PAMMS.fermi], // [!code focus]
+  venues: [PAMMS.fermi],
 });
 const subset = await router.quote(ETH_SENTINEL, USDC, parseEther("1"), {
-  venues: [PAMMS.fermi, PAMMS.bebop], // [!code focus]
+  venues: [PAMMS.fermi, PAMMS.bebop],
 });
 ```

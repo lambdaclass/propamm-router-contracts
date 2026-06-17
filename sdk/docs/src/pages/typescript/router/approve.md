@@ -13,8 +13,8 @@ approve(token: Address, amount: bigint): Promise<Hash>
 import { parseUnits } from "@propamm/sdk/common/helpers";
 import { USDC } from "@propamm/sdk/common/tokens";
 
-const hash = await router.approve(USDC, parseUnits("100", 6)); // [!code focus]
-await client.waitForTransaction(hash); // [!code focus]
+const hash = await router.approve(USDC, parseUnits("100", 6));
+await client.waitForTransaction(hash);
 ```
 
 ## Returns

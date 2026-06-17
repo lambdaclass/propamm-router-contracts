@@ -11,7 +11,7 @@ pub async fn wait_for_swap(&self, hash: H256) -> Result<SwapResult>
 
 ```rust
 let hash = router.swap(&params).await?;
-let result: SwapResult = router.wait_for_swap(hash).await?; // [!code focus]
+let result: SwapResult = router.wait_for_swap(hash).await?;
 ```
 
 ## Returns

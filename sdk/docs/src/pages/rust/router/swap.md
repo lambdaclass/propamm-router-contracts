@@ -14,7 +14,7 @@ pub async fn swap_and_wait_with(&self, params: &SwapParams, opts: &SwapOptions) 
 
 ## Usage
 
-:::code-group
+::: code-group
 
 ```rust [example.rs]
 use propamm_sdk::common::helpers::{apply_slippage, deadline_in, parse_ether};
@@ -24,16 +24,16 @@ use propamm_sdk::router::SwapParams;
 let amount_in = parse_ether("1")?;
 let quote = router.quote(ETH_SENTINEL, USDC, amount_in).await?;
 
-let hash = router // [!code focus]
-    .swap(&SwapParams { // [!code focus]
-        token_in: ETH_SENTINEL, // [!code focus]
-        token_out: USDC, // [!code focus]
-        amount_in, // [!code focus]
-        amount_out_min: apply_slippage(quote.amount_out, 50)?, // [!code focus]
-        recipient: me, // [!code focus]
-        deadline: deadline_in(300), // [!code focus]
-    }) // [!code focus]
-    .await?; // [!code focus]
+let hash = router
+    .swap(&SwapParams {
+        token_in: ETH_SENTINEL,
+        token_out: USDC,
+        amount_in,
+        amount_out_min: apply_slippage(quote.amount_out, 50)?,
+        recipient: me,
+        deadline: deadline_in(300),
+    })
+    .await?;
 ```
 
 ```rust [setup.rs]
@@ -69,10 +69,10 @@ use propamm_sdk::common::pamms::KIPSELI;
 use propamm_sdk::router::SwapOptions;
 
 let opts = SwapOptions {
-    venues: Some(vec![KIPSELI]), // exactly this venue // [!code focus]
+    venues: Some(vec![KIPSELI]), // exactly this venue
     ..Default::default()
 };
-let hash = router.swap_with(&params, &opts).await?; // [!code focus]
+let hash = router.swap_with(&params, &opts).await?;
 ```
 
 `frontend_fee` skims a fee from the output token, paid to its `recipient`.
@@ -86,10 +86,10 @@ and recipient.
 use propamm_sdk::router::{FrontendFee, SwapOptions};
 
 let opts = SwapOptions {
-    frontend_fee: Some(FrontendFee { bps: 25, recipient: fee_recipient }), // 0.25% // [!code focus]
+    frontend_fee: Some(FrontendFee { bps: 25, recipient: fee_recipient }), // 0.25%
     ..Default::default()
 };
-let hash = router.swap_with(&params, &opts).await?; // [!code focus]
+let hash = router.swap_with(&params, &opts).await?;
 ```
 
 ## swap_and_wait
@@ -115,6 +115,6 @@ field-by-field docs. Derive `amount_out_min` from a quote with
 ```rust
 let params = SwapParams {
     // ...
-    amount_out_min: apply_slippage(quote.amount_out, 50)?, // quote - 0.5% // [!code focus]
+    amount_out_min: apply_slippage(quote.amount_out, 50)?, // quote - 0.5%
 };
 ```

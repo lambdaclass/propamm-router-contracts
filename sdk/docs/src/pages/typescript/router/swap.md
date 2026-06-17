@@ -12,7 +12,7 @@ swapAndWait(params: SwapParams, opts?: SwapOptions): Promise<SwapResult>
 
 ## Usage
 
-:::code-group
+::: code-group
 
 ```ts [example.ts]
 import { applySlippage, deadlineIn, parseEther } from "@propamm/sdk/common/helpers";
@@ -22,14 +22,14 @@ import { account, router } from "./config";
 const amountIn = parseEther("1");
 const { amountOut } = await router.quote(ETH_SENTINEL, USDC, amountIn);
 
-const hash = await router.swap({ // [!code focus]
-  tokenIn: ETH_SENTINEL, // [!code focus]
-  tokenOut: USDC, // [!code focus]
-  amountIn, // [!code focus]
-  amountOutMin: applySlippage(amountOut, 50), // [!code focus]
-  recipient: account.address, // [!code focus]
-  deadline: deadlineIn(300), // [!code focus]
-}); // [!code focus]
+const hash = await router.swap({
+  tokenIn: ETH_SENTINEL,
+  tokenOut: USDC,
+  amountIn,
+  amountOutMin: applySlippage(amountOut, 50),
+  recipient: account.address,
+  deadline: deadlineIn(300),
+});
 ```
 
 ```ts [config.ts]
@@ -78,7 +78,7 @@ field-by-field docs. Derive `amountOutMin` from a quote with
 ```ts
 const hash = await router.swap({
   // ...
-  amountOutMin: applySlippage(amountOut, 50), // quote - 0.5% // [!code focus]
+  amountOutMin: applySlippage(amountOut, 50), // quote - 0.5%
 });
 ```
 
@@ -97,10 +97,10 @@ present; omit to swap through the best-quoting venue overall.
 import { PAMMS } from "@propamm/sdk/common/pamms";
 
 // exactly this venue
-const hash = await router.swap(params, { venues: [PAMMS.kipseli] }); // [!code focus]
+const hash = await router.swap(params, { venues: [PAMMS.kipseli] });
 
 // best of a subset
-const hash2 = await router.swap(params, { venues: [PAMMS.fermi, PAMMS.bebop] }); // [!code focus]
+const hash2 = await router.swap(params, { venues: [PAMMS.fermi, PAMMS.bebop] });
 ```
 
 `frontendFee` skims a fee from the output token, paid to its `recipient`.
@@ -112,6 +112,6 @@ amount and recipient.
 
 ```ts
 const hash = await router.swap(params, {
-  frontendFee: { bps: 25, recipient: "0x..." }, // 0.25% to the fee recipient // [!code focus]
+  frontendFee: { bps: 25, recipient: "0x..." }, // 0.25% to the fee recipient
 });
 ```
