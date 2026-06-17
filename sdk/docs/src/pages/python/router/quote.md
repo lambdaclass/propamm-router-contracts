@@ -79,6 +79,24 @@ stale = await router.quote(
 )
 ```
 
+`overrides` can also point at an explicit source — a streaming WebSocket
+source, or a fetch-on-demand JSON-RPC source:
+
+```python
+from propamm_sdk import QuoteOptions
+from propamm_sdk.overrides import OverridesRpcSource, OverridesWsSource
+
+# a streaming WebSocket source…
+overrides = OverridesWsSource(url="wss://rpc.titanbuilder.xyz/ws/pamm_quote_stream")
+
+# …or a fetch-on-demand JSON-RPC source:
+overrides = OverridesRpcSource(url="https://rpc.titanbuilder.xyz")
+
+quote = await router.quote(
+    ETH_SENTINEL, USDC, parse_ether("1"), QuoteOptions(overrides=overrides)
+)
+```
+
 `venues` restricts the quote: a single entry quotes that venue directly,
 several pick the best among them (must be non-empty when present). When no
 listed venue can be priced, the call does **not** raise: it falls back to the
