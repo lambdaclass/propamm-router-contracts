@@ -14,7 +14,32 @@ export default defineConfig({
   // `/foo` -> `foo.html`).
   cleanUrls: true,
   themeConfig: {
-    search: { provider: "local" },
+    search: {
+      provider: "local",
+      options: {
+        // Same page names exist under both SDKs (e.g. `quote`), so a bare
+        // search result can't tell TypeScript from Rust. Prefix the first
+        // heading's text with the SDK tag in the search index only (the
+        // rendered page is unaffected) so results read e.g. "[Rust] quote".
+        _render(src, env, md) {
+          const html = md.render(src, env);
+          if (env.frontmatter?.search === false) return "";
+          const path = env.relativePath ?? "";
+          const sdk = path.startsWith("typescript/")
+            ? "TypeScript"
+            : path.startsWith("rust/")
+              ? "Rust"
+              : "";
+          if (!sdk) return html;
+          // Inject the tag before the heading's anchor link, so the splitter
+          // picks it up as part of the section title.
+          return html.replace(
+            /(<h[1-6][^>]*>)(.*?)(<a\b)/i,
+            (_match, open, text, anchor) => `${open}[${sdk}] ${text}${anchor}`,
+          );
+        },
+      },
+    },
     socialLinks: [
       {
         icon: "github",
