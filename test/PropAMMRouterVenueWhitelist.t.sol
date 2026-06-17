@@ -21,7 +21,7 @@ contract PropAMMRouterVenueWhitelistTest is Test {
     MockERC20 internal tokenIn;
     MockERC20 internal tokenOut;
 
-    address constant KIPSELI_PAMM = 0x342b8458161137d0203605Fa51E4363c1445ADCD;
+    address constant KIPSELI_PAMM = 0x71e790dd841c8A9061487cb3E78C288E75cE0B3d;
 
     address internal owner = address(this);
     address internal stranger = address(0xBEEF);

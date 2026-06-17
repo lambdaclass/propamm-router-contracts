@@ -25,8 +25,8 @@ contract PropAMMRouterForkTests is Test {
     // The address of the mainnet PropAMMRouter contract (demo environment)
     address constant MAINNET_PROPAMM_ROUTER_ADDRESS = 0x4DdF368080CD7946db5b459aD591c350158175e1;
 
-    /// @dev A newly deployed Kipseli PAMM, distinct from the built-in
-    /// `KIPSELI_PAMM` address.
+    /// @dev The Kipseli PAMM whitelisted by the live demo router — the same
+    /// address `initialize` now seeds as the built-in Kipseli venue.
     address constant NEW_KIPSELI_PAMM = 0x71e790dd841c8A9061487cb3E78C288E75cE0B3d;
     address constant NEW_FERMI_ROUTER = 0x5979458912F80B96d30D4220af8E2e4925A33320;
 
