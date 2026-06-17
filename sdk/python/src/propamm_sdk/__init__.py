@@ -16,6 +16,7 @@ from .error import (
     OverridesError,
     PropAmmError,
     RevertError,
+    TimeoutError,
     TransactionRevertedError,
 )
 from .overrides import (
@@ -58,5 +59,6 @@ __all__ = [
     "SwapOptions",
     "SwapParams",
     "SwapResult",
+    "TimeoutError",
     "TransactionRevertedError",
 ]
