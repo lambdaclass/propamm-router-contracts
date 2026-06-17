@@ -1,9 +1,8 @@
 """Python SDK for interacting with the PropAMM contracts over JSON-RPC.
 
-Mirrors the TypeScript SDK (``sdk/typescript``) and Rust SDK (``sdk/rust``): a
-generic :class:`ContractClient`, typed :class:`PropAmmRouter` bindings (quotes,
-swaps, and views), and pAMM state-override sources so quotes price fresh
-off-chain liquidity.
+Provides a generic :class:`ContractClient`, typed :class:`PropAmmRouter`
+bindings (quotes, swaps, and views), and pAMM state-override sources so quotes
+price fresh off-chain liquidity.
 """
 
 from __future__ import annotations

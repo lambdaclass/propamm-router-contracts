@@ -1,4 +1,4 @@
-"""Exception hierarchy, mirroring the Rust SDK's ``Error`` enum.
+"""Exception hierarchy for the SDK.
 
 All SDK errors derive from :class:`PropAmmError`, so callers can catch the
 whole family with a single ``except``.
@@ -62,7 +62,7 @@ class OverridesError(PropAmmError):
     """Failure while fetching or parsing pAMM state overrides."""
 
 
-class TimeoutError(PropAmmError):  # noqa: A001 - intentional parity with the Rust enum
+class TimeoutError(PropAmmError):  # noqa: A001 - intentionally shadows the builtin TimeoutError
     """An operation did not complete within its deadline."""
 
 

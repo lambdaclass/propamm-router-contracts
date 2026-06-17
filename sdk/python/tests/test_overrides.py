@@ -1,4 +1,4 @@
-"""Ported from the Rust SDK's `overrides` unit tests."""
+"""Unit tests for pAMM state-override parsing and sources."""
 
 from __future__ import annotations
 

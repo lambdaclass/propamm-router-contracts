@@ -5,9 +5,9 @@ SDK for interacting with the `PropAMMRouter` contract over JSON-RPC, built on
 `AsyncWeb3` transport, the contract object (calldata encoding, return-value and
 event decoding, custom-error decoding), and transaction building/signing — from
 the contract's own ABI (`propamm_router_abi.json`, vendored verbatim from
-`forge inspect PropAMMRouter abi` and regression-tested against it). Mirrors the
-TypeScript (`../typescript`) and Rust (`../rust`) SDKs: same surface,
-snake_case names, no on-chain `V1` suffix. Fully async (`asyncio`).
+`forge inspect PropAMMRouter abi` and regression-tested against it). Method
+names drop the on-chain `V1` suffix (`router.swap(...)` calls `swapV1`). Fully
+async (`asyncio`).
 
 The one thing web3 doesn't expose is `eth_call` with a *block* override (the
 4th RPC parameter), which on-chain quotes need so venues see a matching block

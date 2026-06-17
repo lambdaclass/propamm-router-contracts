@@ -1,4 +1,4 @@
-"""Ported from the Rust SDK's `common::helpers` unit tests."""
+"""Unit tests for the conversion and numeric helpers."""
 
 from __future__ import annotations
 

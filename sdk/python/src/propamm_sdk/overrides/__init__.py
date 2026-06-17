@@ -354,7 +354,7 @@ class OverridesWsSource(OverridesSource):
         try:
             frame = parse_overrides_message(json.loads(data))
         except (json.JSONDecodeError, OverridesError):
-            return  # skip undecodable frames, like the reference consumers do
+            return  # skip undecodable frames
 
         # A frame only carries the pAMMs it updates; entries for other pAMMs
         # stay cached from earlier frames.
