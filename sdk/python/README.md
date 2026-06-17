@@ -45,11 +45,14 @@ from propamm_sdk.common.accounts import account_from_key
 from propamm_sdk.common.helpers import apply_slippage, deadline_in, parse_ether
 from propamm_sdk.common.tokens import ETH_SENTINEL, USDC
 
+PRIVATE_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" # anvil rich account
+RPC_URL = "http://localhost:8545" # local anvil instance
+ROUTER_ADDRESS = "0x4DdF368080CD7946db5b459aD591c350158175e1" # mainnet router deployment
 
 async def main():
-    account = account_from_key("0x...")
-    client = ContractClient("https://...", account=account)
-    router = PropAmmRouter(client, "0x...")  # deployed router proxy
+    account = account_from_key(PRIVATE_KEY)
+    client = ContractClient(RPC_URL, account=account)
+    router = PropAmmRouter(client, ROUTER_ADDRESS)
 
     amount_in = parse_ether("1")
     quote = await router.quote(ETH_SENTINEL, USDC, amount_in)
