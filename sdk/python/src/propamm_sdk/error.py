@@ -54,10 +54,6 @@ class MissingEventError(PropAmmError):
         self.event = event
 
 
-class AbiError(PropAmmError):
-    """ABI encoding/decoding failure."""
-
-
 class OverridesError(PropAmmError):
     """Failure while fetching or parsing pAMM state overrides."""
 

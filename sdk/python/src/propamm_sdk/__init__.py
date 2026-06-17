@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from .client import ContractClient
 from .error import (
-    AbiError,
     ClientError,
     InvalidInputError,
     MissingEventError,
@@ -39,7 +38,6 @@ from .router import (
 
 __all__ = [
     "MAX_FEE_BPS",
-    "AbiError",
     "ClientError",
     "ContractClient",
     "FeeCharged",
