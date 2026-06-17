@@ -27,8 +27,13 @@ contract PropAMMRouterForkTests is Test {
 
     /// @dev A newly deployed Kipseli PAMM, distinct from the built-in
     /// `KIPSELI_PAMM` address.
-    address constant NEW_KIPSELI_PAMM = 0x342b8458161137d0203605Fa51E4363c1445ADCD;
+    address constant NEW_KIPSELI_PAMM = 0x71e790dd841c8A9061487cb3E78C288E75cE0B3d;
     address constant NEW_FERMI_ROUTER = 0x5979458912F80B96d30D4220af8E2e4925A33320;
+
+    /// @dev Block of mainnet tx
+    /// 0x7c3cb5e32867d724a51cbaede51c165454cbc59324511ff3470b983acaa705f0, a
+    /// `swapViaVenueV1` USDC->WETH that settled through `NEW_KIPSELI_PAMM`.
+    uint256 constant KIPSELI_FORK_BLOCK = 25_288_802;
 
     IPropAMMRouter router;
     address taker;
@@ -42,6 +47,13 @@ contract PropAMMRouterForkTests is Test {
         // Target the demo environment router
         router = IPropAMMRouter(MAINNET_PROPAMM_ROUTER_ADDRESS);
 
+        _seedTaker();
+    }
+
+    /// @dev (Re)funds the taker with USDC, grants a max router allowance, and
+    /// gives it ETH for gas. Idempotent so it can run again after a fork roll,
+    /// which reloads account state from a different block and wipes these.
+    function _seedTaker() internal {
         // Fund the taker with 1M USDC (well above the worst-case test spend).
         _fundTakerUSDC(1_000_000 * 1e6);
         _setMaxAllowance(USDC, taker, address(router));
@@ -54,12 +66,11 @@ contract PropAMMRouterForkTests is Test {
     /// and asserts the swap was actually executed by Kipseli (didn't fallback to Uniswap).
     /// It updates the price before sending the swap transaction.
     function test_swapViaVenueV1NewKipseli() public {
-        // FIXME(kipseli-migration): skipped until `_updateNewKipseliPrice` replays
-        // the NEW Kipseli (0x342b…ADCD) price lane. After the on-chain migration
-        // the old 0x71e7 replay leaves 0x342b unpriced, so the swap falls back to
-        // Uniswap and fails `executedVenue == venue`. Re-enable once the new
-        // venue's mainnet updater tx (price target / lane / slot) is wired in.
-        vm.skip(true);
+        // Roll back to the block where `NEW_KIPSELI_PAMM` was whitelisted and
+        // `swapViaVenueV1` settled through it on mainnet, then re-seed the taker
+        // because the roll reloads account state from that block.
+        vm.rollFork(KIPSELI_FORK_BLOCK);
+        _seedTaker();
         _updateNewKipseliPrice();
         _runSwapViaVenueV1(NEW_KIPSELI_PAMM);
     }
@@ -86,12 +97,6 @@ contract PropAMMRouterForkTests is Test {
     /// time so it lands inside the registry's freshness window regardless of
     /// which block the fork pins to.
     function _updateNewKipseliPrice() internal {
-        // FIXME(kipseli-migration): NEW_KIPSELI_PAMM was repointed to
-        // 0x342b8458161137d0203605Fa51E4363c1445ADCD, but the price-lane replay
-        // below is still the SUPERSEDED 0x71e790dd… deployment's data. Until the
-        // target/lane/slot are refreshed from the *new* Kipseli's mainnet updater
-        // tx, this venue stays unpriced on the fork, so `test_swapViaVenueV1NewKipseli`
-        // falls back to Uniswap and fails the `executedVenue == venue` assertion.
         // Target, lane, and price slot all taken from the mainnet updater tx
         // 0xf7be932bf666b0fb4d10bbd0cd844876e24f0e75dfd11772907dff94e90513e8.
         // Pricing lane scoped to this target (the account that calls `getState`)
