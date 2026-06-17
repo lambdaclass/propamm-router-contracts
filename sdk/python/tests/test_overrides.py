@@ -10,6 +10,7 @@ from propamm_sdk.error import OverridesError
 from propamm_sdk.overrides import (
     BEBOP_DEFAULT_SLOT,
     OverridesSnapshot,
+    _LEGACY_BEBOP_LOWER,
     _parse_rpc_response,
     parse_overrides_message,
     to_state_override,
@@ -102,12 +103,16 @@ def test_to_state_override_can_skip_the_bebop_default():
 
 def test_to_state_override_keeps_real_bebop_diffs_without_injecting_default():
     contract = to_checksum_address("0x0000000000000000000000000000000000000011")
-    # pAMM IS Bebop, so the default-slot injection is skipped.
+    # pAMM IS Bebop, so Bebop's own default-slot injection is skipped.
     snapshot = _snapshot_with(BEBOP, contract, 7, 99)
 
     state = to_state_override(snapshot)
     assert state[contract]["stateDiff"][_word(7)] == _word(99)
     assert BEBOP not in state
+    # ...but the legacy Bebop venue, which never has a fresh override, is still
+    # neutralized.
+    legacy = to_checksum_address(_LEGACY_BEBOP_LOWER)
+    assert state[legacy]["stateDiff"][_word(int(BEBOP_DEFAULT_SLOT, 16))] == _word(0)
 
 
 def test_parse_word_accepts_padded_and_unpadded_hex():
