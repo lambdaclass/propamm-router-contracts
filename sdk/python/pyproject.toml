@@ -10,20 +10,20 @@ license = "MIT"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "web3==7.16.0",
-    "eth-abi==5.2.0",
-    "eth-utils==6.0.0",
-    "eth-account==0.13.7",
-    "aiohttp==3.14.1",
-    "websockets==15.0.1",
-    "certifi==2026.5.20",
+    "web3>=7,<8",
+    "eth-abi>=5",
+    "eth-utils>=4",
+    "eth-account>=0.11",
+    "aiohttp>=3.9",
+    "websockets>=12",
+    "certifi",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest==9.1.0",
-    "pytest-asyncio==1.4.0",
-    "ruff==0.15.17",
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.6",
 ]
 
 [tool.hatch.build.targets.wheel]

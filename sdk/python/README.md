@@ -18,10 +18,20 @@ custom errors (everything else gets web3's built-in error decoding for free).
 
 ## Setup
 
+Using [uv](https://docs.astral.sh/uv/) (installs the exact pinned versions from `uv.lock`):
+
+```sh
+uv sync --extra dev
+uv run pytest          # incl. ABI selector & overrides regression tests
+uv run ruff check .
+```
+
+Using pip (resolves the dependency ranges in `pyproject.toml`):
+
 ```sh
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-pytest          # incl. ABI selector & overrides regression tests
+pytest
 ruff check .
 ```
 
