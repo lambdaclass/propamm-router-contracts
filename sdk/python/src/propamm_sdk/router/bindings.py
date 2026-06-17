@@ -17,6 +17,7 @@ from web3.constants import ADDRESS_ZERO
 from web3.logs import DISCARD
 
 from ..client import ContractClient
+from ..common.helpers import parse_address
 from ..common.tokens import ETH_SENTINEL
 from ..error import InvalidInputError, MissingEventError, RevertError, TransactionRevertedError
 from ..overrides import (
@@ -215,7 +216,7 @@ class PropAmmRouter:
         if fee is not None:
             _validate_fee(fee)
             # The `WithFee` selectors take the same tuple plus the fee struct last.
-            args.append((fee.bps, to_checksum_address(fee.recipient)))
+            args.append((fee.bps, parse_address(fee.recipient)))
 
         plain, with_fee = _SWAP_FUNCS[mode]
         function = getattr(self._contract.functions, with_fee if fee else plain)(*args)
@@ -370,10 +371,12 @@ def _venue_dispatch(venues: list[str] | None) -> tuple[str, list]:
 
 
 def _validate_fee(fee: FrontendFee) -> None:
-    """Raises unless the fee has bps in [1, MAX_FEE_BPS] and a non-zero recipient."""
+    """Raise ``InvalidInputError`` unless ``bps`` is in [1, MAX_FEE_BPS] and the
+    recipient is a valid, non-zero address.
+    """
     if not isinstance(fee.bps, int) or fee.bps < 1 or fee.bps > MAX_FEE_BPS:
         raise InvalidInputError(f"fee bps must be an integer in [1, {MAX_FEE_BPS}], got {fee.bps}")
-    if fee.recipient.lower() == ADDRESS_ZERO:
+    if parse_address(fee.recipient).lower() == ADDRESS_ZERO:
         raise InvalidInputError("fee recipient must not be the zero address")
 
 
