@@ -28,7 +28,7 @@ uv run ruff check .
 Using pip (resolves the dependency ranges in `pyproject.toml`):
 
 ```sh
-python -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 pytest
 ruff check .
@@ -73,10 +73,10 @@ async def main():
 asyncio.run(main())
 ```
 
-A runnable version lives in [`examples/getting_started.py`](examples/getting_started.py):
+A runnable version lives in [`examples/getting_started.py`](examples/getting_started.py).
 
 ```sh
-python examples/getting_started.py
+python3 examples/getting_started.py
 ```
 
 It defaults to a local anvil mainnet fork (`anvil --fork-url <mainnet rpc>`)
