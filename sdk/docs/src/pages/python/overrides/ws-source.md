@@ -5,7 +5,12 @@ per-pAMM entries across frames (a frame only carries the pAMMs it updates),
 reconnects with backoff, and auto-closes when idle.
 
 ```python
-OverridesWsSource(url: str = ..., *, first_frame_timeout: float = 5.0, idle_timeout: float = 30.0)
+OverridesWsSource(
+    url: str = "wss://rpc.titanbuilder.xyz/ws/pamm_quote_stream",
+    *,
+    first_frame_timeout: float = 5.0,
+    idle_timeout: float = 30.0
+)
 ```
 
 ## Usage
