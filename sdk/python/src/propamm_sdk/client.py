@@ -17,6 +17,7 @@ from eth_utils import to_checksum_address
 from web3 import AsyncWeb3
 from web3.contract import AsyncContract
 from web3.contract.async_contract import AsyncContractFunction
+from web3.exceptions import ContractLogicError, Web3Exception
 
 from ._tls import ssl_context
 from .common.accounts import account_from_key
@@ -107,21 +108,57 @@ class ContractClient:
         """
         if self.account is None:
             raise ClientError("ContractClient was created without a signer; sends are unavailable")
-        # web3 fills gas, fees, and chain id in `build_transaction`, but not the
-        # nonce — supply it ourselves (pending, so back-to-back sends don't collide).
-        nonce = await self.w3.eth.get_transaction_count(self.account.address, "pending")
-        tx = await function.build_transaction(
-            {"from": self.account.address, "value": value or 0, "nonce": nonce}
-        )
-        signed = self.account.sign_transaction(tx)
-        raw = getattr(signed, "raw_transaction", None) or signed.rawTransaction
-        return self.w3.to_hex(await self.w3.eth.send_raw_transaction(raw))
+        try:
+            # web3 fills gas, fees, and chain id in `build_transaction`, but not the
+            # nonce — supply it ourselves (pending, so back-to-back sends don't collide).
+            nonce = await self.w3.eth.get_transaction_count(self.account.address, "pending")
+            tx = await function.build_transaction(
+                {"from": self.account.address, "value": value or 0, "nonce": nonce}
+            )
+            signed = self.account.sign_transaction(tx)
+            raw = getattr(signed, "raw_transaction", None) or signed.rawTransaction
+            return self.w3.to_hex(await self.w3.eth.send_raw_transaction(raw))
+        except ContractLogicError as exc:
+            # A revert surfaced during gas estimation (e.g. slippage, deadline).
+            # web3 has no ABI context here, so it carries only the raw revert
+            # payload — pass it through on `data` so the router can name it.
+            raise RevertError(_web3_message(exc), _revert_data(exc)) from exc
+        except Web3Exception as exc:
+            # Insufficient funds, bad nonce, transport failure, ... — keep the
+            # SDK's exception surface consistent (see ClientError's docstring).
+            raise ClientError(_web3_message(exc)) from exc
 
     async def wait_for_transaction(self, tx_hash: str) -> Any:
         """Wait until a transaction is mined and return its receipt."""
         return await self.w3.eth.wait_for_transaction_receipt(
             tx_hash, timeout=RECEIPT_TIMEOUT_SECONDS
         )
+
+
+def _revert_data(exc: ContractLogicError) -> bytes | None:
+    """The raw revert payload off a web3 contract error, as bytes (or ``None``)."""
+    raw = getattr(exc, "data", None)
+    if isinstance(raw, (bytes, bytearray)):
+        return bytes(raw)
+    if isinstance(raw, str) and raw.startswith("0x") and len(raw) > 2:
+        try:
+            return bytes.fromhex(raw[2:])
+        except ValueError:
+            return None
+    return None
+
+
+def _web3_message(exc: Web3Exception) -> str:
+    """Extract a clean message from a web3 exception.
+
+    web3 stores ``(message, data)`` in ``args`` (so ``str(exc)`` is an ugly
+    tuple), and ``Web3RPCError.message`` is the raw JSON-RPC error object —
+    prefer ``.message``, unwrapping the nested ``message`` when it's a dict.
+    """
+    message = getattr(exc, "message", None)
+    if isinstance(message, dict):
+        return message.get("message") or str(message)
+    return message or str(exc)
 
 
 def _revert_from_rpc_error(error: dict[str, Any]) -> RevertError:

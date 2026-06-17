@@ -1,10 +1,11 @@
 """Router ABI, loaded from the contract's own compiled artifact.
 
 ``propamm_router_abi.json`` is ``forge inspect PropAMMRouter abi`` verbatim, so
-web3.py handles all encoding/decoding (calldata, return values, events, custom
-errors). The only thing web3 can't decode for us is a custom error recovered
-from a *raw* ``eth_call`` (the block-override quote path) — :func:`name_error`
-covers that, built on ``eth-utils``/``eth-abi`` primitives.
+web3.py handles the encoding/decoding for us — calldata, return values, and
+events. The one thing it doesn't do is name a custom error: a reverted call
+surfaces only the raw 4-byte selector (web3 never maps it back to a signature,
+in any path). :func:`name_error` covers that, decoding the selector against the
+ABI's error entries — built on ``web3.utils`` helpers plus ``eth-abi``.
 """
 
 from __future__ import annotations
@@ -14,8 +15,11 @@ from functools import lru_cache
 from importlib.resources import files
 
 from eth_abi import decode as abi_decode
-from eth_utils import function_signature_to_4byte_selector
-from eth_utils.abi import collapse_if_tuple
+from web3.utils import (
+    filter_abi_by_type,
+    function_abi_to_4byte_selector,
+    get_abi_input_types,
+)
 
 #: The router's full ABI (the compiled contract's own ABI).
 ROUTER_ABI = json.loads((files(__package__) / "propamm_router_abi.json").read_text())
@@ -45,20 +49,13 @@ ERC20_ABI = [
 ]
 
 
-def _error_signature(error_abi: dict) -> str:
-    types = ",".join(collapse_if_tuple(arg) for arg in error_abi["inputs"])
-    return f"{error_abi['name']}({types})"
-
-
 @lru_cache(maxsize=1)
 def _error_table() -> dict[bytes, dict]:
     """selector -> error ABI, for every custom error in ``ROUTER_ABI``."""
-    table: dict[bytes, dict] = {}
-    for entry in ROUTER_ABI:
-        if entry.get("type") == "error":
-            signature = _error_signature(entry)
-            table[function_signature_to_4byte_selector(signature)] = entry
-    return table
+    return {
+        function_abi_to_4byte_selector(entry): entry
+        for entry in filter_abi_by_type("error", ROUTER_ABI)
+    }
 
 
 def name_error(data: bytes) -> str | None:
@@ -73,9 +70,8 @@ def name_error(data: bytes) -> str | None:
     entry = _error_table().get(data[:4])
     if entry is None:
         return None
-    name = entry["name"]
-    if not entry["inputs"]:
-        return f"{name}()"
-    types = [collapse_if_tuple(arg) for arg in entry["inputs"]]
+    types = get_abi_input_types(entry)
+    if not types:
+        return f"{entry['name']}()"
     values = abi_decode(types, data[4:])
-    return f"{name}({', '.join(str(value) for value in values)})"
+    return f"{entry['name']}({', '.join(str(value) for value in values)})"

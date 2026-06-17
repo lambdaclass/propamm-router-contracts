@@ -186,15 +186,14 @@ class PropAmmRouter:
         function = getattr(self._contract.functions, _QUOTE_FUNCS[mode])(
             *venue_args, token_in, token_out, amount_in
         )
+        # One path: `call_with_overrides` runs a plain eth_call when no overrides
+        # apply, so quote reverts always decode into named errors via _named_revert.
         overrides = await self._resolve_overrides(opts)
-        if overrides is None:
-            amount_out, venue = await function.call()
-        else:
-            try:
-                raw = await self.client.call_with_overrides(function, **overrides)
-            except RevertError as error:
-                raise _named_revert(error) from error
-            amount_out, venue = abi_decode(["uint256", "address"], raw)
+        try:
+            raw = await self.client.call_with_overrides(function, **(overrides or {}))
+        except RevertError as error:
+            raise _named_revert(error) from error
+        amount_out, venue = abi_decode(["uint256", "address"], raw)
         return Quote(amount_out=amount_out, venue=to_checksum_address(venue))
 
     # ------ Swaps ------
@@ -222,7 +221,7 @@ class PropAmmRouter:
         function = getattr(self._contract.functions, with_fee if fee else plain)(*args)
         # Native-ETH input is signalled by the sentinel and paid via msg.value.
         value = params.amount_in if _eq(params.token_in, ETH_SENTINEL) else None
-        return await self.client.send(function, value)
+        return await self._send(function, value)
 
     async def swap_and_wait(
         self, params: SwapParams, opts: SwapOptions | None = None
@@ -269,7 +268,7 @@ class PropAmmRouter:
     async def approve(self, token: str, amount: int) -> str:
         """Approve the router to pull ``amount`` of ``token`` from the signer."""
         erc20 = self.client.contract(token, ERC20_ABI)
-        return await self.client.send(erc20.functions.approve(self.address, amount))
+        return await self._send(erc20.functions.approve(self.address, amount))
 
     async def allowance(self, token: str, owner: str) -> int:
         """Current router allowance of ``token`` granted by ``owner``."""
@@ -307,6 +306,13 @@ class PropAmmRouter:
         return await self._contract.functions.paused().call()
 
     # ------ Internals ------
+
+    async def _send(self, function: Any, value: int | None = None) -> str:
+        """Send via the client, naming any router custom error in the revert."""
+        try:
+            return await self.client.send(function, value)
+        except RevertError as error:
+            raise _named_revert(error) from error
 
     def _extract_event_from_receipt(self, name: str, receipt: Any) -> dict | None:
         """First log of ``name`` emitted by this router (web3 decodes the args)."""
@@ -372,13 +378,17 @@ def _validate_fee(fee: FrontendFee) -> None:
 
 
 def _named_revert(error: RevertError) -> RevertError:
-    """Name a raw-path revert against the contract's custom errors, if possible."""
+    """Name a revert against the contract's custom errors when possible.
+
+    On a match, the decoded name (e.g. ``UnknownVenue()``) becomes the message;
+    otherwise the original error (which carries the node's message) is kept.
+    """
     if error.data is None:
         return error
     named = name_error(error.data)
     if named is None:
         return error
-    return RevertError(f"{error.message} ({named})", error.data)
+    return RevertError(named, error.data)
 
 
 def _eq(a: str, b: str) -> bool:
