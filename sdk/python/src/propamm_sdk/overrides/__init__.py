@@ -332,7 +332,7 @@ class OverridesWsSource(OverridesSource):
                         self._handle_frame(message)
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:  # noqa: BLE001 - reconnect on any transport error
+            except Exception as exc:  # reconnect on any transport error
                 self._last_error = exc
 
             if self._closed or self._idle_remaining() <= 0:

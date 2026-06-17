@@ -58,7 +58,7 @@ class OverridesError(PropAmmError):
     """Failure while fetching or parsing pAMM state overrides."""
 
 
-class TimeoutError(PropAmmError):  # noqa: A001 - intentionally shadows the builtin TimeoutError
+class TimeoutError(PropAmmError):  # intentionally shadows the builtin TimeoutError
     """An operation did not complete within its deadline."""
 
 
