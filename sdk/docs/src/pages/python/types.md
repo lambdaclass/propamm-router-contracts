@@ -20,9 +20,9 @@ class SwapParams:
     deadline: int
 ```
 
-- `token_in` — token being sold, or `ETH_SENTINEL` for native ETH (attaches
+- `token_in` — address of the token being sold, or `ETH_SENTINEL` for native ETH (attaches
   `msg.value` automatically).
-- `token_out` — token being bought; `ETH_SENTINEL` delivers native ETH.
+- `token_out` — address of the token being bought; `ETH_SENTINEL` delivers native ETH.
 - `amount_in` — exact input amount, in atomic units.
 - `amount_out_min` — minimum acceptable output (net of the frontend fee, when
   one is passed); derive from a quote with `apply_slippage`.

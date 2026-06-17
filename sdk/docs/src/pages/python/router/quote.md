@@ -51,13 +51,13 @@ follow-up [`swap`](/python/router/swap) via its `venues` option.
 
 - **Type:** `str`
 
-Token being sold, or `ETH_SENTINEL` for native ETH.
+Address of the token being sold, or `ETH_SENTINEL` for native ETH.
 
 ### token_out
 
 - **Type:** `str`
 
-Token being bought, or `ETH_SENTINEL` for native ETH.
+Address of the token being bought, or `ETH_SENTINEL` for native ETH.
 
 ### amount_in
 
