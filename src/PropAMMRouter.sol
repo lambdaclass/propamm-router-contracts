@@ -15,7 +15,6 @@ import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/Pau
 import {IPropAMMRouter} from "./interfaces/IPropAMMRouter.sol";
 import {IPropAMM} from "./interfaces/IPropAMM.sol";
 import {IWETH} from "./interfaces/IWETH.sol";
-import {FERMI_ROUTER, IFermiSwapper} from "./interfaces/IFermiSwapper.sol";
 import {BEBOP_ROUTER, IBebopRouter} from "./interfaces/IBebopRouter.sol";
 import {UniV3Router} from "./libraries/UniV3Router.sol";
 import {FrontendFees} from "./libraries/FrontendFees.sol";
@@ -104,7 +103,7 @@ contract PropAMMRouter is
 
         _seedDefaultPairFees();
 
-        _addVenue(FERMI_ROUTER);
+        _addVenue(0x5979458912F80B96d30D4220af8E2e4925A33320); // Fermi
         _addVenue(BEBOP_ROUTER);
         _addVenue(0x71e790dd841c8A9061487cb3E78C288E75cE0B3d); // Kipseli
 
@@ -396,14 +395,7 @@ contract PropAMMRouter is
         // `_coreSwap` engages the Uniswap fallback.
         require(isWhitelistedVenue(venue), UnknownVenue());
 
-        if (venue == FERMI_ROUTER) {
-            IERC20(tokenIn).forceApprove(FERMI_ROUTER, amountIn);
-            int256 _amountIn = amountIn.toInt256();
-            IFermiSwapper(FERMI_ROUTER).fermiSwapWithAllowances(tokenIn, tokenOut, _amountIn, amountOutMin, recipient);
-
-            // Prevent later transfers if token was partially pulled
-            IERC20(tokenIn).forceApprove(FERMI_ROUTER, 0);
-        } else if (venue == BEBOP_ROUTER) {
+        if (venue == BEBOP_ROUTER) {
             uint256 balanceTokenOutBefore = IERC20(tokenOut).balanceOf(address(this));
 
             IERC20(tokenIn).forceApprove(BEBOP_ROUTER, amountIn);
@@ -575,9 +567,9 @@ contract PropAMMRouter is
     /// it cannot be priced.
     /// @dev Self-only. Declared `external` (despite the leading underscore) so
     /// the selection helpers and `quoteVenueV1` can reach it through `this.` and
-    /// wrap it in a `try/catch` — internal calls cannot be caught. The two
-    /// built-in propAMMs (Fermi, Bebop) are priced through their bespoke
-    /// quoters; every other whitelisted venue through the common `IPropAMM.quote`. Reverts
+    /// wrap it in a `try/catch` — internal calls cannot be caught. The
+    /// built-in propAMM Bebop is priced through its bespoke
+    /// quoter; every other whitelisted venue through the common `IPropAMM.quote`. Reverts
     /// `UnknownVenue` for a non-whitelisted, non-fallback `venue`, and bubbles up
     /// any revert from the underlying quoter so callers can skip it. Unlike
     /// `quoteVenueV1`, it does NOT gracefully fall back to the public venue.
@@ -600,10 +592,7 @@ contract PropAMMRouter is
 
         require(_whitelistedVenues.contains(venue), UnknownVenue());
 
-        if (venue == FERMI_ROUTER) {
-            int256 amountInt256 = amount.toInt256();
-            (, amountOut) = IFermiSwapper(FERMI_ROUTER).quoteAmounts(tokenIn, tokenOut, amountInt256);
-        } else if (venue == BEBOP_ROUTER) {
+        if (venue == BEBOP_ROUTER) {
             amountOut = IBebopRouter(BEBOP_ROUTER).quote(tokenIn, tokenOut, amount);
         } else {
             // Any other whitelisted venue speaks the common `IPropAMM` interface.
@@ -812,9 +801,8 @@ contract PropAMMRouter is
     /// (and quote) through it — including as an auto-selection candidate in
     /// `swapV1` / `quoteV1`, which iterate the whitelist.
     /// @dev Access-controlled via the AccessManager authority. Reverts `ZeroAddress` if `venue` is zero, or
-    /// `VenueAlreadyWhitelisted` if it is already listed. Other than the two
-    /// built-in propAMMs (Fermi and Bebop, which use their bespoke interfaces),
-    /// a venue is expected
+    /// `VenueAlreadyWhitelisted` if it is already listed. Other than the
+    /// built-in propAMMs Bebop, (which use their bespoke interface), a venue is expected
     /// to implement the common `IPropAMM` interface. Listing an address that does
     /// not (an EOA, the wrong contract, a not-yet-deployed adapter) is not a
     /// foot-gun: its `quote`/`swap` calls revert, so it is skipped by selection
