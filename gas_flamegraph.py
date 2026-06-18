@@ -73,6 +73,35 @@ def fetch_trace(txhash, rpc):
     return json.loads(out)
 
 
+def fetch_receipt_gas(txhash, rpc):
+    """Actual gas charged on-chain (what Etherscan shows) from the tx receipt."""
+    out = subprocess.run(
+        ["cast", "rpc", "--rpc-url", rpc, "eth_getTransactionReceipt", txhash],
+        check=True, capture_output=True, text=True,
+    ).stdout
+    return int(json.loads(out)["gasUsed"], 16)
+
+
+def scale_to_receipt(folded, receipt_gas):
+    """Scale every frame so the total equals the on-chain receipt gas.
+
+    callTracer reports gross execution gas; the receipt is net of refunds (and includes
+    intrinsic). Refunds aren't attributable to a frame, so we spread the adjustment
+    proportionally across frames, keeping their relative widths. The rounding remainder
+    is absorbed into the largest frame so the total matches the receipt exactly.
+    """
+    parsed = [(line.rsplit(" ", 1)[0], int(line.rsplit(" ", 1)[1])) for line in folded]
+    gross = sum(v for _, v in parsed)
+    if gross == 0:
+        return folded
+    factor = receipt_gas / gross
+    scaled = [(stack, max(1, round(v * factor))) for stack, v in parsed]
+    remainder = receipt_gas - sum(v for _, v in scaled)
+    biggest = max(range(len(scaled)), key=lambda i: scaled[i][1])
+    scaled[biggest] = (scaled[biggest][0], scaled[biggest][1] + remainder)
+    return [f"{stack} {v}" for stack, v in scaled]
+
+
 def fold(node, stack, selectors, lines):
     """Walk the call tree, emitting one folded-stack line per frame with self-gas."""
     selector = node.get("input", "0x")[:10]
@@ -114,7 +143,13 @@ def main():
     trace = fetch_trace(txhash, rpc)
     folded = []
     fold(trace, [], selectors, folded)
-    render(folded, name, f"transaction: {txhash}", Path(f"{name.replace(' ', '_')}.svg"))
+
+    # Scale frames so the total matches the on-chain receipt gas (see scale_to_receipt).
+    receipt_gas = fetch_receipt_gas(txhash, rpc)
+    folded = scale_to_receipt(folded, receipt_gas)
+
+    subtitle = f"transaction: {txhash}  |  {receipt_gas:,} gas on-chain"
+    render(folded, name, subtitle, Path(f"{name.replace(' ', '_')}.svg"))
 
 
 if __name__ == "__main__":
