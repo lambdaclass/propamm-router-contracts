@@ -1,9 +1,9 @@
 // Slim root: the two entry classes and core types. Everything else lives in
-// subpath modules — see @propamm/sdk/router, @propamm/sdk/common/*.
+// subpath modules — see propamm/router, propamm/common/*.
 export { ContractClient } from "./client.js";
 export type { ContractClientOptions, ReadParams, WriteParams } from "./client.js";
 
-export { PropAmmRouter } from "./router/index.js";
+export { MAINNET_ROUTER, PropAmmRouter } from "./router/index.js";
 export type {
   FrontendFee,
   PropAmmRouterOptions,
