@@ -91,12 +91,13 @@ def fold(node, stack, selectors, lines):
         fold(child, full_stack, selectors, lines)
 
 
-def render(folded, title, out_path):
+def render(folded, title, subtitle, out_path):
     """Render folded stacks to an SVG via flamegraph.pl, then open it."""
     if not FLAMEGRAPH_PL.exists():
         urllib.request.urlretrieve(FLAMEGRAPH_URL, FLAMEGRAPH_PL)
     svg = subprocess.run(
-        ["perl", str(FLAMEGRAPH_PL), "--title", title, "--countname", "gas", "--minwidth", "0"],
+        ["perl", str(FLAMEGRAPH_PL), "--flamechart", "--title", title, "--subtitle", subtitle,
+         "--countname", "gas", "--minwidth", "0"],
         input="\n".join(folded), check=True, capture_output=True, text=True,
     ).stdout
     out_path.write_text(svg)
@@ -113,7 +114,7 @@ def main():
     trace = fetch_trace(txhash, rpc)
     folded = []
     fold(trace, [], selectors, folded)
-    render(folded, name, Path(f"{name.replace(' ', '_')}.svg"))
+    render(folded, name, f"transaction: {txhash}", Path(f"{name.replace(' ', '_')}.svg"))
 
 
 if __name__ == "__main__":
