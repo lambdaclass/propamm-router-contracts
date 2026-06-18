@@ -522,6 +522,7 @@ contract PropAMMRouter is
         }
 
         amountOut = _dispatchQuoteVenue(venue, tokenIn, tokenOut, amount);
+        quotedVenue = venue;
     }
 
     /// @inheritdoc IPropAMMRouter
