@@ -26,7 +26,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -36,7 +37,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "pnpm typecheck && pnpm lint && pnpm format:check",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "prepublishOnly": "pnpm clean && pnpm build && pnpm check"
   },
   "dependencies": {
     "viem": "^2.50.4"
