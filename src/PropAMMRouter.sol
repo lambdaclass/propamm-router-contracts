@@ -3,7 +3,6 @@ pragma solidity ^0.8.35;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
@@ -36,7 +35,6 @@ contract PropAMMRouter is
     UUPSUpgradeable
 {
     using SafeERC20 for IERC20;
-    using SafeCast for uint256;
     using EnumerableSet for EnumerableSet.AddressSet;
 
     /// @notice Fallback venue address.
