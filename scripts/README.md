@@ -93,7 +93,7 @@ columns: `total_gas`, `inner_swap_gas` (the PropAMM execution), `premium_vs_raw_
 (gross overhead), `premium_vs_direct_gas` (vs a realistic direct call).
 
 > ⚠️ **Refund caveat.** `callTracer` subcall gas is *gross* while the tx total is
-> *net* of EIP-3529 refunds, so the per-component split carries ~10k gas of
+> *net* of EIP-3529 refunds, so the per-component split carries some gas-level
 > uncertainty (it under-counts venues that refund heavily). `total_gas` and
 > `inner_swap_gas` are the firm anchors. For a refund-clean premium, use the
 > simulation cross-check below.
@@ -134,8 +134,7 @@ and injected via state override).
 - Requires an **archive** RPC (publicnode serves state ≳5M blocks deep). A pruned
   node fails rather than returning a wrong answer.
 - For byte-exact results, **pin `solc` 0.8.29 `--optimize`** (a different compiler
-  shifts the injected helper's dispatcher cost by a few gas). The ~55–66k headline
-  premium is robust regardless.
+  shifts the injected helper's dispatcher cost by a few gas).
 
 ---
 
@@ -193,32 +192,3 @@ unavailable (recorded in the `method` column).
 > ℹ️ **Idle venues.** Any of the three named PropAMMs the router did not route to
 > within the window is emitted as an explicit "checked: no router routing … in
 > window" row in both CSVs, so the absence is documented rather than silent.
-
----
-
-## Findings (as of mid-2025 demo traffic)
-
-- Going through the router costs a **roughly fixed ~55–66k extra gas per swap**
-  vs. calling the PropAMM directly — dominated by the second `transferFrom` (the
-  router pulls funds in, then pushes to the venue), output balance-delta
-  verification, whitelist/pause/reentrancy reads, and the proxy hop.
-- As a percentage this is **~29% on a cheap venue (Fermi, ~192k direct)** and
-  **~20% on a heavy venue (Kipseli, ~332k direct)** — the absolute overhead is
-  venue-independent; the percentage just tracks how heavy the underlying swap is.
-- The auto-selection entrypoint `swapViaSelectedVenuesV1` adds a further ~100k gas
-  because it re-quotes candidate venues on-chain; explicit `swapViaVenueV1` avoids it.
-
-### Quote overhead (from `router_overhead.py`, mainnet, last-3-days windows)
-
-- **Quoting through the router adds a near-constant ~15.6k gas** over a direct
-  propAMM quote — **Kipseli +15.6k (+11%)**, built-in **Fermi +15.6k (+16%)** — and
-  **~27k (+23%)** on the public Uniswap-fallback path. As with swaps, the absolute
-  overhead is roughly venue-independent; the percentage tracks how heavy the
-  underlying quote is.
-- **Swap overhead in a given short window depends heavily on what the router routed
-  to.** In recent windows the router's own (`tx.to == router`) swaps landed mostly
-  on the Uniswap fallback (~+115% vs a direct call — but that is router→public-DEX,
-  not a propAMM), with only Kipseli giving a clean propAMM sample (~+5% vs a
-  refund-credited direct baseline, ~+22% vs the bare venue swap frame). Built-in
-  Fermi traffic arrived almost entirely through wrapper/keeper contracts
-  (`tx.to ≠ router`), which the tool flags and excludes from swap stats.
