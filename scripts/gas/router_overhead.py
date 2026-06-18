@@ -105,13 +105,19 @@ UNISWAP_FALLBACK = "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45"  # UniV3 SwapRou
 ETH_SENTINEL = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 WETH_ADDR = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
 
+# The canonical PropAMMs are the whitelisted generic-IPropAMM venues below: they
+# use the STANDARD swap (0x9908fc8b) / quote (0xb6466384) selectors. The two
+# "legacy builtin" addresses (FERMI_BUILTIN, BEBOP_BUILTIN) are still whitelisted
+# and the router dispatches them through bespoke entrypoints (quoteAmounts /
+# fermiSwapWithAllowances, IBebopRouter), so they are labeled distinctly and not
+# mistaken for the canonical Fermi/Bebop.
 VENUE_NAMES = {
-    "0x5979458912f80b96d30d4220af8e2e4925a33320": "Fermi (new)",
-    FERMI_BUILTIN: "Fermi (builtin)",
+    "0x5979458912f80b96d30d4220af8e2e4925a33320": "Fermi",
+    FERMI_BUILTIN: "Fermi (legacy builtin)",
     "0x71e790dd841c8a9061487cb3e78c288e75ce0b3d": "Kipseli",
     "0xccdda3258aa079ce45e6aa6f35829a6612eb7c45": "Kipseli (alt)",
-    "0xdb13ad0fcd134e9c48f2fdaea8f6751a0f5349ca": "Bebop (new)",
-    BEBOP_BUILTIN: "Bebop (builtin)",
+    "0xdb13ad0fcd134e9c48f2fdaea8f6751a0f5349ca": "Bebop",
+    BEBOP_BUILTIN: "Bebop (legacy builtin)",
     UNISWAP_FALLBACK: "Uniswap V3 (fallback)",
 }
 
