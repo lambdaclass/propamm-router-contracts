@@ -47,7 +47,6 @@ export default defineConfig({
       },
     ],
     sidebar: [
-      { text: "Introduction", link: "/" },
       {
         text: "PropAMMs",
         collapsed: false,
