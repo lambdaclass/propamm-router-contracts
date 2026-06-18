@@ -24,7 +24,7 @@ import { privateKeyToAccount } from "propamm/common/accounts";
 
 const account = privateKeyToAccount("0x...");
 const client = new ContractClient({ rpcUrl: "https://...", chain: mainnet, account });
-const router = new PropAmmRouter(client, "0x..."); // deployed router proxy
+const router = new PropAmmRouter(client); // defaults to the mainnet router proxy
 
 const amountIn = parseEther("1");
 const { amountOut } = await router.quote(ETH_SENTINEL, USDC, amountIn);
@@ -68,7 +68,7 @@ const client = new ContractClient({
   chain: mainnet,
   account: privateKeyToAccount("0x..."), // omit for read-only (quotes/views still work)
 });
-const router = new PropAmmRouter(client, "0x..."); // deployed router proxy
+const router = new PropAmmRouter(client, "0x..."); // pass an explicit proxy; omit for the mainnet default
 
 // Quote, approve, swap, then wait
 const amountIn = parseUnits("100", 6); // 100 USDC
