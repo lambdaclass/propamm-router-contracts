@@ -507,16 +507,7 @@ contract PropAMMRouter is
 
     /// @inheritdoc IPropAMMRouter
     /// @dev Gates on `_isVenue` (a whitelisted propAMM or the fallback),
-    /// reverting `UnknownVenue` otherwise. Prices `venue` through
-    /// `_dispatchQuoteVenue` (which resolves the fallback address to the Uniswap
-    /// V3 route); if the venue cannot be priced (its quoter reverts, or it does
-    /// not implement the expected interface), the call does NOT surface the
-    /// revert — it gracefully falls back to the public venue, returning the
-    /// Uniswap quote and `fallbackSwapRouter` as `quotedVenue`. It only reverts
-    /// when the public venue itself cannot be priced either. The selection
-    /// helpers (`_pickBestVenue`, `_pickBestVenueFrom`) deliberately bypass this
-    /// graceful fallback by calling `_dispatchQuoteVenue` directly, so a failing
-    /// venue is skipped rather than silently re-quoted as the fallback.
+    /// reverting `UnknownVenue` otherwise.
     function quoteVenueV1(address venue, address tokenIn, address tokenOut, uint256 amount)
         public
         returns (uint256 amountOut, address quotedVenue)
@@ -530,13 +521,7 @@ contract PropAMMRouter is
             tokenOut = WETH;
         }
 
-        // Quote the venue (the fallback included), and if it cannot be priced
-        // gracefully fall back to the public venue, reporting `fallbackSwapRouter`.
-        try this._dispatchQuoteVenue(venue, tokenIn, tokenOut, amount) returns (uint256 out) {
-            return (out, venue);
-        } catch {
-            return (quoteUniswapV3(tokenIn, tokenOut, amount), fallbackSwapRouter);
-        }
+        amountOut = _dispatchQuoteVenue(venue, tokenIn, tokenOut, amount);
     }
 
     /// @inheritdoc IPropAMMRouter
@@ -587,7 +572,7 @@ contract PropAMMRouter is
     /// @param amount The amount of `tokenIn` to quote.
     /// @return amountOut The amount of `tokenOut` quoted by `venue`.
     function _dispatchQuoteVenue(address venue, address tokenIn, address tokenOut, uint256 amount)
-        external
+        public
         returns (uint256 amountOut)
     {
         require(msg.sender == address(this), OnlySelf());

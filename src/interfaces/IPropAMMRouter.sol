@@ -203,8 +203,7 @@ interface IPropAMMRouter {
         returns (uint256 bestQuote, address venue);
 
     /// @notice Quotes `amount` of `tokenIn` against a single venue — a whitelisted
-    /// propAMM or the public-venue fallback. If the venue quote fails, it falls back
-    /// to quoting Uniswap V3.
+    /// propAMM or the public-venue fallback.
     /// @dev Reverts `UnknownVenue` if `venue` is neither a whitelisted propAMM nor the
     /// fallback address.
     /// @param venue The venue to quote against — a propAMM address, or the
