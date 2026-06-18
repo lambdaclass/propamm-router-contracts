@@ -5,8 +5,7 @@ Gas costs of swapping through the **PropAMMRouter**, covering two sources of ove
 1. The router itself, vs. swapping directly against a venue.
 2. On-chain requoting, when `swapViaSelectedVenues` quotes every venue before executing.
 
-All totals are the root-frame gas from each flamegraph, scaled to match the on-chain
-receipt `gasUsed` (i.e. the value Etherscan shows).
+> **Note:** Bebop is not included — it does not currently work with the PropAMMRouter.
 
 ## 1. Router gas overhead
 
