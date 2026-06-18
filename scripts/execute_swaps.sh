@@ -9,6 +9,11 @@
 #     frontend fee, in basis points, off the tokenOut before paying the recipient.
 #   MODE=nofee             -> `swapViaVenueV1`: same venue routing + Uniswap V3
 #     fallback, but NO fee skim — the recipient receives the full output.
+#   MODE=selected          -> `swapViaSelectedVenuesV1`: passes a SET of candidate
+#     venues; the router re-quotes them on-chain and best-fills (Uniswap V3 the
+#     safety net). No fee skim. The set is all venues by default, or the [venues] arg.
+#   MODE=selectedwithfee   -> `swapViaSelectedVenuesWithFeeV1`: same best-of-set
+#     routing, plus the frontend fee skim.
 #
 # Before each swap the script QUOTES the targeted venue on-chain (router
 # `quoteVenueV1`, which itself falls back to the Uniswap V3 quote if the venue
@@ -30,11 +35,13 @@
 #     (Titan / Quasar / BuilderNet) built that block.
 #
 # Usage:
-#   ETH_RPC_URL=<rpc> PK=<priv-key> ./scripts/execute_swaps.sh <num_swaps> [venue]
+#   ETH_RPC_URL=<rpc> PK=<priv-key> ./scripts/execute_swaps.sh <num_swaps> [venues]
 #
-# With no <venue>, the script round-robins BEBOP -> FERMI -> KIPSELI across the
-# N swaps. Pass a venue name (e.g. FERMI, case-insensitive) to force ALL N swaps
-# at that single venue instead.
+# <venues> is an optional comma-separated list of venue names (case-insensitive),
+# e.g. "kipseli,fermi". With none, all venues are used. In the single-venue MODEs
+# the list is round-robined one venue per swap (a single name forces all swaps at
+# that venue); in the selected MODEs the list IS the candidate set the router
+# re-quotes and best-fills across.
 #
 # Examples:
 #   # 3 swaps, default mode (withfee, 0.50% fee), venues round-robin BEBOP -> FERMI -> KIPSELI:
@@ -45,6 +52,13 @@
 #
 #   # No frontend fee (swapViaVenueV1) — recipient receives the full output:
 #   MODE=nofee ETH_RPC_URL=... PK=... ./scripts/execute_swaps.sh 5
+#
+#   # Best-of-set routing (swapViaSelectedVenuesV1) — router re-quotes all venues
+#   # on-chain and fills the best; 3 swaps:
+#   MODE=selected ETH_RPC_URL=... PK=... ./scripts/execute_swaps.sh 3
+#
+#   # Best-of a chosen set (KIPSELI + FERMI), passed as the positional arg, with fee:
+#   MODE=selectedwithfee ETH_RPC_URL=... PK=... ./scripts/execute_swaps.sh 4 kipseli,fermi
 #
 #   # 25 bps fee paid to a dedicated fee wallet, tighter 10 bps slippage, all via BEBOP:
 #   FEE_BPS=25 FEE_RECIPIENT=0x... SLIPPAGE_BPS=10 ETH_RPC_URL=... PK=... ./scripts/execute_swaps.sh 6 bebop
@@ -64,7 +78,10 @@
 # Env:
 #   ETH_RPC_URL   (required) JSON-RPC endpoint.
 #   PK            (required) sender private key (0x...).
-#   MODE          (optional) withfee (default, swapViaVenueWithFeeV1) | nofee (swapViaVenueV1, no fee skim).
+#   MODE          (optional) withfee (default, swapViaVenueWithFeeV1) | nofee
+#                 (swapViaVenueV1) | selected (swapViaSelectedVenuesV1) |
+#                 selectedwithfee (swapViaSelectedVenuesWithFeeV1). The venue set
+#                 for the selected MODEs comes from the [venues] positional arg.
 #   RECIPIENT     (optional) who receives the tokenOut; defaults to PK's address.
 #   AMOUNT_IN     (optional) tokenIn units to sell per swap; default 1000000 (1 USDC).
 #   TOKEN_IN      (optional) default USDC.
@@ -161,11 +178,11 @@ muldiv() {
 
 # --- args & env -------------------------------------------------------------
 NUM_SWAPS="${1:-}"
-VENUE_FILTER="${2:-}"                    # optional: force all swaps at one venue
+VENUE_FILTER="${2:-}"                    # optional: comma-separated venue names
 if ! [[ "$NUM_SWAPS" =~ ^[1-9][0-9]*$ ]]; then
-  echo "usage: ETH_RPC_URL=<rpc> PK=<key> $0 <num_swaps> [venue]" >&2
+  echo "usage: ETH_RPC_URL=<rpc> PK=<key> $0 <num_swaps> [venues]" >&2
   echo "  <num_swaps> must be a positive integer" >&2
-  echo "  [venue]     optional venue name to target for every swap" >&2
+  echo "  [venues]    optional comma-separated venue names (e.g. kipseli,fermi)" >&2
   exit 1
 fi
 : "${ETH_RPC_URL:?set ETH_RPC_URL to the JSON-RPC endpoint}"
@@ -176,14 +193,22 @@ if command -v jq >/dev/null 2>&1; then HAVE_JQ=1; else HAVE_JQ=0; fi
 if command -v bc >/dev/null 2>&1; then HAVE_BC=1; else HAVE_BC=0; fi
 
 # --- swap mode --------------------------------------------------------------
-# withfee (default): swapViaVenueWithFeeV1 — skims a frontend fee off tokenOut.
-# nofee            : swapViaVenueV1        — no fee; recipient gets the full out.
-# FEE_MODE is the single boolean every fee-specific branch below keys off of.
+# Two orthogonal dimensions are folded into MODE:
+#   routing — single named venue (swapViaVenue*) vs. a caller-selected SET the
+#             router re-quotes on-chain and best-fills (swapViaSelectedVenues*).
+#   fee     — skim a frontend fee off tokenOut (*WithFee*) or not.
+# withfee (default): swapViaVenueWithFeeV1        — single venue + fee skim.
+# nofee            : swapViaVenueV1               — single venue, no fee.
+# selected         : swapViaSelectedVenuesV1      — venue SET (best-of), no fee.
+# selectedwithfee  : swapViaSelectedVenuesWithFeeV1 — venue SET + fee skim.
+# FEE_MODE / SELECTED_MODE are the booleans every branch below keys off of.
 MODE=$(lc "${MODE:-withfee}")
 case "$MODE" in
-  withfee) FEE_MODE=1 ;;
-  nofee)   FEE_MODE=0 ;;
-  *) echo "error: MODE must be 'withfee' or 'nofee' (got '$MODE')" >&2; exit 1 ;;
+  withfee)         FEE_MODE=1; SELECTED_MODE=0 ;;
+  nofee)           FEE_MODE=0; SELECTED_MODE=0 ;;
+  selected)        FEE_MODE=0; SELECTED_MODE=1 ;;
+  selectedwithfee) FEE_MODE=1; SELECTED_MODE=1 ;;
+  *) echo "error: MODE must be withfee|nofee|selected|selectedwithfee (got '$MODE')" >&2; exit 1 ;;
 esac
 
 # --- fixed addresses (mainnet) ---------------------------------------------
@@ -200,22 +225,44 @@ VENUE_ADDRS=(
 )
 NUM_VENUES=${#VENUE_ADDRS[@]}
 
-# Build the list of venue indices to actually fire at. With no $2 we use every
-# venue (round-robin); with a $2 we restrict to that single matching venue.
+# Build the list of venue indices to operate on from the optional [venues] arg —
+# a comma-separated list of names (e.g. "kipseli,fermi"), case-insensitive, order
+# preserved, dups removed. With no arg we use every venue. In the single-venue
+# MODEs this list is round-robined one venue per swap; in the selected MODEs it
+# IS the candidate set the router re-quotes and best-fills across.
 ACTIVE_IDXS=()
 if [[ -n "$VENUE_FILTER" ]]; then
-  want=$(printf '%s' "$VENUE_FILTER" | tr '[:lower:]' '[:upper:]')
-  for ((v = 0; v < NUM_VENUES; v++)); do
-    if [[ "$want" == "${VENUE_NAMES[$v]}" ]]; then ACTIVE_IDXS=("$v"); break; fi
+  IFS=',' read -r -a _req <<< "$VENUE_FILTER"
+  for nm in "${_req[@]}"; do
+    want=$(printf '%s' "$nm" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')
+    [[ -z "$want" ]] && continue
+    hit=-1
+    for ((v = 0; v < NUM_VENUES; v++)); do
+      [[ "$want" == "${VENUE_NAMES[$v]}" ]] && { hit=$v; break; }
+    done
+    [[ $hit -lt 0 ]] && { echo "error: unknown venue '$nm'; valid: ${VENUE_NAMES[*]}" >&2; exit 1; }
+    dup=0
+    for e in ${ACTIVE_IDXS[@]+"${ACTIVE_IDXS[@]}"}; do [[ "$e" == "$hit" ]] && { dup=1; break; }; done
+    [[ $dup -eq 0 ]] && ACTIVE_IDXS+=("$hit")
   done
-  if [[ ${#ACTIVE_IDXS[@]} -eq 0 ]]; then
-    echo "error: unknown venue '$VENUE_FILTER'; valid: ${VENUE_NAMES[*]}" >&2
-    exit 1
-  fi
+  [[ ${#ACTIVE_IDXS[@]} -eq 0 ]] && { echo "error: no valid venues in '$VENUE_FILTER'" >&2; exit 1; }
 else
   for ((v = 0; v < NUM_VENUES; v++)); do ACTIVE_IDXS+=("$v"); done
 fi
 NUM_ACTIVE=${#ACTIVE_IDXS[@]}
+
+# In the selected MODEs the router re-quotes the candidate SET on-chain and best-
+# fills across it. The set is the [venues] arg (or all venues by default), i.e.
+# ACTIVE_IDXS. SELECTED_ARG is the address[] literal cast expects ("[0xaa,0xbb]");
+# SEL_NAMES is for display.
+SELECTED_ARG=""
+SEL_NAMES=""
+if [[ $SELECTED_MODE -eq 1 ]]; then
+  _addrs=(); _names=()
+  for v in "${ACTIVE_IDXS[@]}"; do _addrs+=("${VENUE_ADDRS[$v]}"); _names+=("${VENUE_NAMES[$v]}"); done
+  SELECTED_ARG="[$(IFS=,; printf '%s' "${_addrs[*]}")]"
+  SEL_NAMES="$(IFS=,; printf '%s' "${_names[*]}")"
+fi
 
 FILLED_COUNT=()                         # per-venue "filled as targeted" tally
 for ((v = 0; v < NUM_VENUES; v++)); do FILLED_COUNT+=(0); done
@@ -450,19 +497,27 @@ fi
 if [[ -n "$BASEFEE_MAX_WEI" ]]; then
   echo "  basefeeGate : wait for basefee <= $BASEFEE_MAX_GWEI gwei before each tx (poll ${GAS_WAIT_SECS}s x $GAS_WAIT_TRIES)"
 fi
+if [[ $SELECTED_MODE -eq 1 ]]; then
+  SWAP_FN=$([[ $FEE_MODE -eq 1 ]] && echo "swapViaSelectedVenuesWithFeeV1" || echo "swapViaSelectedVenuesV1")
+else
+  SWAP_FN=$([[ $FEE_MODE -eq 1 ]] && echo "swapViaVenueWithFeeV1" || echo "swapViaVenueV1")
+fi
+echo "  mode        : $MODE  ($SWAP_FN)"
 if [[ $FEE_MODE -eq 1 ]]; then
-  echo "  mode        : $MODE  (swapViaVenueWithFeeV1)"
-  echo "  slippage    : $SLIPPAGE_BPS bps (${SLIPPAGE_PCT}%)  -> AMOUNT_OUT_MIN = expected net out - slippage, quoted per swap @ targeted venue"
+  echo "  slippage    : $SLIPPAGE_BPS bps (${SLIPPAGE_PCT}%)  -> AMOUNT_OUT_MIN = expected net out - slippage, quoted per swap"
   echo "  feeBps      : $FEE_BPS  (${FEE_PCT}% of gross tokenOut, skimmed to feeRecipient)"
   echo "  feeRecipient: $FEE_RECIPIENT"
 else
-  echo "  mode        : $MODE  (swapViaVenueV1, no fee skim — recipient gets full output)"
-  echo "  slippage    : $SLIPPAGE_BPS bps (${SLIPPAGE_PCT}%)  -> AMOUNT_OUT_MIN = expected out - slippage, quoted per swap @ targeted venue"
+  echo "  slippage    : $SLIPPAGE_BPS bps (${SLIPPAGE_PCT}%)  -> AMOUNT_OUT_MIN = expected out - slippage, quoted per swap"
 fi
-if [[ -n "$VENUE_FILTER" ]]; then
-  echo "  venue       : ${VENUE_NAMES[${ACTIVE_IDXS[0]}]} (forced for all swaps)"
+ACTIVE_NAMES=""
+for v in "${ACTIVE_IDXS[@]}"; do ACTIVE_NAMES="${ACTIVE_NAMES:+$ACTIVE_NAMES,}${VENUE_NAMES[$v]}"; done
+if [[ $SELECTED_MODE -eq 1 ]]; then
+  echo "  venues      : [$SEL_NAMES] (selected set; router re-quotes on-chain and best-fills)"
+elif [[ $NUM_ACTIVE -eq 1 ]]; then
+  echo "  venue       : $ACTIVE_NAMES (all swaps)"
 else
-  echo "  venues      : ${VENUE_NAMES[*]} (round-robin)"
+  echo "  venues      : $ACTIVE_NAMES (round-robin)"
 fi
 if [[ $HAVE_JQ -eq 0 ]]; then
   echo "  note        : jq not found -> printing raw receipts, no venue/builder report"
@@ -512,12 +567,16 @@ echo
 
 # --- fire the swaps ---------------------------------------------------------
 for (( i = 0; i < NUM_SWAPS; i++ )); do
-  idx=${ACTIVE_IDXS[$(( i % NUM_ACTIVE ))]}
-  venue="${VENUE_ADDRS[$idx]}"
-  name="${VENUE_NAMES[$idx]}"
-
   hr
-  echo "swap $(( i + 1 ))/$NUM_SWAPS  ->  target venue: $name ($venue)"
+  if [[ $SELECTED_MODE -eq 1 ]]; then
+    venue=""; name=""; idx=-1                     # no single target in selected mode
+    echo "swap $(( i + 1 ))/$NUM_SWAPS  ->  candidate venues: [$SEL_NAMES]"
+  else
+    idx=${ACTIVE_IDXS[$(( i % NUM_ACTIVE ))]}
+    venue="${VENUE_ADDRS[$idx]}"
+    name="${VENUE_NAMES[$idx]}"
+    echo "swap $(( i + 1 ))/$NUM_SWAPS  ->  target venue: $name ($venue)"
+  fi
   DEADLINE=$(( $(date +%s) + 3600 ))    # per-swap: gating can delay broadcasts
 
   # --- per-swap slippage floor ---------------------------------------------
@@ -528,9 +587,15 @@ for (( i = 0; i < NUM_SWAPS; i++ )); do
   # In nofee mode there is no fee: subtract SLIPPAGE_BPS off the gross quote
   # directly (swapViaVenueV1 compares the floor against the raw delivered output).
   AMOUNT_OUT_MIN=0
-  q_raw=$( { cast call "$ROUTER" \
-      "quoteVenueV1(address,address,address,uint256)(uint256,address)" \
-      "$venue" "$TOKEN_IN" "$TOKEN_OUT" "$AMOUNT_IN" --rpc-url "$ETH_RPC_URL" 2>/dev/null || true; } )
+  if [[ $SELECTED_MODE -eq 1 ]]; then
+    q_raw=$( { cast call "$ROUTER" \
+        "quoteSelectedVenuesV1(address[],address,address,uint256)(uint256,address)" \
+        "$SELECTED_ARG" "$TOKEN_IN" "$TOKEN_OUT" "$AMOUNT_IN" --rpc-url "$ETH_RPC_URL" 2>/dev/null || true; } )
+  else
+    q_raw=$( { cast call "$ROUTER" \
+        "quoteVenueV1(address,address,address,uint256)(uint256,address)" \
+        "$venue" "$TOKEN_IN" "$TOKEN_OUT" "$AMOUNT_IN" --rpc-url "$ETH_RPC_URL" 2>/dev/null || true; } )
+  fi
   { read -r q_line1; read -r q_line2; } < <(printf '%s\n' "$q_raw") || true
   expected_gross=$(printf '%s' "${q_line1:-}" | grep -oE '^[0-9]+' || true)
   quoted_addr=$(printf '%s' "${q_line2:-}" | grep -oiE '0x[0-9a-f]{40}' || true)
@@ -560,9 +625,25 @@ for (( i = 0; i < NUM_SWAPS; i++ )); do
   price_tx
   [[ -n "$PRICE_NOTE" ]] && echo "   gas    : $PRICE_NOTE"
 
-  # Build the swap call for the selected MODE. withfee appends the frontend-fee
-  # tuple (uint16 bps, address recipient); nofee uses the plain swapViaVenueV1.
-  if [[ $FEE_MODE -eq 1 ]]; then
+  # Build the swap call for the chosen MODE. The *WithFee* variants append the
+  # frontend-fee tuple (uint16 bps, address recipient); the selected* variants
+  # take the candidate set (address[]) instead of a single venue address.
+  if [[ $SELECTED_MODE -eq 1 && $FEE_MODE -eq 1 ]]; then
+    SWAP_ARGS=(
+      "$ROUTER"
+      "swapViaSelectedVenuesWithFeeV1(address[],address,address,uint256,uint256,address,uint256,(uint16,address))"
+      "$SELECTED_ARG" "$TOKEN_IN" "$TOKEN_OUT" "$AMOUNT_IN" "$AMOUNT_OUT_MIN" "$RECIPIENT" "$DEADLINE"
+      "($FEE_BPS,$FEE_RECIPIENT)"
+      "${CAST_COMMON[@]}" --gas-limit "$GAS_LIMIT" ${FEE_FLAGS[@]+"${FEE_FLAGS[@]}"}
+    )
+  elif [[ $SELECTED_MODE -eq 1 ]]; then
+    SWAP_ARGS=(
+      "$ROUTER"
+      "swapViaSelectedVenuesV1(address[],address,address,uint256,uint256,address,uint256)"
+      "$SELECTED_ARG" "$TOKEN_IN" "$TOKEN_OUT" "$AMOUNT_IN" "$AMOUNT_OUT_MIN" "$RECIPIENT" "$DEADLINE"
+      "${CAST_COMMON[@]}" --gas-limit "$GAS_LIMIT" ${FEE_FLAGS[@]+"${FEE_FLAGS[@]}"}
+    )
+  elif [[ $FEE_MODE -eq 1 ]]; then
     SWAP_ARGS=(
       "$ROUTER"
       "swapViaVenueWithFeeV1(address,address,address,uint256,uint256,address,uint256,(uint16,address))"
@@ -655,7 +736,21 @@ for (( i = 0; i < NUM_SWAPS; i++ )); do
   ao_eth=$(cast from-wei "$ao" 2>/dev/null || echo "$ao")
   filler=$(venue_name "$mm")
 
-  if [[ "$(lc "$mm")" == "$(lc "$venue")" ]]; then
+  if [[ $SELECTED_MODE -eq 1 ]]; then
+    # No single target: success = one of the candidate venues best-filled (vs the
+    # Uniswap V3 fallback). Tally by whichever venue the router actually used.
+    fidx=-1
+    for ((v = 0; v < NUM_VENUES; v++)); do
+      [[ "$(lc "$mm")" == "$(lc "${VENUE_ADDRS[$v]}")" ]] && { fidx=$v; break; }
+    done
+    if [[ $fidx -ge 0 ]]; then
+      echo "   filled : OK  best venue $filler  ($mm)"
+      FILLED_COUNT[$fidx]=$(( ${FILLED_COUNT[$fidx]} + 1 ))
+    else
+      echo "   filled : !!  no candidate filled -> $filler ($mm)"
+      FALLBACK_COUNT=$((FALLBACK_COUNT + 1))
+    fi
+  elif [[ "$(lc "$mm")" == "$(lc "$venue")" ]]; then
     echo "   filled : OK  via $name  ($mm)"
     FILLED_COUNT[$idx]=$(( ${FILLED_COUNT[$idx]} + 1 ))
   else
@@ -711,10 +806,15 @@ hr
 echo "Summary"
 hr
 if [[ $HAVE_JQ -eq 1 ]]; then
+  if [[ $SELECTED_MODE -eq 1 ]]; then FILL_LABEL="best-filled"; else FILL_LABEL="filled as targeted"; fi
   for v in "${ACTIVE_IDXS[@]}"; do
-    echo "  ${VENUE_NAMES[$v]} filled as targeted : ${FILLED_COUNT[$v]}"
+    echo "  ${VENUE_NAMES[$v]} $FILL_LABEL : ${FILLED_COUNT[$v]}"
   done
-  echo "  fell back to other venue   : $FALLBACK_COUNT"
+  if [[ $SELECTED_MODE -eq 1 ]]; then
+    echo "  fell back to Uniswap V3    : $FALLBACK_COUNT"
+  else
+    echo "  fell back to other venue   : $FALLBACK_COUNT"
+  fi
   if [[ $FEE_MODE -eq 1 ]]; then
     echo "  --- frontend fee (${FEE_PCT}%) ---"
     echo "  fee matched expected       : $FEE_OK_COUNT"

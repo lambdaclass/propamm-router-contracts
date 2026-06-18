@@ -1,16 +1,19 @@
 # Scripts
 
-This directory holds two kinds of scripts:
+This directory holds three kinds of scripts:
 
 - **Foundry deploy/ops scripts** (`*.s.sol`): `Deploy.s.sol`, `Execute.s.sol`,
   `Upgrade.s.sol`, `setupRouterVariables.s.sol`. See the root `README.md` and
   `.env.example` for how to run those with `forge script`.
+- **On-chain swap drivers** (`execute_swaps.sh`, `execute_direct_swaps.sh`): fire
+  real `$1` swaps through the PropAMM router (or directly at each venue) to
+  generate the transactions the gas tools below later analyze.
 - **Off-chain analysis tooling** (`kyberswap/`, `gas/`): the routing and
   gas-comparison experiments documented below.
 
-Everything below is plain Python 3 using only the **standard library** — there is
-nothing to `pip install`. The gas tools additionally shell out to Foundry's
-`cast` (and `solc` for one helper).
+The analysis tooling below is plain Python 3 using only the **standard library** —
+there is nothing to `pip install`. The swap drivers are Bash; they and the gas
+tools shell out to Foundry's `cast` (and `solc` for one helper).
 
 > Run all commands **from the repository root** — the scripts write their default
 > CSVs to `scripts/kyberswap/` and `scripts/gas/` using relative paths.
@@ -23,9 +26,11 @@ nothing to `pip install`. The gas tools additionally shell out to Foundry's
 |---|---|---|
 | Python 3.10+ | all | stdlib only |
 | Network access to `aggregator-api.kyberswap.com` | `quote_sweep.py` | live quotes |
-| `cast` (Foundry) | `router_gas_compare.py`, `direct_sim.py` | storage slots + RPC |
+| `cast` (Foundry) | `router_gas_compare.py`, `direct_sim.py`, `execute_swaps.sh` | storage slots + RPC; the driver also broadcasts txs |
+| `jq`, `bc` | `execute_swaps.sh` | receipt decoding + fee-math check (script still runs without, just prints raw JSON) |
 | `solc` 0.8.29 | `direct_sim.py` | compiles the helper (auto, or pass bytecode) |
 | `ETH_RPC_URL` | the gas tools | **archive** node with `debug_traceTransaction` + state overrides (e.g. `ethereum-rpc.publicnode.com`) |
+| `ETH_RPC_URL` + `PK` | `execute_swaps.sh` | any mainnet RPC that accepts `eth_sendRawTransaction`; `PK` is a **funded** sender — these are real txs that cost gas |
 
 Quick capability check for the RPC:
 
@@ -71,7 +76,69 @@ plus a printed per-size summary of the distinct routes observed and their counts
 
 ---
 
-## 2. Router gas decomposition — `gas/router_gas_compare.py`
+## 2. Fire router swaps — `execute_swaps.sh`
+
+Broadcasts `N` real swaps through the PropAMM router
+(`swapViaVenue*` / `swapViaSelectedVenues*`), selling 1 USDC → WETH per swap by
+default. This is what *produces* the on-chain transactions the gas tools below read
+back. Before each swap it quotes the targeted venue on-chain (`quoteVenueV1`) and
+sets `AMOUNT_OUT_MIN` to the quote minus `SLIPPAGE_BPS` (default 0.50%); after each
+tx it decodes the `Swapped` event's `marketMaker` to report **which venue actually
+filled** (vs. silently falling back to Uniswap V3), the output received, the
+frontend-fee check, and which builder built the landing block.
+
+`MODE` picks the routing function — and changes what the `[venues]` arg means:
+
+| `MODE` | function | `[venues]` is… |
+|---|---|---|
+| `withfee` *(default)* | `swapViaVenueWithFeeV1` | round-robin: one venue per swap |
+| `nofee` | `swapViaVenueV1` | round-robin: one venue per swap |
+| `selected` | `swapViaSelectedVenuesV1` | the **candidate set** the router re-quotes on-chain and best-fills |
+| `selectedwithfee` | `swapViaSelectedVenuesWithFeeV1` | the **candidate set** (best-of), plus a fee skim |
+
+`[venues]` is an optional comma-separated, case-insensitive list — valid names are
+`BEBOP`, `FERMI`, `KIPSELI` (order preserved, dups dropped). Omit it to use all
+three. Uniswap V3 is the safety net in every mode.
+
+```bash
+# Best-of {KIPSELI, FERMI} with the frontend fee — the router re-quotes BOTH venues
+# on-chain each swap and fills whichever prices best (Uniswap V3 as fallback). 4 swaps:
+MODE=selectedwithfee ETH_RPC_URL=… PK=0x… ./scripts/execute_swaps.sh 4 kipseli,fermi
+
+# Same best-of-set, no fee (recipient gets the full output):
+MODE=selected ETH_RPC_URL=… PK=0x… ./scripts/execute_swaps.sh 4 kipseli,fermi
+
+# Single-venue mode with the same arg → round-robins KIPSELI → FERMI → KIPSELI → …,
+# one venue per swap (NOT best-of). 4 swaps, default withfee + 0.50% fee:
+ETH_RPC_URL=… PK=0x… ./scripts/execute_swaps.sh 4 kipseli,fermi
+
+# All swaps forced through a single venue (one name = no rotation):
+ETH_RPC_URL=… PK=0x… ./scripts/execute_swaps.sh 10 fermi
+```
+
+Key env: `ETH_RPC_URL`, `PK` (required); `MODE` (above); `FEE_BPS` (default 50),
+`FEE_RECIPIENT`; `SLIPPAGE_BPS` (default 50); `AMOUNT_IN` / `TOKEN_IN` / `TOKEN_OUT`
+(default 1 USDC → WETH; re-size `AMOUNT_IN` in base units whenever you change
+`TOKEN_IN`); `PRIORITY_GWEI` / `MAX_FEE_GWEI` / `BASEFEE_MAX_GWEI` (gas pricing and
+a cheap-gas gate); `RECEIPT_TRIES` / `RECEIPT_WAIT_SECS` (receipt-poll budget).
+
+**Output:** no CSV — it's a driver, not an analyzer. Per tx it prints the tx hash
+and a verdict line (filled venue, output, fee OK/MISMATCH, builder), then a
+per-venue "filled as targeted" tally at the end.
+
+> ⚠️ **Real mainnet txs.** Each run spends gas from `PK` and the ERC20 approve is
+> only skipped when the existing allowance already covers the batch. Start with a
+> small `N`.
+
+> ⚠️ **Quoted ≠ filled.** A venue can quote on-chain yet fail to fill (e.g. FERMI
+> RFQ); in the single-venue modes that pushes the min above the Uniswap fallback's
+> real fill and the tx reverts. The `selected*` modes re-quote the whole set, so
+> they tolerate this better. Watch the `marketMaker` in the verdict to see what
+> truly filled.
+
+---
+
+## 3. Router gas decomposition — `gas/router_gas_compare.py`
 
 Finds the swaps we fired through the PropAMM router
 (`0x4DdF368080CD7946db5b459aD591c350158175e1`) by reading the venue `Swapped`
@@ -100,7 +167,7 @@ columns: `total_gas`, `inner_swap_gas` (the PropAMM execution), `premium_vs_raw_
 
 ---
 
-## 3. Refund-clean gas cross-check (simulation) — `gas/direct_sim.py`
+## 4. Refund-clean gas cross-check (simulation) — `gas/direct_sim.py`
 
 The rigorous "router vs. direct" number. For one real `swapViaVenueV1` /
 `swapViaVenueWithFeeV1` transaction it:
@@ -138,7 +205,7 @@ and injected via state override).
 
 ---
 
-## 4. Router overhead over the last N days, swaps + quotes — `gas/router_overhead.py`
+## 5. Router overhead over the last N days, swaps + quotes — `gas/router_overhead.py`
 
 The all-in-one "how much overhead does the router add" tool, scoped to a rolling
 time window (default **3 days**) and covering **both** operations. It discovers
