@@ -1,0 +1,53 @@
+{
+  "name": "propamm",
+  "version": "0.1.0",
+  "packageManager": "pnpm@9.15.4",
+  "description": "TypeScript SDK for interacting with the PropAMM contracts",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./router": {
+      "types": "./dist/router/index.d.ts",
+      "import": "./dist/router/index.js"
+    },
+    "./overrides": {
+      "types": "./dist/overrides/index.d.ts",
+      "import": "./dist/overrides/index.js"
+    },
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "import": "./dist/*.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "pnpm typecheck && pnpm lint && pnpm format:check",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "viem": "^2.50.4"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^25.9.2",
+    "eslint": "^10.4.1",
+    "globals": "^17.6.0",
+    "prettier": "^3.8.4",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.61.0"
+  }
+}

@@ -31,3 +31,76 @@ jobs:
         env:
           RPC_URL: https://ethereum-rpc.publicnode.com
         run: forge test
+
+  sdk:
+    name: SDK (typecheck / lint / format)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    defaults:
+      run:
+        working-directory: sdk/typescript
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          package_json_file: sdk/typescript/package.json
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: sdk/typescript/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck, lint and check formatting
+        run: pnpm check
+
+  sdk-rust:
+    name: SDK Rust (build / clippy / format)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: sdk/rust
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: sdk/rust
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Build contract ABI artifact
+        working-directory: .
+        run: forge build src/PropAMMRouter.sol
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Lint
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Build
+        run: cargo build --all-targets
+
+      - name: Run tests
+        env:
+          REQUIRE_CONTRACT_ABI: "1"
+        run: cargo test
