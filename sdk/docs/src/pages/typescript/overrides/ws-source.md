@@ -15,7 +15,7 @@ import { OverridesWsSource } from "@propamm/sdk/overrides";
 import { PropAmmRouter } from "@propamm/sdk/router";
 
 // the default: a router without options creates one internally
-const router = new PropAmmRouter(client, "0x...");
+const router = new PropAmmRouter(client);
 
 // or configure explicitly
 const source = new OverridesWsSource({ idleTimeoutMs: 0 });

@@ -36,7 +36,7 @@ export const client = new ContractClient({
   rpcUrl: "https://...",
   chain: mainnet,
 });
-export const router = new PropAmmRouter(client, "0x..."); // router proxy
+export const router = new PropAmmRouter(client); // defaults to the mainnet router proxy
 ```
 
 :::

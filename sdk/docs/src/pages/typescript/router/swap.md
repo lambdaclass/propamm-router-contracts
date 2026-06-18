@@ -44,7 +44,7 @@ export const client = new ContractClient({
   chain: mainnet,
   account,
 });
-export const router = new PropAmmRouter(client, "0x...");
+export const router = new PropAmmRouter(client); // defaults to the mainnet router proxy
 ```
 
 :::
