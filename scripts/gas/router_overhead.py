@@ -44,8 +44,9 @@ Stdlib only -- nothing to `pip install`. Needs an archive RPC with
 Falls back to `eth_estimateGas` for quotes if `debug_traceCall` is unavailable.
 
 Example:
-    ETH_RPC_URL=... python3 scripts/gas/router_overhead.py
-    python3 scripts/gas/router_overhead.py --days 3 --max-txs 100
+    ETH_RPC_URL=... python3 scripts/gas/router_overhead.py                 # last 3 days
+    python3 scripts/gas/router_overhead.py --start-block 25300000          # from block -> latest
+    python3 scripts/gas/router_overhead.py --start-block 25300000 --to-block 25320000
 """
 
 from __future__ import annotations
@@ -572,9 +573,11 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Router vs direct PropAMM gas overhead (swaps + quotes).")
     ap.add_argument("--rpc", default=os.environ.get("ETH_RPC_URL", ""), help="RPC URL (default $ETH_RPC_URL)")
     ap.add_argument("--router", default=ROUTER, help=f"Router address (default {ROUTER})")
-    ap.add_argument("--days", type=float, default=3.0, help="Lookback window in days (default 3)")
-    ap.add_argument("--from-block", type=int, default=0, help="Override start block (default: derived from --days)")
+    ap.add_argument("--start-block", "--from-block", dest="from_block", type=int, default=0,
+                    help="Start block: analyze from here to --to-block (latest). Overrides --days.")
     ap.add_argument("--to-block", type=int, default=0, help="End block (default 0 = latest)")
+    ap.add_argument("--days", type=float, default=3.0,
+                    help="Lookback window in days; used only when --start-block is not given (default 3)")
     ap.add_argument("--window", type=int, default=3000, help="getLogs chunk size (default 3000)")
     ap.add_argument("--max-txs", type=int, default=200, help="Max swaps to analyze (default 200)")
     ap.add_argument("--delay", type=float, default=0.1, help="Seconds between traced txs (default 0.1)")
@@ -602,13 +605,17 @@ def main() -> int:
         to_block = latest
     now_ts = hx(rpc(url, "eth_getBlockByNumber", [hex(to_block), False])["timestamp"])
     if args.from_block:
-        from_block = min(args.from_block, to_block)
+        if args.from_block > to_block:
+            print(f"ERROR: --start-block {args.from_block} > end block {to_block}.", file=sys.stderr)
+            return 2
+        from_block = args.from_block
+        window_desc = f"--start-block {from_block}"
     else:
         target = now_ts - int(args.days * 86400)
         from_block = block_at_timestamp(url, target, latest)
-    if from_block > to_block:
-        print(f"ERROR: from_block {from_block} > to_block {to_block}.", file=sys.stderr)
-        return 2
+        window_desc = f"--days {args.days}"
+    from_ts = hx(rpc(url, "eth_getBlockByNumber", [hex(from_block), False])["timestamp"])
+    span_days = (now_ts - from_ts) / 86400
 
     # Probe debug_traceCall once; fall back to eth_estimateGas if unsupported.
     _, _, _, probe_err = trace_call(url, ROUTER, "0x", to_block)
@@ -616,7 +623,8 @@ def main() -> int:
     method = "eth_estimateGas (debug_traceCall unavailable)" if use_estimate else "debug_traceCall"
 
     print(f"Router {args.router}  chainId {chain_id}")
-    print(f"Window: blocks {from_block}-{to_block} (~{args.days} days)")
+    print(f"Window: blocks {from_block}-{to_block} "
+          f"({to_block - from_block + 1:,} blocks, ~{span_days:.2f} days) [{window_desc}]")
     print(f"Quote sim method: {method}\n")
 
     swaps = find_router_swaps(url, args.router, from_block, to_block, args.window)

@@ -164,15 +164,18 @@ CSVs:
   Premium = `router_quote_gas − direct_quote_gas`.
 
 ```bash
-ETH_RPC_URL=… python3 scripts/gas/router_overhead.py            # last 3 days
-python3 scripts/gas/router_overhead.py --days 7 --max-txs 100   # wider window
-python3 scripts/gas/router_overhead.py --from-block 25320000 --to-block 25344000
+ETH_RPC_URL=… python3 scripts/gas/router_overhead.py                  # last 3 days (default)
+python3 scripts/gas/router_overhead.py --start-block 25300000         # from a block -> latest
+python3 scripts/gas/router_overhead.py --start-block 25300000 --to-block 25320000   # pinned range
+python3 scripts/gas/router_overhead.py --days 7 --max-txs 100         # wider time window
 ```
 
-Key flags: `--days` (default 3), `--from-block`/`--to-block` (override the derived
-window), `--max-txs`, `--window` (getLogs chunk), `--delay`, `--out-swaps`,
-`--out-quotes`, `--rpc`, `--router`. Quotes fall back to `eth_estimateGas` if
-`debug_traceCall` is unavailable (recorded in the `method` column).
+Key flags: `--start-block` (alias `--from-block`) — analyze from this block to
+`--to-block` (default latest), overriding `--days`; `--days` (default 3) is the
+time-based fallback used only when `--start-block` is omitted; `--max-txs`,
+`--window` (getLogs chunk), `--delay`, `--out-swaps`, `--out-quotes`, `--rpc`,
+`--router`. Quotes fall back to `eth_estimateGas` if `debug_traceCall` is
+unavailable (recorded in the `method` column).
 
 > ⚠️ **Cold/warm.** The venue frame *inside* the router tx is warm (the router
 > pre-warms storage slots/addresses via EIP-2929), so `inner_exec_gas` slightly
