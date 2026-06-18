@@ -12,13 +12,13 @@
  * The RPC_URL environment variable is required (e.g. a mainnet node).
  * ROUTER_ADDRESS defaults to the mainnet router deployment.
  */
-import { ContractClient } from "@propamm/sdk/client";
-import { PropAmmRouter } from "@propamm/sdk/router";
-import { ETH_SENTINEL, USDC } from "@propamm/sdk/common/tokens";
-import { PAMMS } from "@propamm/sdk/common/pamms";
-import { formatUnits, parseUnits } from "@propamm/sdk/common/helpers";
-import { anvil } from "@propamm/sdk/common/chains";
-import type { Address } from "@propamm/sdk";
+import { ContractClient } from "propamm/client";
+import { PropAmmRouter } from "propamm/router";
+import { ETH_SENTINEL, USDC } from "propamm/common/tokens";
+import { PAMMS } from "propamm/common/pamms";
+import { formatUnits, parseUnits } from "propamm/common/helpers";
+import { anvil } from "propamm/common/chains";
+import type { Address } from "propamm";
 
 const RPC_URL = process.env.RPC_URL;
 if (!RPC_URL) throw new Error("RPC_URL is required");
