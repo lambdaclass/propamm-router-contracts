@@ -25,13 +25,13 @@ The router adds ~22k–70k gas on top of the underlying swap. Part of this overh
 from the extra ERC-20 transfer the router performs to move the input tokens into the
 PropAMM before the swap — a cost a direct swap avoids.
 
-Flamegraphs:
-[Fermi direct](flamegraphs/swap_Fermi_direct.svg) ·
-[Fermi via router](flamegraphs/swapViaVenue_Fermi.svg) ·
-[Kipseli direct](flamegraphs/swap_Kipseli_direct.svg) ·
-[Kipseli via router](flamegraphs/swapViaVenue_Kipseli.svg) ·
-[Uniswap direct](flamegraphs/swap_Uniswap_direct.svg) ·
-[Uniswap via router](flamegraphs/swapViaVenue_Uniswap.svg)
+Flamegraphs (open interactively via raw.githack.com):
+[Fermi direct](https://raw.githack.com/lambdaclass/propamm-router-contracts/gas-router-overhead/docs/flamegraphs/swap_Fermi_direct.svg) ·
+[Fermi via router](https://raw.githack.com/lambdaclass/propamm-router-contracts/gas-router-overhead/docs/flamegraphs/swapViaVenue_Fermi.svg) ·
+[Kipseli direct](https://raw.githack.com/lambdaclass/propamm-router-contracts/gas-router-overhead/docs/flamegraphs/swap_Kipseli_direct.svg) ·
+[Kipseli via router](https://raw.githack.com/lambdaclass/propamm-router-contracts/gas-router-overhead/docs/flamegraphs/swapViaVenue_Kipseli.svg) ·
+[Uniswap direct](https://raw.githack.com/lambdaclass/propamm-router-contracts/gas-router-overhead/docs/flamegraphs/swap_Uniswap_direct.svg) ·
+[Uniswap via router](https://raw.githack.com/lambdaclass/propamm-router-contracts/gas-router-overhead/docs/flamegraphs/swapViaVenue_Uniswap.svg)
 
 ## 2. On-chain requoting overhead
 
@@ -54,7 +54,7 @@ Each additional venue quoted adds ~73k–113k gas, and that quote's result is di
 if it doesn't win. If callers can quote off-chain and pass the winning venue to
 `swapViaVenue`, they avoid paying for the discarded quotes.
 
-Flamegraphs:
-[swapViaSelectedVenues([Fermi])](flamegraphs/swapViaSelectedVenues_Fermi.svg) ·
-[swapViaSelectedVenues([Kipseli,Fermi])](flamegraphs/swapViaSelectedVenues_Kipseli_Fermi.svg) ·
-[swapViaSelectedVenues([Kipseli,Fermi,Uniswap])](flamegraphs/swapViaSelectedVenues_Kipseli_Fermi_Uniswap.svg)
+Flamegraphs (open interactively via raw.githack.com):
+[swapViaSelectedVenues([Fermi])](https://raw.githack.com/lambdaclass/propamm-router-contracts/gas-router-overhead/docs/flamegraphs/swapViaSelectedVenues_Fermi.svg) ·
+[swapViaSelectedVenues([Kipseli,Fermi])](https://raw.githack.com/lambdaclass/propamm-router-contracts/gas-router-overhead/docs/flamegraphs/swapViaSelectedVenues_Kipseli_Fermi.svg) ·
+[swapViaSelectedVenues([Kipseli,Fermi,Uniswap])](https://raw.githack.com/lambdaclass/propamm-router-contracts/gas-router-overhead/docs/flamegraphs/swapViaSelectedVenues_Kipseli_Fermi_Uniswap.svg)
