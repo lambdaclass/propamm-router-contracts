@@ -49,9 +49,7 @@ All rows execute the swap via Fermi; only the number of venues quoted on-chain c
 | Fermi + Kipseli (2)               | 331,892 | +112,795       |
 | Fermi + Kipseli + Uniswap (3)     | 439,539 | +107,647       |
 
-Each additional venue quoted adds ~73k–113k gas, and that quote's result is discarded
-if it doesn't win. If callers can quote off-chain and pass the winning venue to
-`swapViaVenue`, they avoid paying for the discarded quotes.
+Each additional venue quoted adds ~73k–113k gas.
 
 Flamegraphs (open interactively via raw.githack.com):
 [swapViaSelectedVenues([Fermi])](https://raw.githack.com/lambdaclass/propamm-router-contracts/gas-router-overhead/docs/flamegraphs/swapViaSelectedVenues_Fermi.svg) ·
