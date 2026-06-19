@@ -134,7 +134,7 @@ jobs:
 
       - name: Build
         run: pnpm build
-  
+
   sdk-python:
     name: SDK Python (lint / format / tests)
     runs-on: ubuntu-latest
