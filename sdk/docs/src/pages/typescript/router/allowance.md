@@ -9,7 +9,7 @@ allowance(token: Address, owner: Address): Promise<bigint>
 ## Usage
 
 ```ts
-import { USDC } from "@propamm/sdk/common/tokens";
+import { USDC } from "propamm/common/tokens";
 
 await router.allowance(USDC, account.address);
 ```

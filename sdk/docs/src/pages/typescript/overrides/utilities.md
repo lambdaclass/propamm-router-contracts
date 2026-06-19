@@ -1,6 +1,6 @@
 # Overrides utilities
 
-Lower-level pieces of `@propamm/sdk/overrides`, for custom sources or manual
+Lower-level pieces of `propamm/overrides`, for custom sources or manual
 `eth_call` overrides.
 
 ## parseOverridesMessage
@@ -14,7 +14,7 @@ Parse a raw payload (a WS frame or the JSON-RPC `result`) into an
 lowercased, empty `stateDiff`s dropped.
 
 ```ts
-import { parseOverridesMessage } from "@propamm/sdk/overrides";
+import { parseOverridesMessage } from "propamm/overrides";
 
 const snapshot = parseOverridesMessage(JSON.parse(frame));
 // { blockNumber: 24285034n, timestampNs: ..., perPamm: { "0x...": { ... } } }
@@ -33,7 +33,7 @@ Flatten a snapshot into viem's `StateOverride` array for `eth_call`, merging
 diffs at slot level and padding words to 32 bytes.
 
 ```ts
-import { toStateOverride } from "@propamm/sdk/overrides";
+import { toStateOverride } from "propamm/overrides";
 
 const stateOverride = toStateOverride(snapshot);
 const out = await client.call({ ...callParams, stateOverride });

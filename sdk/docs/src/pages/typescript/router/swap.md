@@ -12,8 +12,8 @@ swapAndWait(params: SwapParams, opts?: SwapOptions): Promise<SwapResult>
 ::: code-group
 
 ```ts [example.ts]
-import { applySlippage, deadlineIn, parseEther } from "@propamm/sdk/common/helpers";
-import { ETH_SENTINEL, USDC } from "@propamm/sdk/common/tokens";
+import { applySlippage, deadlineIn, parseEther } from "propamm/common/helpers";
+import { ETH_SENTINEL, USDC } from "propamm/common/tokens";
 import { account, router } from "./config";
 
 const amountIn = parseEther("1");
@@ -30,10 +30,10 @@ const hash = await router.swap({
 ```
 
 ```ts [config.ts]
-import { ContractClient } from "@propamm/sdk/client";
-import { PropAmmRouter } from "@propamm/sdk/router";
-import { mainnet } from "@propamm/sdk/common/chains";
-import { privateKeyToAccount } from "@propamm/sdk/common/accounts";
+import { ContractClient } from "propamm/client";
+import { PropAmmRouter } from "propamm/router";
+import { mainnet } from "propamm/common/chains";
+import { privateKeyToAccount } from "propamm/common/accounts";
 
 export const account = privateKeyToAccount("0x...");
 export const client = new ContractClient({
@@ -91,7 +91,7 @@ re-quote on-chain and fill via the best of them. Must be non-empty when
 present; omit to swap through the best-quoting venue overall.
 
 ```ts
-import { PAMMS } from "@propamm/sdk/common/pamms";
+import { PAMMS } from "propamm/common/pamms";
 
 // exactly this venue
 const hash = await router.swap(params, { venues: [PAMMS.kipseli] });

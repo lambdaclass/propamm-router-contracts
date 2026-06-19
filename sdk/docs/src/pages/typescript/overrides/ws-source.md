@@ -11,8 +11,8 @@ new OverridesWsSource(options?: OverridesWsSourceOptions)
 ## Usage
 
 ```ts
-import { OverridesWsSource } from "@propamm/sdk/overrides";
-import { PropAmmRouter } from "@propamm/sdk/router";
+import { OverridesWsSource } from "propamm/overrides";
+import { PropAmmRouter } from "propamm/router";
 
 // the default: a router without options creates one internally
 const router = new PropAmmRouter(client);

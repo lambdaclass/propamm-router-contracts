@@ -11,8 +11,8 @@ new OverridesRpcSource(options?: OverridesRpcSourceOptions)
 ## Usage
 
 ```ts
-import { OverridesRpcSource } from "@propamm/sdk/overrides";
-import { PropAmmRouter } from "@propamm/sdk/router";
+import { OverridesRpcSource } from "propamm/overrides";
+import { PropAmmRouter } from "propamm/router";
 
 const source = new OverridesRpcSource();
 const router = new PropAmmRouter(client, "0x...", { overrides: source });

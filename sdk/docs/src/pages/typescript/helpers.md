@@ -1,6 +1,6 @@
 # Helpers
 
-Utilities from `@propamm/sdk/common/helpers`, plus the token/venue constants
+Utilities from `propamm/common/helpers`, plus the token/venue constants
 and viem re-exports.
 
 ## applySlippage
@@ -12,7 +12,7 @@ applySlippage(amount: bigint, bps: number): bigint
 Shave basis points off an amount — derive `amountOutMin` from a quote.
 
 ```ts
-import { applySlippage } from "@propamm/sdk/common/helpers";
+import { applySlippage } from "propamm/common/helpers";
 
 const minOut = applySlippage(amountOut, 50); // quote - 0.5%
 ```
@@ -30,7 +30,7 @@ deadlineIn(seconds: number): bigint
 Unix-timestamp deadline some seconds from now, for swap `deadline` params.
 
 ```ts
-import { deadlineIn } from "@propamm/sdk/common/helpers";
+import { deadlineIn } from "propamm/common/helpers";
 
 const deadline = deadlineIn(300); // now + 5 min
 ```
@@ -49,7 +49,7 @@ formatUnits(value: bigint, decimals: number): string
 viem's unit conversion, re-exported.
 
 ```ts
-import { parseUnits, formatUnits } from "@propamm/sdk/common/helpers";
+import { parseUnits, formatUnits } from "propamm/common/helpers";
 
 parseUnits("1.5", 6);      // 1500000n
 formatUnits(1500000n, 6);  // "1.5"
