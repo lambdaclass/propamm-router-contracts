@@ -19,7 +19,7 @@ const client = new ContractClient({
   chain: mainnet,
   account, // omit for a read-only client (quotes and views still work)
 });
-const router = new PropAmmRouter(client, "0x..."); // deployed router proxy
+const router = new PropAmmRouter(client); // defaults to the mainnet router proxy
 
 const amountIn = parseEther("1");
 const { amountOut, venue } = await router.quote(ETH_SENTINEL, USDC, amountIn);
@@ -34,6 +34,10 @@ const result = await router.swapAndWait({
 });
 console.log(`received ${formatUnits(result.amountOut, 6)} USDC via ${result.executedVenue}`);
 ```
+
+`PropAmmRouter`'s second argument is optional: it defaults to the mainnet
+`PropAMMRouter` deployment (exported as `MAINNET_ROUTER`). Pass an explicit
+address to target a testnet or local-fork deployment.
 
 The quote already reflects fresh off-chain liquidity — pAMM state overrides
 are applied automatically. Native ETH input is signalled with `ETH_SENTINEL`

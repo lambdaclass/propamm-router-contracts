@@ -1,9 +1,6 @@
 # swap
 
-Swap through the best-quoting venue; falls back to Uniswap V3 if the chosen
-venue fails to fill. Returns the transaction hash — pair with
-[`waitForSwap`](/typescript/router/waitForSwap), or use `swapAndWait` to do
-both in one call.
+Swap through the best-quoting venue (across all whitelisted venues by default, or restricted to a subset of selected venues); falls back to Uniswap V3 if the chosen venue fails to fill. Returns the transaction hash — pair with [`waitForSwap`](/typescript/router/waitForSwap), or use `swapAndWait` to do both in one call.
 
 ```ts
 swap(params: SwapParams, opts?: SwapOptions): Promise<Hash>
@@ -44,7 +41,7 @@ export const client = new ContractClient({
   chain: mainnet,
   account,
 });
-export const router = new PropAmmRouter(client, "0x...");
+export const router = new PropAmmRouter(client); // defaults to the mainnet router proxy
 ```
 
 :::
