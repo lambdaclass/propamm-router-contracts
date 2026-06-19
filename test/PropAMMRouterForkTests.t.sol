@@ -25,10 +25,15 @@ contract PropAMMRouterForkTests is Test {
     // The address of the mainnet PropAMMRouter contract (demo environment)
     address constant MAINNET_PROPAMM_ROUTER_ADDRESS = 0x4DdF368080CD7946db5b459aD591c350158175e1;
 
-    /// @dev A newly deployed Kipseli PAMM, distinct from the built-in
-    /// `KIPSELI_PAMM` address.
+    /// @dev The Kipseli PAMM whitelisted by the live demo router — the same
+    /// address `initialize` now seeds as the built-in Kipseli venue.
     address constant NEW_KIPSELI_PAMM = 0x71e790dd841c8A9061487cb3E78C288E75cE0B3d;
     address constant NEW_FERMI_ROUTER = 0x5979458912F80B96d30D4220af8E2e4925A33320;
+
+    /// @dev Block of mainnet tx
+    /// 0x7c3cb5e32867d724a51cbaede51c165454cbc59324511ff3470b983acaa705f0, a
+    /// `swapViaVenueV1` USDC->WETH that settled through `NEW_KIPSELI_PAMM`.
+    uint256 constant KIPSELI_FORK_BLOCK = 25_288_802;
 
     IPropAMMRouter router;
     address taker;
@@ -42,6 +47,13 @@ contract PropAMMRouterForkTests is Test {
         // Target the demo environment router
         router = IPropAMMRouter(MAINNET_PROPAMM_ROUTER_ADDRESS);
 
+        _seedTaker();
+    }
+
+    /// @dev (Re)funds the taker with USDC, grants a max router allowance, and
+    /// gives it ETH for gas. Idempotent so it can run again after a fork roll,
+    /// which reloads account state from a different block and wipes these.
+    function _seedTaker() internal {
         // Fund the taker with 1M USDC (well above the worst-case test spend).
         _fundTakerUSDC(1_000_000 * 1e6);
         _setMaxAllowance(USDC, taker, address(router));
@@ -54,6 +66,19 @@ contract PropAMMRouterForkTests is Test {
     /// and asserts the swap was actually executed by Kipseli (didn't fallback to Uniswap).
     /// It updates the price before sending the swap transaction.
     function test_swapViaVenueV1NewKipseli() public {
+        // Skipped in CI: this test rolls the fork back to `KIPSELI_FORK_BLOCK`
+        // and executes a swap, which requires the RPC to serve account state at
+        // that historical block. CI uses the public node
+        // `ethereum-rpc.publicnode.com`, which is not a full archive node and
+        // returns "historical state ... is not available". Run locally against
+        // an archive RPC (set `RPC_URL`) to exercise this lane.
+        vm.skip(true);
+
+        // Roll back to the block where `NEW_KIPSELI_PAMM` was whitelisted and
+        // `swapViaVenueV1` settled through it on mainnet, then re-seed the taker
+        // because the roll reloads account state from that block.
+        vm.rollFork(KIPSELI_FORK_BLOCK);
+        _seedTaker();
         _updateNewKipseliPrice();
         _runSwapViaVenueV1(NEW_KIPSELI_PAMM);
     }

@@ -1,0 +1,90 @@
+# quote
+
+Best quote across all whitelisted venues and the Uniswap V3 fallback.
+
+The router's quote functions are nonpayable on-chain, so the SDK calls them
+through `eth_call` simulation — by default carrying the latest pAMM state
+overrides plus their block number/timestamp, so venues quote fresh off-chain
+liquidity.
+
+```rust
+pub async fn quote(&self, token_in: Address, token_out: Address, amount_in: U256) -> Result<Quote>
+pub async fn quote_with(&self, token_in: Address, token_out: Address, amount_in: U256, opts: &QuoteOptions) -> Result<Quote>
+```
+
+## Usage
+
+::: code-group
+
+```rust [example.rs]
+use propamm_sdk::common::helpers::parse_ether;
+use propamm_sdk::common::tokens::{ETH_SENTINEL, USDC};
+
+let quote: Quote = router.quote(ETH_SENTINEL, USDC, parse_ether("1")?).await?;
+```
+
+```rust [setup.rs]
+use propamm_sdk::common::helpers::parse_address;
+use propamm_sdk::{ContractClient, PropAmmRouter};
+
+let client = ContractClient::connect("https://...")?;
+let router = PropAmmRouter::new(client, parse_address("0x...")?);
+```
+
+:::
+
+## Returns
+
+[`Result<Quote>`](/rust/types#quote)
+
+The best output amount and the venue that produced it; pin `venue` in a
+follow-up [`swap_with`](/rust/router/swap) via `SwapOptions::venues`.
+
+## Parameters
+
+### token_in
+
+- **Type:** `Address`
+
+Token being sold, or `ETH_SENTINEL` for native ETH.
+
+### token_out
+
+- **Type:** `Address`
+
+Token being bought, or `ETH_SENTINEL` for native ETH.
+
+### amount_in
+
+- **Type:** `U256`
+
+Exact input amount, in atomic units.
+
+## quote_with
+
+Same, plus [`opts: &QuoteOptions`](/rust/types#quoteoptions):
+
+```rust
+use propamm_sdk::router::{QuoteOptions, QuoteOverrides};
+
+let opts = QuoteOptions {
+    overrides: QuoteOverrides::Skip,
+    ..Default::default()
+};
+let stale = router.quote_with(ETH_SENTINEL, USDC, amount_in, &opts).await?;
+```
+
+`venues` restricts the quote: a single entry quotes that venue directly,
+several pick the best among them (must be non-empty when present). When no
+listed venue can be priced, the call does **not** fail: it falls back to
+the Uniswap V3 quote and reports the fallback router as `venue`.
+
+```rust
+use propamm_sdk::common::pamms::{BEBOP, FERMI};
+
+let opts = QuoteOptions {
+    venues: Some(vec![FERMI, BEBOP]),
+    ..Default::default()
+};
+let subset = router.quote_with(ETH_SENTINEL, USDC, amount_in, &opts).await?;
+```
