@@ -1,7 +1,7 @@
 # Types
 
 Shared types across the TypeScript SDK. Import value types from
-`@propamm/sdk/router` / `@propamm/sdk/client` / `@propamm/sdk/overrides`;
+`propamm/router` / `propamm/client` / `propamm/overrides`;
 primitives (`Address`, `Hash`, `Account`, `Chain`) re-export from the root.
 
 ## SwapParams

@@ -6,12 +6,12 @@ client, a router, and two calls.
 ## Quote and swap
 
 ```ts
-import { ContractClient } from "@propamm/sdk/client";
-import { PropAmmRouter } from "@propamm/sdk/router";
-import { ETH_SENTINEL, USDC } from "@propamm/sdk/common/tokens";
-import { applySlippage, deadlineIn, formatUnits, parseEther } from "@propamm/sdk/common/helpers";
-import { mainnet } from "@propamm/sdk/common/chains";
-import { privateKeyToAccount } from "@propamm/sdk/common/accounts";
+import { ContractClient } from "propamm/client";
+import { PropAmmRouter } from "propamm/router";
+import { ETH_SENTINEL, USDC } from "propamm/common/tokens";
+import { applySlippage, deadlineIn, formatUnits, parseEther } from "propamm/common/helpers";
+import { mainnet } from "propamm/common/chains";
+import { privateKeyToAccount } from "propamm/common/accounts";
 
 const account = privateKeyToAccount("0x...");
 const client = new ContractClient({
