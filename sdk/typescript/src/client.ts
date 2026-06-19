@@ -26,7 +26,7 @@ import { getContractError } from "viem/utils";
 export interface ContractClientOptions {
   /** JSON-RPC endpoint, e.g. `http://localhost:8545`. */
   rpcUrl: string;
-  /** Target chain (e.g. `mainnet` or `anvil` from `@propamm/sdk/common/chains`). */
+  /** Target chain (e.g. `mainnet` or `anvil` from `propamm/common/chains`). */
   chain: Chain;
   /** Account used to sign transactions. Omit for a read-only client. */
   account?: Account;

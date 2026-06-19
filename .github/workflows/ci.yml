@@ -105,6 +105,36 @@ jobs:
           REQUIRE_CONTRACT_ABI: "1"
         run: cargo test
 
+  docs:
+    name: Docs (build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    defaults:
+      run:
+        working-directory: sdk/docs
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          package_json_file: sdk/docs/package.json
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: sdk/docs/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+  
   sdk-python:
     name: SDK Python (lint / format / tests)
     runs-on: ubuntu-latest
