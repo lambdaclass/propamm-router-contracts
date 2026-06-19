@@ -78,7 +78,7 @@ contract UpgradeConfigForkTest is Test {
         assertEq(router.fallbackFee(), 0, "fallbackFee 0 right after bare upgrade");
         assertEq(router.whitelistedVenueCount(), 0, "no venues right after bare upgrade");
         vm.expectRevert();
-        router.quoteUniswapV3(WETH, USDC, 1e18);
+        router.quoteVenueV1(router.fallbackSwapRouter(), WETH, USDC, 1e18);
 
         _runConfigScript();
 
@@ -129,6 +129,6 @@ contract UpgradeConfigForkTest is Test {
         assertEq(router.fallbackFee(), 0);
         assertEq(router.resolvedFee(DAI, WETH), 0);
         vm.expectRevert();
-        router.quoteUniswapV3(DAI, WETH, 1e18);
+        router.quoteVenueV1(router.fallbackSwapRouter(), DAI, WETH, 1e18);
     }
 }

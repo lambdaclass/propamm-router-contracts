@@ -212,8 +212,7 @@ interface IPropAMMRouter {
     /// @param tokenOut The token being bought.
     /// @param amount The amount of `tokenIn` to quote.
     /// @return amountOut The amount of `tokenOut` quoted by `venue`.
-    /// @return quotedVenue The asked venue if the quote succeeded, or the fallback
-    /// venue address in other case.
+    /// @return quotedVenue The asked venue. Kept for retro-compatibility.
     function quoteVenueV1(address venue, address tokenIn, address tokenOut, uint256 amount)
         external
         returns (uint256 amountOut, address quotedVenue);

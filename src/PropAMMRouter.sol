@@ -494,13 +494,6 @@ contract PropAMMRouter is
         public
         returns (uint256 bestQuote, address venue)
     {
-        if (tokenIn == ETH_SENTINEL) {
-            tokenIn = WETH;
-        }
-        if (tokenOut == ETH_SENTINEL) {
-            tokenOut = WETH;
-        }
-
         (bestQuote, venue) = _pickBestVenue(tokenIn, tokenOut, amount);
         require(bestQuote > 0, NoQuotesAvailable());
     }
@@ -521,72 +514,13 @@ contract PropAMMRouter is
             tokenOut = WETH;
         }
 
-        amountOut = _dispatchQuoteVenue(venue, tokenIn, tokenOut, amount);
+        // The asked venue. Kept for retro-compatibility.
         quotedVenue = venue;
-    }
 
-    /// @inheritdoc IPropAMMRouter
-    /// @dev Delegates to `_pickBestVenueFrom`, considering ONLY `venues`. Venues
-    /// that revert while quoting — including non-whitelisted addresses, which
-    /// `_dispatchQuoteVenue` rejects with `UnknownVenue` — are skipped, not surfaced.
-    /// When none of `venues` can be priced, it does NOT revert: it falls back to
-    /// the public venue, returning its quote and `fallbackSwapRouter`, mirroring
-    /// the execution-time safety net of `swapViaSelectedVenuesV1`. Only reverts
-    /// `NoQuotesAvailable` if even the fallback cannot be priced.
-    function quoteSelectedVenuesV1(address[] calldata venues, address tokenIn, address tokenOut, uint256 amountIn)
-        public
-        returns (uint256 bestAmountOut, address bestVenue)
-    {
-        if (tokenIn == ETH_SENTINEL) {
-            tokenIn = WETH;
-        }
-        if (tokenOut == ETH_SENTINEL) {
-            tokenOut = WETH;
-        }
-
-        (bestAmountOut, bestVenue) = _pickBestVenueFrom(venues, tokenIn, tokenOut, amountIn);
-        if (bestVenue == address(0)) {
-            // None of the considered venues could be priced; fall back to the
-            // public venue, as documented by `IPropAMMRouter`.
-            try this.quoteUniswapV3(tokenIn, tokenOut, amountIn) returns (uint256 fallbackOut) {
-                bestAmountOut = fallbackOut;
-                bestVenue = fallbackSwapRouter;
-            } catch {
-                revert NoQuotesAvailable();
-            }
-        }
-    }
-
-    /// @notice Strict single-venue quote: prices exactly `venue` and reverts if
-    /// it cannot be priced.
-    /// @dev Self-only. Declared `external` (despite the leading underscore) so
-    /// the selection helpers and `quoteVenueV1` can reach it through `this.` and
-    /// wrap it in a `try/catch` — internal calls cannot be caught. The two
-    /// built-in propAMMs (Fermi, Bebop) are priced through their bespoke
-    /// quoters; every other whitelisted venue through the common `IPropAMM.quote`. Reverts
-    /// `UnknownVenue` for a non-whitelisted, non-fallback `venue`, and bubbles up
-    /// any revert from the underlying quoter so callers can skip it. Unlike
-    /// `quoteVenueV1`, it does NOT gracefully fall back to the public venue.
-    /// @param venue The venue to price — a whitelisted propAMM or the fallback.
-    /// @param tokenIn The token being sold.
-    /// @param tokenOut The token being bought.
-    /// @param amount The amount of `tokenIn` to quote.
-    /// @return amountOut The amount of `tokenOut` quoted by `venue`.
-    function _dispatchQuoteVenue(address venue, address tokenIn, address tokenOut, uint256 amount)
-        public
-        returns (uint256 amountOut)
-    {
-        require(msg.sender == address(this), OnlySelf());
-
-        // The fallback (Uniswap V3) is the always-available safety net and is not
-        // part of the propAMM whitelist, so it is checked before the gate.
         if (venue == fallbackSwapRouter) {
-            return quoteUniswapV3(tokenIn, tokenOut, amount);
-        }
-
-        require(_whitelistedVenues.contains(venue), UnknownVenue());
-
-        if (venue == FERMI_ROUTER) {
+            amountOut =
+                UniV3Router.quoteExactIn(tokenIn, tokenOut, resolvedFee(tokenIn, tokenOut), amount, fallbackQuoter);
+        } else if (venue == FERMI_ROUTER) {
             int256 amountInt256 = amount.toInt256();
             (, amountOut) = IFermiSwapper(FERMI_ROUTER).quoteAmounts(tokenIn, tokenOut, amountInt256);
         } else if (venue == BEBOP_ROUTER) {
@@ -597,17 +531,31 @@ contract PropAMMRouter is
         }
     }
 
-    /// @notice Quotes the Uniswap V3 fallback for the pair at its resolved fee
-    /// tier (the per-pair override if set, otherwise the global `fallbackFee`).
-    /// @dev Public so `_pickBestVenue` and `quoteSelectedVenuesV1` can wrap it
-    /// in a `try/catch` through an external self-call (an internal library call
-    /// can't be caught).
-    /// @param tokenIn The address of the token being sold.
-    /// @param tokenOut The address of the token being bought.
-    /// @param amount The exact amount of `tokenIn` to quote against.
-    /// @return amountOut The amount of `tokenOut` the Uniswap V3 swap would produce.
-    function quoteUniswapV3(address tokenIn, address tokenOut, uint256 amount) public returns (uint256 amountOut) {
-        return UniV3Router.quoteExactIn(tokenIn, tokenOut, resolvedFee(tokenIn, tokenOut), amount, fallbackQuoter);
+    /// @inheritdoc IPropAMMRouter
+    /// @dev Delegates to `_pickBestVenueFrom`, considering ONLY `venues`. Venues
+    /// that revert while quoting — including non-whitelisted addresses, which
+    /// `quoteVenueV1` rejects with `UnknownVenue` — are skipped, not surfaced.
+    /// When none of `venues` can be priced, it does NOT revert: it falls back to
+    /// the public venue, returning its quote and `fallbackSwapRouter`, mirroring
+    /// the execution-time safety net of `swapViaSelectedVenuesV1`. Only reverts
+    /// `NoQuotesAvailable` if even the fallback cannot be priced.
+    function quoteSelectedVenuesV1(address[] calldata venues, address tokenIn, address tokenOut, uint256 amountIn)
+        public
+        returns (uint256 bestAmountOut, address bestVenue)
+    {
+        (bestAmountOut, bestVenue) = _pickBestVenueFrom(venues, tokenIn, tokenOut, amountIn);
+        if (bestVenue == address(0)) {
+            // None of the considered venues could be priced; fall back to the
+            // public venue, as documented by `IPropAMMRouter`.
+            try this.quoteVenueV1(fallbackSwapRouter, tokenIn, tokenOut, amountIn) returns (
+                uint256 fallbackOut, address _quotedVenue
+            ) {
+                bestAmountOut = fallbackOut;
+                bestVenue = fallbackSwapRouter;
+            } catch {
+                revert NoQuotesAvailable();
+            }
+        }
     }
 
     /// @notice Finds the venue offering the best `tokenOut` for `amount` of
@@ -637,7 +585,9 @@ contract PropAMMRouter is
         uint256 venueCount = whitelistedVenueCount();
         for (uint256 i = 0; i < venueCount; i++) {
             address candidate = whitelistedVenueAt(i);
-            try this._dispatchQuoteVenue(candidate, tokenIn, tokenOut, amount) returns (uint256 amountOut) {
+            try this.quoteVenueV1(candidate, tokenIn, tokenOut, amount) returns (
+                uint256 amountOut, address _quotedVenue
+            ) {
                 if (amountOut > bestQuote) {
                     bestQuote = amountOut;
                     venue = candidate;
@@ -649,7 +599,9 @@ contract PropAMMRouter is
         // `venue` is `fallbackSwapRouter`, which `_coreSwap` (via `swapV1`)
         // treats as the Uniswap fallback. Callers may also name that address
         // directly through `swapViaVenueV1` / `quoteVenueV1`.
-        try this.quoteUniswapV3(tokenIn, tokenOut, amount) returns (uint256 amountOut) {
+        try this.quoteVenueV1(fallbackSwapRouter, tokenIn, tokenOut, amount) returns (
+            uint256 amountOut, address _quotedVenue
+        ) {
             if (amountOut > bestQuote) {
                 bestQuote = amountOut;
                 venue = fallbackSwapRouter;
@@ -659,12 +611,10 @@ contract PropAMMRouter is
 
     /// @notice Finds the venue offering the best `tokenOut` for `amount` of
     /// `tokenIn` among a caller-supplied set of venues.
-    /// @dev Quotes ONLY the provided `venues` (each via `this._dispatchQuoteVenue`
+    /// @dev Quotes ONLY the provided `venues` (each via `this.quoteVenueV1`
     /// in its own `try/catch`), so a venue that reverts — including a
-    /// non-whitelisted address, which `_dispatchQuoteVenue` rejects with
-    /// `UnknownVenue` — is simply skipped. It uses the strict quote (not
-    /// `quoteVenueV1`) precisely so a failing venue is dropped rather than
-    /// silently re-quoted as the public-venue fallback. Unlike `_pickBestVenue`, it does NOT seed or
+    /// non-whitelisted address, which `quoteVenueV1` rejects with
+    /// `UnknownVenue` — is simply skipped. Unlike `_pickBestVenue`, it does NOT seed or
     /// auto-include the Uniswap fallback: the returned `venue` is `address(0)`
     /// when none of the supplied venues can be priced. The Uniswap fallback
     /// still applies at execution time via `_coreSwap` (the transparent safety
@@ -681,7 +631,9 @@ contract PropAMMRouter is
         returns (uint256 bestQuote, address venue)
     {
         for (uint256 i = 0; i < venues.length; i++) {
-            try this._dispatchQuoteVenue(venues[i], tokenIn, tokenOut, amount) returns (uint256 amountOut) {
+            try this.quoteVenueV1(venues[i], tokenIn, tokenOut, amount) returns (
+                uint256 amountOut, address _quotedVenue
+            ) {
                 if (amountOut > bestQuote) {
                     bestQuote = amountOut;
                     venue = venues[i];

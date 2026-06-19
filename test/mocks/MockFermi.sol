@@ -4,7 +4,7 @@ pragma solidity ^0.8.35;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @notice Minimal FermiSwap stand-in for the bespoke `IFermiSwapper` dispatch
-/// path (`venue == FERMI_ROUTER` in `_dispatchVenue` / `_dispatchQuoteVenue`).
+/// path (`venue == FERMI_ROUTER` in `_dispatchVenue` / `quoteVenueV1`).
 /// @dev Stateless on purpose: tests place this code at the hard-coded
 /// `FERMI_ROUTER` address with `vm.etch`, which copies code but NOT storage, so
 /// both the quote and the delivered amount are derived from the mock's own
