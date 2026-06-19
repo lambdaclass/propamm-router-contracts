@@ -1073,7 +1073,7 @@ wheels = [
 ]
 
 [[package]]
-name = "propamm-sdk"
+name = "propamm"
 version = "1.0.0"
 source = { editable = "." }
 dependencies = [

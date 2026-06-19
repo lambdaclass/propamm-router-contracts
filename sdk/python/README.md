@@ -40,10 +40,10 @@ Quote and swap 1 ETH for USDC through the best venue:
 
 ```python
 import asyncio
-from propamm_sdk import ContractClient, PropAmmRouter, SwapParams
-from propamm_sdk.common.accounts import account_from_key
-from propamm_sdk.common.helpers import apply_slippage, deadline_in, parse_ether
-from propamm_sdk.common.tokens import ETH_SENTINEL, USDC
+from propamm import ContractClient, PropAmmRouter, SwapParams
+from propamm.common.accounts import account_from_key
+from propamm.common.helpers import apply_slippage, deadline_in, parse_ether
+from propamm.common.tokens import ETH_SENTINEL, USDC
 
 PRIVATE_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" # anvil rich account
 RPC_URL = "http://localhost:8545" # local anvil instance
@@ -87,11 +87,11 @@ with `RPC_URL` / `PRIVATE_KEY` / `ROUTER_ADDRESS` / `SLIPPAGE_BPS`.
 
 | Module | Purpose |
 | --- | --- |
-| `propamm_sdk.client` | `ContractClient`: `AsyncWeb3` wrapper (`contract` / `call_with_overrides` / `send` / `wait_for_transaction`). |
-| `propamm_sdk.router` | `PropAmmRouter` bindings: quotes, swaps, ERC-20, views. |
-| `propamm_sdk.router.abi` | Vendored router ABI and custom-error naming. |
-| `propamm_sdk.overrides` | pAMM state-override sources (`OverridesRpcSource`, `OverridesWsSource`). |
-| `propamm_sdk.common` | `tokens`, `pamms`, `helpers`, `accounts`. |
+| `propamm.client` | `ContractClient`: `AsyncWeb3` wrapper (`contract` / `call_with_overrides` / `send` / `wait_for_transaction`). |
+| `propamm.router` | `PropAmmRouter` bindings: quotes, swaps, ERC-20, views. |
+| `propamm.router.abi` | Vendored router ABI and custom-error naming. |
+| `propamm.overrides` | pAMM state-override sources (`OverridesRpcSource`, `OverridesWsSource`). |
+| `propamm.common` | `tokens`, `pamms`, `helpers`, `accounts`. |
 
 ## Quotes & state overrides
 

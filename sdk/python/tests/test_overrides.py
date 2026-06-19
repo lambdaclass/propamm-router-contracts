@@ -5,9 +5,9 @@ from __future__ import annotations
 import pytest
 from eth_utils import to_checksum_address
 
-from propamm_sdk.common.pamms import BEBOP
-from propamm_sdk.error import OverridesError
-from propamm_sdk.overrides import (
+from propamm.common.pamms import BEBOP
+from propamm.error import OverridesError
+from propamm.overrides import (
     BEBOP_DEFAULT_SLOT,
     OverridesSnapshot,
     _LEGACY_BEBOP_LOWER,
