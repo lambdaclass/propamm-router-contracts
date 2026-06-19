@@ -16,8 +16,8 @@ quote(tokenIn: Address, tokenOut: Address, amountIn: bigint, opts?: QuoteOptions
 ::: code-group
 
 ```ts [example.ts]
-import { parseEther } from "@propamm/sdk/common/helpers";
-import { ETH_SENTINEL, USDC } from "@propamm/sdk/common/tokens";
+import { parseEther } from "propamm/common/helpers";
+import { ETH_SENTINEL, USDC } from "propamm/common/tokens";
 import { router } from "./config";
 
 const { amountOut, venue } = await router.quote(
@@ -28,9 +28,9 @@ const { amountOut, venue } = await router.quote(
 ```
 
 ```ts [config.ts]
-import { ContractClient } from "@propamm/sdk/client";
-import { PropAmmRouter } from "@propamm/sdk/router";
-import { mainnet } from "@propamm/sdk/common/chains";
+import { ContractClient } from "propamm/client";
+import { PropAmmRouter } from "propamm/router";
+import { mainnet } from "propamm/common/chains";
 
 export const client = new ContractClient({
   rpcUrl: "https://...",
@@ -86,7 +86,7 @@ listed venue can be priced, the call does **not** revert: it falls back to
 the Uniswap V3 quote and reports the fallback router as `venue`.
 
 ```ts
-import { PAMMS } from "@propamm/sdk/common/pamms";
+import { PAMMS } from "propamm/common/pamms";
 
 const pinned = await router.quote(ETH_SENTINEL, USDC, parseEther("1"), {
   venues: [PAMMS.fermi],

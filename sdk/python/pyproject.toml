@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "propamm"
+version = "1.0.0"
+description = "Python SDK for interacting with the PropAMM contracts"
+license = "MIT"
+license-files = ["LICENSE"]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "web3>=7,<8",
+    "eth-abi>=5",
+    "eth-utils>=4",
+    "eth-account>=0.11",
+    "aiohttp>=3.9",
+    "websockets>=12",
+    "certifi",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.6",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/propamm"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "examples", "tests"]

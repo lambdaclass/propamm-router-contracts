@@ -10,8 +10,8 @@ approve(token: Address, amount: bigint): Promise<Hash>
 ## Usage
 
 ```ts
-import { parseUnits } from "@propamm/sdk/common/helpers";
-import { USDC } from "@propamm/sdk/common/tokens";
+import { parseUnits } from "propamm/common/helpers";
+import { USDC } from "propamm/common/tokens";
 
 const hash = await router.approve(USDC, parseUnits("100", 6));
 await client.waitForTransaction(hash);

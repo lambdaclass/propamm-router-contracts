@@ -1,24 +1,24 @@
 # Installation
 
-The TypeScript SDK is published as `@propamm/sdk`, built on
+The TypeScript SDK is published as `propamm`, built on
 [viem](https://viem.sh).
 
 ::: code-group
 
 ```bash [npm]
-npm install @propamm/sdk
+npm install propamm
 ```
 
 ```bash [pnpm]
-pnpm add @propamm/sdk
+pnpm add propamm
 ```
 
 ```bash [yarn]
-yarn add @propamm/sdk
+yarn add propamm
 ```
 
 ```bash [bun]
-bun add @propamm/sdk
+bun add propamm
 ```
 
 :::
