@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from eth_utils import function_signature_to_4byte_selector
 
-from propamm_sdk.router import abi
+from propamm.router import abi
 
 
 def _u256(n: int) -> bytes:

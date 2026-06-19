@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from propamm_sdk.common.helpers import (
+from propamm.common.helpers import (
     apply_slippage,
     deadline_in,
     format_ether,
@@ -13,7 +13,7 @@ from propamm_sdk.common.helpers import (
     parse_ether,
     parse_units,
 )
-from propamm_sdk.error import InvalidInputError
+from propamm.error import InvalidInputError
 
 
 def test_apply_slippage_shaves_bps_and_floors_in_the_users_favor():

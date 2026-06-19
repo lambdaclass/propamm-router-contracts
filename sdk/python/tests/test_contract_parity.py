@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from propamm_sdk.router import abi
+from propamm.router import abi
 
 # sdk/python/tests -> repo root
 REPO_ROOT = Path(__file__).resolve().parents[3]

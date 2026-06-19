@@ -1073,8 +1073,8 @@ wheels = [
 ]
 
 [[package]]
-name = "propamm-sdk"
-version = "0.1.0"
+name = "propamm"
+version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },

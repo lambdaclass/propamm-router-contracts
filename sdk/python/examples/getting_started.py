@@ -20,16 +20,16 @@ from __future__ import annotations
 import asyncio
 import os
 
-from propamm_sdk import ContractClient, PropAmmRouter, SwapParams
-from propamm_sdk.common.accounts import account_from_key
-from propamm_sdk.common.helpers import (
+from propamm import ContractClient, PropAmmRouter, SwapParams
+from propamm.common.accounts import account_from_key
+from propamm.common.helpers import (
     apply_slippage,
     deadline_in,
     format_ether,
     format_units,
     parse_ether,
 )
-from propamm_sdk.common.tokens import ETH_SENTINEL, USDC
+from propamm.common.tokens import ETH_SENTINEL, USDC
 
 USDC_DECIMALS = 6
 
