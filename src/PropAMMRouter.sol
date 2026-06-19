@@ -535,26 +535,14 @@ contract PropAMMRouter is
     /// @dev Delegates to `_pickBestVenueFrom`, considering ONLY `venues`. Venues
     /// that revert while quoting — including non-whitelisted addresses, which
     /// `quoteVenueV1` rejects with `UnknownVenue` — are skipped, not surfaced.
-    /// When none of `venues` can be priced, it does NOT revert: it falls back to
-    /// the public venue, returning its quote and `fallbackSwapRouter`, mirroring
-    /// the execution-time safety net of `swapViaSelectedVenuesV1`. Only reverts
-    /// `NoQuotesAvailable` if even the fallback cannot be priced.
+    /// When none of `venues` can be priced, it reverts `NoQuotesAvailable`.
     function quoteSelectedVenuesV1(address[] calldata venues, address tokenIn, address tokenOut, uint256 amountIn)
         public
         returns (uint256 bestAmountOut, address bestVenue)
     {
         (bestAmountOut, bestVenue) = _pickBestVenueFrom(venues, tokenIn, tokenOut, amountIn);
         if (bestVenue == address(0)) {
-            // None of the considered venues could be priced; fall back to the
-            // public venue, as documented by `IPropAMMRouter`.
-            try this.quoteVenueV1(fallbackSwapRouter, tokenIn, tokenOut, amountIn) returns (
-                uint256 fallbackOut, address _quotedVenue
-            ) {
-                bestAmountOut = fallbackOut;
-                bestVenue = fallbackSwapRouter;
-            } catch {
-                revert NoQuotesAvailable();
-            }
+            revert NoQuotesAvailable();
         }
     }
 

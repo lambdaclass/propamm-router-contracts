@@ -218,8 +218,8 @@ interface IPropAMMRouter {
         returns (uint256 amountOut, address quotedVenue);
 
     /// @notice Quotes `amountIn` of `tokenIn` across a caller-selected set of
-    /// venues and returns the best output and the venue that produced it, or
-    /// the public-venue fallback if all considered venues reverted.
+    /// venues and returns the best output and the venue that produced it.
+    /// Reverts `NoQuotesAvailable` if none of `venues` can be priced.
     /// @param venues The venues to consider — a subset of the available venues.
     /// @param tokenIn The token being sold.
     /// @param tokenOut The token being bought.
