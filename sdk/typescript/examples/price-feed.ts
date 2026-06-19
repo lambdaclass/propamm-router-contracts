@@ -12,13 +12,13 @@
  * The RPC_URL environment variable is required (e.g. a mainnet node).
  * ROUTER_ADDRESS defaults to the mainnet router deployment.
  */
-import { ContractClient } from "@propamm/sdk/client";
-import { PropAmmRouter } from "@propamm/sdk/router";
-import { ETH_SENTINEL, USDC } from "@propamm/sdk/common/tokens";
-import { PAMMS } from "@propamm/sdk/common/pamms";
-import { formatUnits, parseUnits } from "@propamm/sdk/common/helpers";
-import { anvil } from "@propamm/sdk/common/chains";
-import type { Address } from "@propamm/sdk";
+import { ContractClient } from "propamm/client";
+import { PropAmmRouter } from "propamm/router";
+import { ETH_SENTINEL, USDC } from "propamm/common/tokens";
+import { PAMMS } from "propamm/common/pamms";
+import { formatUnits, parseUnits } from "propamm/common/helpers";
+import { anvil } from "propamm/common/chains";
+import type { Address } from "propamm";
 
 const RPC_URL = process.env.RPC_URL;
 if (!RPC_URL) throw new Error("RPC_URL is required");
@@ -49,7 +49,7 @@ venueNames[(await router.fallbackSwapRouter()).toLowerCase()] = "uniswap";
 venueNames["0xb1076fE3AB5e28005C7c323Bac5AC06a680d452e".toLowerCase()] = "fermi";
 venueNames["0x042b83b4043019D8f2a83C77240a50793FF7420d".toLowerCase()] = "fermi";
 venueNames["0xdB13ad0fcD134E9c48f2fDaEa8f6751a0F5349ca".toLowerCase()] = "bebop";
-venueNames["0xcCdda3258aA079ce45E6aa6F35829a6612eb7C45".toLowerCase()] = "kipseli";
+venueNames["0x71e790dd841c8A9061487cb3E78C288E75cE0B3d".toLowerCase()] = "kipseli";
 
 // Returns the venue's name, or its raw address if we don't have one.
 const venueName = (address: Address) => venueNames[address.toLowerCase()] ?? address;

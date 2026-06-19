@@ -2,7 +2,7 @@
 pragma solidity ^0.8.35;
 
 // Address of the FermiSwap router used for FermiSwap-routed swaps.
-address constant FERMI_ROUTER = 0xb1076fE3AB5e28005C7c323Bac5AC06a680d452e;
+address constant FERMI_ROUTER = 0x5979458912F80B96d30D4220af8E2e4925A33320;
 
 interface IFermiSwapper {
     function fermiSwapWithAllowances(

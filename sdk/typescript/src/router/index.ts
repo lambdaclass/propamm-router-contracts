@@ -111,13 +111,28 @@ export interface SwapResult {
 /** Maximum frontend fee accepted by the router, in bps. */
 export const MAX_FEE_BPS = 100;
 
+/**
+ * Mainnet address of the deployed `PropAMMRouter` proxy — the default target
+ * the constructor binds to when no address is given. Pass an explicit address
+ * (e.g. a testnet or local-fork deployment) to override it.
+ */
+export const MAINNET_ROUTER: Address = "0x4DdF368080CD7946db5b459aD591c350158175e1";
+
 export class PropAmmRouter {
   readonly address: Address;
   readonly client: ContractClient;
   /** Source of pAMM state overrides quotes apply by default. */
   readonly overrides: OverridesSource;
 
-  constructor(client: ContractClient, address: Address, options: PropAmmRouterOptions = {}) {
+  /**
+   * @param address Router proxy to bind to; defaults to the mainnet deployment
+   * (`MAINNET_ROUTER`).
+   */
+  constructor(
+    client: ContractClient,
+    address: Address = MAINNET_ROUTER,
+    options: PropAmmRouterOptions = {},
+  ) {
     this.client = client;
     this.address = address;
     this.overrides = options.overrides ?? new OverridesWsSource();
