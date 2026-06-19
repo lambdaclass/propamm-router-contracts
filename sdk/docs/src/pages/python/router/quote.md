@@ -22,15 +22,15 @@ async def quote(
 ::: code-group
 
 ```python [example.py]
-from propamm_sdk.common.helpers import parse_ether
-from propamm_sdk.common.tokens import ETH_SENTINEL, USDC
+from propamm.common.helpers import parse_ether
+from propamm.common.tokens import ETH_SENTINEL, USDC
 from config import router
 
 quote = await router.quote(ETH_SENTINEL, USDC, parse_ether("1"))
 ```
 
 ```python [config.py]
-from propamm_sdk import ContractClient, PropAmmRouter
+from propamm import ContractClient, PropAmmRouter
 
 client = ContractClient("https://...")
 router = PropAmmRouter(client, "0x...")  # router proxy
@@ -72,7 +72,7 @@ Exact input amount, in atomic units.
 Per-call quote options.
 
 ```python
-from propamm_sdk import QuoteOptions
+from propamm import QuoteOptions
 
 stale = await router.quote(
     ETH_SENTINEL, USDC, parse_ether("1"), QuoteOptions(overrides=None)
@@ -83,8 +83,8 @@ stale = await router.quote(
 source, or a fetch-on-demand JSON-RPC source:
 
 ```python
-from propamm_sdk import QuoteOptions
-from propamm_sdk.overrides import OverridesRpcSource, OverridesWsSource
+from propamm import QuoteOptions
+from propamm.overrides import OverridesRpcSource, OverridesWsSource
 
 # a streaming WebSocket source…
 overrides = OverridesWsSource(url="wss://rpc.titanbuilder.xyz/ws/pamm_quote_stream")
@@ -103,7 +103,7 @@ listed venue can be priced, the call does **not** raise: it falls back to the
 Uniswap V3 quote and reports the fallback router as `venue`.
 
 ```python
-from propamm_sdk.common.pamms import BEBOP, FERMI
+from propamm.common.pamms import BEBOP, FERMI
 
 pinned = await router.quote(
     ETH_SENTINEL, USDC, parse_ether("1"), QuoteOptions(venues=[FERMI])

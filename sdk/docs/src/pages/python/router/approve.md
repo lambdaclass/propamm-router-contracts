@@ -10,8 +10,8 @@ async def approve(self, token: str, amount: int) -> str
 ## Usage
 
 ```python
-from propamm_sdk.common.helpers import parse_units
-from propamm_sdk.common.tokens import USDC
+from propamm.common.helpers import parse_units
+from propamm.common.tokens import USDC
 
 tx_hash = await router.approve(USDC, parse_units("100", 6))
 await client.wait_for_transaction(tx_hash)

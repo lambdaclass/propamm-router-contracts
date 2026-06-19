@@ -1,6 +1,6 @@
 # Helpers
 
-Utilities from `propamm_sdk.common.helpers`, plus the token/venue constants
+Utilities from `propamm.common.helpers`, plus the token/venue constants
 and account builders.
 
 ## apply_slippage
@@ -12,7 +12,7 @@ def apply_slippage(amount: int, bps: int) -> int
 Shave basis points off an amount — derive `amount_out_min` from a quote.
 
 ```python
-from propamm_sdk.common.helpers import apply_slippage
+from propamm.common.helpers import apply_slippage
 
 min_out = apply_slippage(amount_out, 50)  # quote - 0.5%
 ```
@@ -30,7 +30,7 @@ def deadline_in(seconds: int) -> int
 Unix-timestamp deadline some seconds from now, for swap `deadline` params.
 
 ```python
-from propamm_sdk.common.helpers import deadline_in
+from propamm.common.helpers import deadline_in
 
 deadline = deadline_in(300)  # now + 5 min
 ```
@@ -49,7 +49,7 @@ def format_units(value: int, decimals: int) -> str
 Decimal/atomic-unit conversion.
 
 ```python
-from propamm_sdk.common.helpers import format_units, parse_units
+from propamm.common.helpers import format_units, parse_units
 
 parse_units("1.5", 6)      # 1500000
 format_units(1500000, 6)   # "1.5"

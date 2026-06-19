@@ -11,8 +11,8 @@ OverridesRpcSource(url: str = ...)
 ## Usage
 
 ```python
-from propamm_sdk import PropAmmRouter, QuoteOptions
-from propamm_sdk.overrides import OverridesRpcSource
+from propamm import PropAmmRouter, QuoteOptions
+from propamm.overrides import OverridesRpcSource
 
 source = OverridesRpcSource()
 router = PropAmmRouter(client, "0x...", overrides=source)

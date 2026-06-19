@@ -16,8 +16,8 @@ OverridesWsSource(
 ## Usage
 
 ```python
-from propamm_sdk import PropAmmRouter
-from propamm_sdk.overrides import OverridesWsSource
+from propamm import PropAmmRouter
+from propamm.overrides import OverridesWsSource
 
 # the default: a router without an overrides argument creates one internally
 router = PropAmmRouter(client, "0x...")

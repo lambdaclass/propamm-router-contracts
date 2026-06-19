@@ -15,9 +15,9 @@ async def swap_and_wait(self, params: SwapParams, opts: SwapOptions | None = Non
 ::: code-group
 
 ```python [example.py]
-from propamm_sdk import SwapParams
-from propamm_sdk.common.helpers import apply_slippage, deadline_in, parse_ether
-from propamm_sdk.common.tokens import ETH_SENTINEL, USDC
+from propamm import SwapParams
+from propamm.common.helpers import apply_slippage, deadline_in, parse_ether
+from propamm.common.tokens import ETH_SENTINEL, USDC
 from config import account, router
 
 amount_in = parse_ether("1")
@@ -36,8 +36,8 @@ tx_hash = await router.swap(
 ```
 
 ```python [config.py]
-from propamm_sdk import ContractClient, PropAmmRouter
-from propamm_sdk.common.accounts import account_from_key
+from propamm import ContractClient, PropAmmRouter
+from propamm.common.accounts import account_from_key
 
 account = account_from_key("0x...")
 client = ContractClient("https://...", account=account)
@@ -93,8 +93,8 @@ on-chain and fill via the best of them. Must be non-empty when present; omit
 to swap through the best-quoting venue overall.
 
 ```python
-from propamm_sdk import SwapOptions
-from propamm_sdk.common.pamms import BEBOP, FERMI, KIPSELI
+from propamm import SwapOptions
+from propamm.common.pamms import BEBOP, FERMI, KIPSELI
 
 # exactly this venue
 tx_hash = await router.swap(params, SwapOptions(venues=[KIPSELI]))
@@ -111,7 +111,7 @@ must receive after the fee, and the decoded result's `fee` field (via
 recipient.
 
 ```python
-from propamm_sdk import FrontendFee, SwapOptions
+from propamm import FrontendFee, SwapOptions
 
 tx_hash = await router.swap(
     params,

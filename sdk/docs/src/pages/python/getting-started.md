@@ -8,10 +8,10 @@ client, a router, and two calls.
 ```python
 import asyncio
 
-from propamm_sdk import ContractClient, PropAmmRouter, SwapParams
-from propamm_sdk.common.accounts import account_from_key
-from propamm_sdk.common.helpers import apply_slippage, deadline_in, format_units, parse_ether
-from propamm_sdk.common.tokens import ETH_SENTINEL, USDC
+from propamm import ContractClient, PropAmmRouter, SwapParams
+from propamm.common.accounts import account_from_key
+from propamm.common.helpers import apply_slippage, deadline_in, format_units, parse_ether
+from propamm.common.tokens import ETH_SENTINEL, USDC
 
 
 async def main():

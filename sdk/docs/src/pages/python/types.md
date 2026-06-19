@@ -2,8 +2,8 @@
 
 Shared types across the Python SDK. The value types (`SwapParams`, `Quote`,
 `SwapResult`, …) are dataclasses re-exported from the package root
-(`from propamm_sdk import SwapParams`); override types come from
-`propamm_sdk.overrides`.
+(`from propamm import SwapParams`); override types come from
+`propamm.overrides`.
 
 ## SwapParams
 

@@ -1,6 +1,6 @@
 # Overrides utilities
 
-Lower-level pieces of `propamm_sdk.overrides`, for custom sources or manual
+Lower-level pieces of `propamm.overrides`, for custom sources or manual
 `eth_call` overrides.
 
 ## parse_overrides_message
@@ -16,7 +16,7 @@ out, addresses lowercased, empty `stateDiff`s dropped.
 ```python
 import json
 
-from propamm_sdk.overrides import parse_overrides_message
+from propamm.overrides import parse_overrides_message
 
 snapshot = parse_overrides_message(json.loads(frame))
 # OverridesSnapshot(block_number=24285034, timestamp_ns=..., per_pamm={"0x...": {...}})
@@ -36,7 +36,7 @@ Flatten a snapshot into the `eth_call` state-override map
 padding words to 32 bytes.
 
 ```python
-from propamm_sdk.overrides import to_state_override
+from propamm.overrides import to_state_override
 
 state_override = to_state_override(snapshot)
 raw = await client.call_with_overrides(function, state_override=state_override)

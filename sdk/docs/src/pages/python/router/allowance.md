@@ -9,7 +9,7 @@ async def allowance(self, token: str, owner: str) -> int
 ## Usage
 
 ```python
-from propamm_sdk.common.tokens import USDC
+from propamm.common.tokens import USDC
 
 await router.allowance(USDC, account.address)
 ```
