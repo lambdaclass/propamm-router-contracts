@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "propamm-sdk"
-version = "0.1.0"
+version = "1.0.0"
 description = "Python SDK for interacting with the PropAMM contracts"
 license = "MIT"
 readme = "README.md"
