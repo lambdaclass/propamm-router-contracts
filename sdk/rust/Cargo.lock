@@ -3311,7 +3311,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "propamm-sdk"
+name = "propamm"
 version = "1.0.0"
 dependencies = [
  "async-trait",
