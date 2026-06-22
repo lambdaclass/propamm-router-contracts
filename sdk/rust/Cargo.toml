@@ -11,15 +11,13 @@ keywords = ["ethereum", "amm", "defi", "propamm", "ethrex"]
 categories = ["cryptography::cryptocurrencies", "api-bindings", "finance"]
 
 [dependencies]
-# Transport: rex / ethrex (git deps; ethrex pinned to the tag rex uses).
-# rex pinned to main at the eth_call overrides merge (#232) — repoint to a tag
-# once one is cut.
-rex-sdk = { git = "https://github.com/lambdaclass/rex", rev = "389401b0c2e3684e1e9708ec9e9f7901be83d638" }
-ethrex-common = { git = "https://github.com/lambdaclass/ethrex", tag = "v9.0.0" }
-ethrex-rpc = { git = "https://github.com/lambdaclass/ethrex", tag = "v9.0.0" }
-ethrex-sdk = { git = "https://github.com/lambdaclass/ethrex", tag = "v9.0.0" }
-ethrex-l2-rpc = { git = "https://github.com/lambdaclass/ethrex", tag = "v9.0.0" }
-ethrex-l2-common = { git = "https://github.com/lambdaclass/ethrex", tag = "v9.0.0" }
+# Transport: rex / ethrex (crates.io)
+rex-sdk = "17.0.0"
+ethrex-common = "17.0.0"
+ethrex-rpc = "17.0.0"
+ethrex-sdk = "17.0.0"
+ethrex-l2-rpc = "17.0.0"
+ethrex-l2-common = "17.0.0"
 secp256k1 = "0.30"
 
 async-trait = "0.1.89"
