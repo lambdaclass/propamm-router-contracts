@@ -101,10 +101,6 @@ contract PropAMMRouter is
 
         _seedDefaultPairFees();
 
-        _addVenue(0x5979458912F80B96d30D4220af8E2e4925A33320); // Fermi
-        _addVenue(BEBOP_ROUTER);
-        _addVenue(0x71e790dd841c8A9061487cb3E78C288E75cE0B3d); // Kipseli
-
         __AccessManaged_init(authority_);
         __Pausable_init();
     }
