@@ -5,3 +5,7 @@ broadcast/
 
 # Dotenv
 .env
+
+# Generated outputs from the off-chain analysis scripts (regenerable run artifacts)
+scripts/gas/*.csv
+scripts/kyberswap/*.csv

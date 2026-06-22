@@ -29,7 +29,9 @@ export default defineConfig({
             ? "TypeScript"
             : path.startsWith("rust/")
               ? "Rust"
-              : "";
+              : path.startsWith("python/")
+                ? "Python"
+                : "";
           if (!sdk) return html;
           // Inject the tag before the heading's anchor link, so the splitter
           // picks it up as part of the section title.
@@ -47,6 +49,7 @@ export default defineConfig({
       },
     ],
     sidebar: [
+      { text: "Introduction", link: "/" },
       {
         text: "PropAMMs",
         collapsed: false,
@@ -117,6 +120,37 @@ export default defineConfig({
           },
           { text: "Helpers", link: "/rust/helpers" },
           { text: "Types", link: "/rust/types" },
+        ],
+      },
+      {
+        text: "Python SDK",
+        collapsed: false,
+        items: [
+          { text: "Installation", link: "/python/installation" },
+          { text: "Getting started", link: "/python/getting-started" },
+          {
+            text: "Router",
+            collapsed: true,
+            items: [
+              { text: "quote", link: "/python/router/quote" },
+              { text: "swap", link: "/python/router/swap" },
+              { text: "wait_for_swap", link: "/python/router/wait_for_swap" },
+              { text: "approve", link: "/python/router/approve" },
+              { text: "allowance", link: "/python/router/allowance" },
+              { text: "Views", link: "/python/router/views" },
+            ],
+          },
+          {
+            text: "State overrides",
+            collapsed: true,
+            items: [
+              { text: "OverridesWsSource", link: "/python/overrides/ws-source" },
+              { text: "OverridesRpcSource", link: "/python/overrides/rpc-source" },
+              { text: "Utilities", link: "/python/overrides/utilities" },
+            ],
+          },
+          { text: "Helpers", link: "/python/helpers" },
+          { text: "Types", link: "/python/types" },
         ],
       },
     ],
