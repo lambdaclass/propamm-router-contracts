@@ -285,9 +285,9 @@ contract PropAMMRouterPairFeeTest is Test {
     }
 
     function test_seedStablePairs_resolveToSeededTiers() public {
-        a = new address[](3);
-        b = new address[](3);
-        f = new uint24[](3);
+        address[] memory a = new address[](3);
+        address[] memory b = new address[](3);
+        address[] memory f = new uint24[](3);
 
         // USDC/USDT — stablecoin pair, deepest at 0.01%.
         a[0] = USDC;
