@@ -13,8 +13,8 @@ pub fn new(config: OverridesWsSourceConfig) -> Self
 ```rust
 use std::sync::Arc;
 use std::time::Duration;
-use propamm_sdk::overrides::{OverridesWsSource, OverridesWsSourceConfig};
-use propamm_sdk::PropAmmRouter;
+use propamm::overrides::{OverridesWsSource, OverridesWsSourceConfig};
+use propamm::PropAmmRouter;
 
 // the default: a router built with `new` creates one internally
 let router = PropAmmRouter::new(client, address);

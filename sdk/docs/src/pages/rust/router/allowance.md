@@ -9,7 +9,7 @@ pub async fn allowance(&self, token: Address, owner: Address) -> Result<U256>
 ## Usage
 
 ```rust
-use propamm_sdk::common::tokens::USDC;
+use propamm::common::tokens::USDC;
 
 let allowance: U256 = router.allowance(USDC, me).await?;
 ```

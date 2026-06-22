@@ -12,7 +12,7 @@ integrate.
 Three implementations with the same surface:
 
 - **[TypeScript](/typescript/getting-started)** (`propamm`) — built on [viem](https://viem.sh).
-- **[Rust](/rust/getting-started)** (`propamm-sdk`) — built on [rex](https://github.com/lambdaclass/rex) / [ethrex](https://github.com/lambdaclass/ethrex).
+- **[Rust](/rust/getting-started)** (`propamm`) — built on [rex](https://github.com/lambdaclass/rex) / [ethrex](https://github.com/lambdaclass/ethrex).
 - **[Python](/python/getting-started)** (`propamm`) — built on [web3.py](https://web3py.readthedocs.io/).
 
 Both apply fresh pAMM state overrides to quotes automatically, so quoted
