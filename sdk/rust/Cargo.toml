@@ -1,9 +1,14 @@
 [package]
-name = "propamm-sdk"
+name = "propamm"
 version = "1.0.0"
 edition = "2024"
-description = "Rust SDK for interacting with the PropAMM contracts"
+description = "Rust SDK for the PropAMM Router contract: typed calls, eth_call overrides, and ABI codec over JSON-RPC"
 license = "MIT"
+repository = "https://github.com/lambdaclass/propamm-router-contracts"
+documentation = "https://docs.rs/propamm"
+readme = "README.md"
+keywords = ["ethereum", "amm", "defi", "propamm", "ethrex"]
+categories = ["cryptography::cryptocurrencies", "api-bindings", "finance"]
 
 [dependencies]
 # Transport: rex / ethrex (git deps; ethrex pinned to the tag rex uses).

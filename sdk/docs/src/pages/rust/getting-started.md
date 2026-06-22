@@ -6,12 +6,12 @@ a router, and two calls.
 ## Quote and swap
 
 ```rust
-use propamm_sdk::common::helpers::{
+use propamm::common::helpers::{
     apply_slippage, deadline_in, format_units, parse_address, parse_ether,
 };
-use propamm_sdk::common::tokens::{ETH_SENTINEL, USDC};
-use propamm_sdk::router::SwapParams;
-use propamm_sdk::{ContractClient, PropAmmRouter};
+use propamm::common::tokens::{ETH_SENTINEL, USDC};
+use propamm::router::SwapParams;
+use propamm::{ContractClient, PropAmmRouter};
 
 let client = ContractClient::connect_with_signer("https://...", "0x<private key>")?;
 // ContractClient::connect("https://...") for a read-only client

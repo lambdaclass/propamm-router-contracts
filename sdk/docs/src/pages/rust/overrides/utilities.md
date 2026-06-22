@@ -13,7 +13,7 @@ Parse a raw payload (a WS frame or the JSON-RPC `result`) into an
 [`OverridesSnapshot`](/rust/types#overridessnapshot); pAMMs/contracts with empty `stateDiff`s are dropped.
 
 ```rust
-use propamm_sdk::overrides::parse_overrides_message;
+use propamm::overrides::parse_overrides_message;
 
 let snapshot = parse_overrides_message(&serde_json::from_str(frame)?)?;
 ```
@@ -31,8 +31,8 @@ Flatten a snapshot into rex's `StateOverrideSet` for `eth_call`, merging
 diffs at slot level.
 
 ```rust
-use propamm_sdk::overrides::{to_state_override, ToStateOverrideOptions};
-use propamm_sdk::CallOverrides;
+use propamm::overrides::{to_state_override, ToStateOverrideOptions};
+use propamm::CallOverrides;
 
 let state = to_state_override(&snapshot, &ToStateOverrideOptions::default());
 let overrides = CallOverrides { state: Some(state), block: None };

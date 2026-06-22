@@ -12,14 +12,14 @@ pub fn new(url: impl Into<String>) -> Self
 
 ```rust
 use std::sync::Arc;
-use propamm_sdk::overrides::OverridesRpcSource;
-use propamm_sdk::PropAmmRouter;
+use propamm::overrides::OverridesRpcSource;
+use propamm::PropAmmRouter;
 
 let source = Arc::new(OverridesRpcSource::default());
 let router = PropAmmRouter::with_overrides(client, address, source.clone());
 
 // or per call
-use propamm_sdk::router::{QuoteOptions, QuoteOverrides};
+use propamm::router::{QuoteOptions, QuoteOverrides};
 let opts = QuoteOptions {
     overrides: QuoteOverrides::Source(source),
     ..Default::default()
