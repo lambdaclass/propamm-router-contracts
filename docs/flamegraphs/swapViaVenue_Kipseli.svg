@@ -1,0 +1,587 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg version="1.1" width="1200" height="254" onload="init(evt)" viewBox="0 0 1200 254" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<!-- Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples. -->
+<!-- NOTES:  -->
+<defs>
+	<linearGradient id="background" y1="0" y2="1" x1="0" x2="0" >
+		<stop stop-color="#eeeeee" offset="5%" />
+		<stop stop-color="#eeeeb0" offset="95%" />
+	</linearGradient>
+</defs>
+<style type="text/css">
+	text { font-family:Verdana; font-size:12px; fill:rgb(0,0,0); }
+	#search, #ignorecase { opacity:0.1; cursor:pointer; }
+	#search:hover, #search.show, #ignorecase:hover, #ignorecase.show { opacity:1; }
+	#subtitle { text-anchor:middle; font-color:rgb(160,160,160); }
+	#title { text-anchor:middle; font-size:17px}
+	#unzoom { cursor:pointer; }
+	#frames > *:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+	.hide { display:none; }
+	.parent { opacity:0.5; }
+</style>
+<script type="text/ecmascript">
+<![CDATA[
+	"use strict";
+	var details, searchbtn, unzoombtn, matchedtxt, svg, searching, currentSearchTerm, ignorecase, ignorecaseBtn;
+	function init(evt) {
+		details = document.getElementById("details").firstChild;
+		searchbtn = document.getElementById("search");
+		ignorecaseBtn = document.getElementById("ignorecase");
+		unzoombtn = document.getElementById("unzoom");
+		matchedtxt = document.getElementById("matched");
+		svg = document.getElementsByTagName("svg")[0];
+		searching = 0;
+		currentSearchTerm = null;
+
+		// use GET parameters to restore a flamegraphs state.
+		var params = get_params();
+		if (params.x && params.y)
+			zoom(find_group(document.querySelector('[x="' + params.x + '"][y="' + params.y + '"]')));
+                if (params.s) search(params.s);
+	}
+
+	// event listeners
+	window.addEventListener("click", function(e) {
+		var target = find_group(e.target);
+		if (target) {
+			if (target.nodeName == "a") {
+				if (e.ctrlKey === false) return;
+				e.preventDefault();
+			}
+			if (target.classList.contains("parent")) unzoom(true);
+			zoom(target);
+			if (!document.querySelector('.parent')) {
+				// we have basically done a clearzoom so clear the url
+				var params = get_params();
+				if (params.x) delete params.x;
+				if (params.y) delete params.y;
+				history.replaceState(null, null, parse_params(params));
+				unzoombtn.classList.add("hide");
+				return;
+			}
+
+			// set parameters for zoom state
+			var el = target.querySelector("rect");
+			if (el && el.attributes && el.attributes.y && el.attributes._orig_x) {
+				var params = get_params()
+				params.x = el.attributes._orig_x.value;
+				params.y = el.attributes.y.value;
+				history.replaceState(null, null, parse_params(params));
+			}
+		}
+		else if (e.target.id == "unzoom") clearzoom();
+		else if (e.target.id == "search") search_prompt();
+		else if (e.target.id == "ignorecase") toggle_ignorecase();
+	}, false)
+
+	// mouse-over for info
+	// show
+	window.addEventListener("mouseover", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = "Function: " + g_to_text(target);
+	}, false)
+
+	// clear
+	window.addEventListener("mouseout", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = ' ';
+	}, false)
+
+	// ctrl-F for search
+	// ctrl-I to toggle case-sensitive search
+	window.addEventListener("keydown",function (e) {
+		if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+			e.preventDefault();
+			search_prompt();
+		}
+		else if (e.ctrlKey && e.keyCode === 73) {
+			e.preventDefault();
+			toggle_ignorecase();
+		}
+	}, false)
+
+	// functions
+	function get_params() {
+		var params = {};
+		var paramsarr = window.location.search.substr(1).split('&');
+		for (var i = 0; i < paramsarr.length; ++i) {
+			var tmp = paramsarr[i].split("=");
+			if (!tmp[0] || !tmp[1]) continue;
+			params[tmp[0]]  = decodeURIComponent(tmp[1]);
+		}
+		return params;
+	}
+	function parse_params(params) {
+		var uri = "?";
+		for (var key in params) {
+			uri += key + '=' + encodeURIComponent(params[key]) + '&';
+		}
+		if (uri.slice(-1) == "&")
+			uri = uri.substring(0, uri.length - 1);
+		if (uri == '?')
+			uri = window.location.href.split('?')[0];
+		return uri;
+	}
+	function find_child(node, selector) {
+		var children = node.querySelectorAll(selector);
+		if (children.length) return children[0];
+	}
+	function find_group(node) {
+		var parent = node.parentElement;
+		if (!parent) return;
+		if (parent.id == "frames") return node;
+		return find_group(parent);
+	}
+	function orig_save(e, attr, val) {
+		if (e.attributes["_orig_" + attr] != undefined) return;
+		if (e.attributes[attr] == undefined) return;
+		if (val == undefined) val = e.attributes[attr].value;
+		e.setAttribute("_orig_" + attr, val);
+	}
+	function orig_load(e, attr) {
+		if (e.attributes["_orig_"+attr] == undefined) return;
+		e.attributes[attr].value = e.attributes["_orig_" + attr].value;
+		e.removeAttribute("_orig_"+attr);
+	}
+	function g_to_text(e) {
+		var text = find_child(e, "title").firstChild.nodeValue;
+		return (text)
+	}
+	function g_to_func(e) {
+		var func = g_to_text(e);
+		// if there's any manipulation we want to do to the function
+		// name before it's searched, do it here before returning.
+		return (func);
+	}
+	function update_text(e) {
+		var r = find_child(e, "rect");
+		var t = find_child(e, "text");
+		var w = parseFloat(r.attributes.width.value) -3;
+		var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+		t.attributes.x.value = parseFloat(r.attributes.x.value) + 3;
+
+		// Smaller than this size won't fit anything
+		if (w < 2 * 12 * 0.59) {
+			t.textContent = "";
+			return;
+		}
+
+		t.textContent = txt;
+		var sl = t.getSubStringLength(0, txt.length);
+		// check if only whitespace or if we can fit the entire string into width w
+		if (/^ *$/.test(txt) || sl < w)
+			return;
+
+		// this isn't perfect, but gives a good starting point
+		// and avoids calling getSubStringLength too often
+		var start = Math.floor((w/sl) * txt.length);
+		for (var x = start; x > 0; x = x-2) {
+			if (t.getSubStringLength(0, x + 2) <= w) {
+				t.textContent = txt.substring(0, x) + "..";
+				return;
+			}
+		}
+		t.textContent = "";
+	}
+
+	// zoom
+	function zoom_reset(e) {
+		if (e.attributes != undefined) {
+			orig_load(e, "x");
+			orig_load(e, "width");
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_reset(c[i]);
+		}
+	}
+	function zoom_child(e, x, ratio) {
+		if (e.attributes != undefined) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = (parseFloat(e.attributes.x.value) - x - 10) * ratio + 10;
+				if (e.tagName == "text")
+					e.attributes.x.value = find_child(e.parentNode, "rect[x]").attributes.x.value + 3;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseFloat(e.attributes.width.value) * ratio;
+			}
+		}
+
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_child(c[i], x - 10, ratio);
+		}
+	}
+	function zoom_parent(e) {
+		if (e.attributes) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = 10;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseInt(svg.width.baseVal.value) - (10 * 2);
+			}
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_parent(c[i]);
+		}
+	}
+	function zoom(node) {
+		var attr = find_child(node, "rect").attributes;
+		var width = parseFloat(attr.width.value);
+		var xmin = parseFloat(attr.x.value);
+		var xmax = parseFloat(xmin + width);
+		var ymin = parseFloat(attr.y.value);
+		var ratio = (svg.width.baseVal.value - 2 * 10) / width;
+
+		// XXX: Workaround for JavaScript float issues (fix me)
+		var fudge = 0.0001;
+
+		unzoombtn.classList.remove("hide");
+
+		var el = document.getElementById("frames").children;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var a = find_child(e, "rect").attributes;
+			var ex = parseFloat(a.x.value);
+			var ew = parseFloat(a.width.value);
+			var upstack;
+			// Is it an ancestor
+			if (0 == 0) {
+				upstack = parseFloat(a.y.value) > ymin;
+			} else {
+				upstack = parseFloat(a.y.value) < ymin;
+			}
+			if (upstack) {
+				// Direct ancestor
+				if (ex <= xmin && (ex+ew+fudge) >= xmax) {
+					e.classList.add("parent");
+					zoom_parent(e);
+					update_text(e);
+				}
+				// not in current path
+				else
+					e.classList.add("hide");
+			}
+			// Children maybe
+			else {
+				// no common path
+				if (ex < xmin || ex + fudge >= xmax) {
+					e.classList.add("hide");
+				}
+				else {
+					zoom_child(e, xmin, ratio);
+					update_text(e);
+				}
+			}
+		}
+		search();
+	}
+	function unzoom(dont_update_text) {
+		unzoombtn.classList.add("hide");
+		var el = document.getElementById("frames").children;
+		for(var i = 0; i < el.length; i++) {
+			el[i].classList.remove("parent");
+			el[i].classList.remove("hide");
+			zoom_reset(el[i]);
+			if(!dont_update_text) update_text(el[i]);
+		}
+		search();
+	}
+	function clearzoom() {
+		unzoom();
+
+		// remove zoom state
+		var params = get_params();
+		if (params.x) delete params.x;
+		if (params.y) delete params.y;
+		history.replaceState(null, null, parse_params(params));
+	}
+
+	// search
+	function toggle_ignorecase() {
+		ignorecase = !ignorecase;
+		if (ignorecase) {
+			ignorecaseBtn.classList.add("show");
+		} else {
+			ignorecaseBtn.classList.remove("show");
+		}
+		reset_search();
+		search();
+	}
+	function reset_search() {
+		var el = document.querySelectorAll("#frames rect");
+		for (var i = 0; i < el.length; i++) {
+			orig_load(el[i], "fill")
+		}
+		var params = get_params();
+		delete params.s;
+		history.replaceState(null, null, parse_params(params));
+	}
+	function search_prompt() {
+		if (!searching) {
+			var term = prompt("Enter a search term (regexp " +
+			    "allowed, eg: ^ext4_)"
+			    + (ignorecase ? ", ignoring case" : "")
+			    + "\nPress Ctrl-i to toggle case sensitivity", "");
+			if (term != null) search(term);
+		} else {
+			reset_search();
+			searching = 0;
+			currentSearchTerm = null;
+			searchbtn.classList.remove("show");
+			searchbtn.firstChild.nodeValue = "Search"
+			matchedtxt.classList.add("hide");
+			matchedtxt.firstChild.nodeValue = ""
+		}
+	}
+	function search(term) {
+		if (term) currentSearchTerm = term;
+		if (currentSearchTerm === null) return;
+
+		var re = new RegExp(currentSearchTerm, ignorecase ? 'i' : '');
+		var el = document.getElementById("frames").children;
+		var matches = new Object();
+		var maxwidth = 0;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var func = g_to_func(e);
+			var rect = find_child(e, "rect");
+			if (func == null || rect == null)
+				continue;
+
+			// Save max width. Only works as we have a root frame
+			var w = parseFloat(rect.attributes.width.value);
+			if (w > maxwidth)
+				maxwidth = w;
+
+			if (func.match(re)) {
+				// highlight
+				var x = parseFloat(rect.attributes.x.value);
+				orig_save(rect, "fill");
+				rect.attributes.fill.value = "rgb(230,0,230)";
+
+				// remember matches
+				if (matches[x] == undefined) {
+					matches[x] = w;
+				} else {
+					if (w > matches[x]) {
+						// overwrite with parent
+						matches[x] = w;
+					}
+				}
+				searching = 1;
+			}
+		}
+		if (!searching)
+			return;
+		var params = get_params();
+		params.s = currentSearchTerm;
+		history.replaceState(null, null, parse_params(params));
+
+		searchbtn.classList.add("show");
+		searchbtn.firstChild.nodeValue = "Reset Search";
+
+		// calculate percent matched, excluding vertical overlap
+		var count = 0;
+		var lastx = -1;
+		var lastw = 0;
+		var keys = Array();
+		for (k in matches) {
+			if (matches.hasOwnProperty(k))
+				keys.push(k);
+		}
+		// sort the matched frames by their x location
+		// ascending, then width descending
+		keys.sort(function(a, b){
+			return a - b;
+		});
+		// Step through frames saving only the biggest bottom-up frames
+		// thanks to the sort order. This relies on the tree property
+		// where children are always smaller than their parents.
+		var fudge = 0.0001;	// JavaScript floating point
+		for (var k in keys) {
+			var x = parseFloat(keys[k]);
+			var w = matches[keys[k]];
+			if (x >= lastx + lastw - fudge) {
+				count += w;
+				lastx = x;
+				lastw = w;
+			}
+		}
+		// display matched percent
+		matchedtxt.classList.remove("hide");
+		var pct = 100 * count / maxwidth;
+		if (pct != 100) pct = pct.toFixed(1)
+		matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+	}
+]]>
+</script>
+<rect x="0.0" y="0" width="1200.0" height="254.0" fill="url(#background)"  />
+<text id="title" x="600.00" y="24" >swapViaVenue Kipseli</text>
+<text id="subtitle" x="600.00" y="48" >transaction: 0x9a4a763fb61c43529c145617d59df0cfc82264112f5361ba72c527371321a2ec  |  357,372 gas on-chain</text>
+<text id="details" x="10.00" y="237" > </text>
+<text id="unzoom" x="10.00" y="24" class="hide">Reset Zoom</text>
+<text id="search" x="1090.00" y="24" >Search</text>
+<text id="ignorecase" x="1174.00" y="24" >ic</text>
+<text id="matched" x="1090.00" y="237" > </text>
+<g id="frames">
+<g >
+<title>0x43506849d7c04f9138d1a2050bbf3a0c054402dd:transfer(address,uint256) (8,630 gas, 2.41%)</title><rect x="338.8" y="93" width="28.5" height="15.0" fill="rgb(222,78,18)" rx="2" ry="2" />
+<text  x="341.76" y="103.5" >0x..</text>
+</g>
+<g >
+<title>0xf4030086522a5beea4988f8ca5b36dbc97bee88c:0x50d25bcd (13,309 gas, 3.72%)</title><rect x="1144.4" y="93" width="44.0" height="15.0" fill="rgb(237,150,35)" rx="2" ry="2" />
+<text  x="1147.45" y="103.5" >0xf4..</text>
+</g>
+<g >
+<title>0xfe3d12b21d2602868223e83149bdbbfb5d11e185:0x051c09ea (58,041 gas, 16.24%)</title><rect x="658.3" y="77" width="191.6" height="15.0" fill="rgb(208,17,4)" rx="2" ry="2" />
+<text  x="661.29" y="87.5" >0xfe3d12b21d2602868223e83..</text>
+</g>
+<g >
+<title>PropAMMRouterImpl:_dispatchVenue(address,address,address,uint256,uint256,address,uint256,uint256) (296,356 gas, 82.93%)</title><rect x="211.5" y="141" width="978.5" height="15.0" fill="rgb(205,2,0)" rx="2" ry="2" />
+<text  x="214.47" y="151.5" >PropAMMRouterImpl:_dispatchVenue(address,address,address,uint256,uint256,address,uint256,uint256)</text>
+</g>
+<g >
+<title>0xfe3d12b21d2602868223e83149bdbbfb5d11e185:0xe6c20bf8 (23,746 gas, 6.64%)</title><rect x="984.6" y="77" width="78.4" height="15.0" fill="rgb(247,193,46)" rx="2" ry="2" />
+<text  x="987.55" y="87.5" >0xfe3d12b..</text>
+</g>
+<g >
+<title>0x7d4e742018fb52e48b08be73d041c18b21de6fb5:0x50d25bcd (6,473 gas, 1.81%)</title><rect x="1114.7" y="77" width="21.3" height="15.0" fill="rgb(230,117,28)" rx="2" ry="2" />
+<text  x="1117.66" y="87.5" >0..</text>
+</g>
+<g >
+<title>0x0e1a3f4cf05829a25d5675dc6a3497eee50a312a:0x6f3ac038 (16,412 gas, 4.59%)</title><rect x="857.6" y="77" width="54.2" height="15.0" fill="rgb(221,74,17)" rx="2" ry="2" />
+<text  x="860.57" y="87.5" >0x0e1..</text>
+</g>
+<g >
+<title>PropAMMRouterProxy:_dispatchVenue(address,address,address,uint256,uint256,address,uint256,uint256) (296,731 gas, 83.03%)</title><rect x="210.2" y="157" width="979.8" height="15.0" fill="rgb(225,93,22)" rx="2" ry="2" />
+<text  x="213.23" y="167.5" >PropAMMRouterProxy:_dispatchVenue(address,address,address,uint256,uint256,address,uint256,uint256)</text>
+</g>
+<g >
+<title>USDC:transfer(address,uint256) (9,350 gas, 2.62%)</title><rect x="336.4" y="109" width="30.9" height="15.0" fill="rgb(208,18,4)" rx="2" ry="2" />
+<text  x="339.38" y="119.5" >US..</text>
+</g>
+<g >
+<title>PropAMMRouterProxy:swapViaVenueV1(address,address,address,uint256,uint256,address,uint256) (357,372 gas, 100.00%)</title><rect x="10.0" y="189" width="1180.0" height="15.0" fill="rgb(215,46,11)" rx="2" ry="2" />
+<text  x="13.00" y="199.5" >PropAMMRouterProxy:swapViaVenueV1(address,address,address,uint256,uint256,address,uint256)</text>
+</g>
+<g >
+<title>WETH:balanceOf(address) (487 gas, 0.14%)</title><rect x="1188.4" y="125" width="1.6" height="15.0" fill="rgb(251,212,50)" rx="2" ry="2" />
+<text  x="1191.39" y="135.5" ></text>
+</g>
+<g >
+<title>0x71e790dd841c8a9061487cb3e78c288e75ce0b3d:swap(address,address,uint256,uint256,address,uint256) (266,251 gas, 74.50%)</title><rect x="309.3" y="125" width="879.1" height="15.0" fill="rgb(236,143,34)" rx="2" ry="2" />
+<text  x="312.26" y="135.5" >0x71e790dd841c8a9061487cb3e78c288e75ce0b3d:swap(address,address,uint256,uint256,address,uint256)</text>
+</g>
+<g >
+<title>0x4a3411ac2948b33c69666b35cc6d055b27ea84f1:0x50d25bcd (6,473 gas, 1.81%)</title><rect x="1167.0" y="77" width="21.4" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="1170.02" y="87.5" >0..</text>
+</g>
+<g >
+<title>0x43506849d7c04f9138d1a2050bbf3a0c054402dd:balanceOf(address) (504 gas, 0.14%)</title><rect x="1088.8" y="77" width="1.7" height="15.0" fill="rgb(222,80,19)" rx="2" ry="2" />
+<text  x="1091.81" y="87.5" ></text>
+</g>
+<g >
+<title>WETH:balanceOf(address) (2,311 gas, 0.65%)</title><rect x="202.6" y="157" width="7.6" height="15.0" fill="rgb(251,212,50)" rx="2" ry="2" />
+<text  x="205.60" y="167.5" ></text>
+</g>
+<g >
+<title>USDC:transfer(address,uint256) (24,943 gas, 6.98%)</title><rect x="484.9" y="93" width="82.4" height="15.0" fill="rgb(208,18,4)" rx="2" ry="2" />
+<text  x="487.91" y="103.5" >USDC:tran..</text>
+</g>
+<g >
+<title>PropAMMRouterImpl:swapViaVenueV1(address,address,address,uint256,uint256,address,uint256) (357,372 gas, 100.00%)</title><rect x="10.0" y="173" width="1180.0" height="15.0" fill="rgb(245,185,44)" rx="2" ry="2" />
+<text  x="13.00" y="183.5" >PropAMMRouterImpl:swapViaVenueV1(address,address,address,uint256,uint256,address,uint256)</text>
+</g>
+<g >
+<title>WETH:balanceOf(address) (2,311 gas, 0.65%)</title><rect x="849.9" y="77" width="7.7" height="15.0" fill="rgb(251,212,50)" rx="2" ry="2" />
+<text  x="852.94" y="87.5" ></text>
+</g>
+<g >
+<title>USDC:transferFrom(address,address,uint256) (42,449 gas, 11.88%)</title><rect x="62.4" y="157" width="140.2" height="15.0" fill="rgb(221,76,18)" rx="2" ry="2" />
+<text  x="65.44" y="167.5" >USDC:transferFrom..</text>
+</g>
+<g >
+<title>all (357,372 gas, 100%)</title><rect x="10.0" y="205" width="1180.0" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="13.00" y="215.5" ></text>
+</g>
+<g >
+<title>0x43506849d7c04f9138d1a2050bbf3a0c054402dd:transferFrom(address,address,uint256) (35,797 gas, 10.02%)</title><rect x="84.4" y="141" width="118.2" height="15.0" fill="rgb(234,137,32)" rx="2" ry="2" />
+<text  x="87.40" y="151.5" >0x43506849d7c0..</text>
+</g>
+<g >
+<title>0x2260fac5e5542a773aa44fbcfedf7c193bc2c599:balanceOf(address) (2,549 gas, 0.71%)</title><rect x="1136.0" y="93" width="8.4" height="15.0" fill="rgb(250,209,50)" rx="2" ry="2" />
+<text  x="1139.03" y="103.5" ></text>
+</g>
+<g >
+<title>0x5cdbe59400cc2efdcc2b54acca4a99fe00dd588c:swap(address,uint256,address,address) (248,689 gas, 69.59%)</title><rect x="367.3" y="109" width="821.1" height="15.0" fill="rgb(215,46,11)" rx="2" ry="2" />
+<text  x="370.25" y="119.5" >0x5cdbe59400cc2efdcc2b54acca4a99fe00dd588c:swap(address,uint256,address,address)</text>
+</g>
+<g >
+<title>0xfe3d12b21d2602868223e83149bdbbfb5d11e185:0x2ba996a5 (6,746 gas, 1.89%)</title><rect x="1063.0" y="93" width="22.2" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="1065.96" y="103.5" >0..</text>
+</g>
+<g >
+<title>0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419:0x50d25bcd (13,309 gas, 3.72%)</title><rect x="1092.1" y="93" width="43.9" height="15.0" fill="rgb(230,118,28)" rx="2" ry="2" />
+<text  x="1095.09" y="103.5" >0x5f..</text>
+</g>
+<g >
+<title>WETH:balanceOf(address) (487 gas, 0.14%)</title><rect x="1090.5" y="93" width="1.6" height="15.0" fill="rgb(251,212,50)" rx="2" ry="2" />
+<text  x="1093.48" y="103.5" ></text>
+</g>
+<g >
+<title>USDC:balanceOf(address) (1,221 gas, 0.34%)</title><rect x="1086.4" y="93" width="4.1" height="15.0" fill="rgb(209,19,4)" rx="2" ry="2" />
+<text  x="1089.45" y="103.5" ></text>
+</g>
+<g >
+<title>0x43506849d7c04f9138d1a2050bbf3a0c054402dd:transfer(address,uint256) (24,223 gas, 6.78%)</title><rect x="229.3" y="109" width="80.0" height="15.0" fill="rgb(222,78,18)" rx="2" ry="2" />
+<text  x="232.28" y="119.5" >0x4350684..</text>
+</g>
+<g >
+<title>0x43506849d7c04f9138d1a2050bbf3a0c054402dd:transfer(address,uint256) (24,223 gas, 6.78%)</title><rect x="487.3" y="77" width="80.0" height="15.0" fill="rgb(222,78,18)" rx="2" ry="2" />
+<text  x="490.28" y="87.5" >0x4350684..</text>
+</g>
+<g >
+<title>0x054f0377e07d2f460151f935dffc4d880017e63a:0xcce096f3 (150,124 gas, 42.01%)</title><rect x="567.3" y="93" width="495.7" height="15.0" fill="rgb(250,211,50)" rx="2" ry="2" />
+<text  x="570.27" y="103.5" >0x054f0377e07d2f460151f935dffc4d880017e63a:0xcce096f3</text>
+</g>
+<g >
+<title>0x054f0377e07d2f460151f935dffc4d880017e63a:0x521eb273 (368 gas, 0.10%)</title><rect x="1085.2" y="93" width="1.2" height="15.0" fill="rgb(222,81,19)" rx="2" ry="2" />
+<text  x="1088.23" y="103.5" ></text>
+</g>
+<g >
+<title>0xda7afeed01fe625cf15d187a19f94b45f00b8c5f:0x16c83adc (6,918 gas, 1.94%)</title><rect x="827.1" y="61" width="22.8" height="15.0" fill="rgb(206,5,1)" rx="2" ry="2" />
+<text  x="830.10" y="71.5" >0..</text>
+</g>
+<g >
+<title>USDC:transfer(address,uint256) (9,350 gas, 2.62%)</title><rect x="920.5" y="77" width="30.9" height="15.0" fill="rgb(208,18,4)" rx="2" ry="2" />
+<text  x="923.48" y="87.5" >US..</text>
+</g>
+<g >
+<title>USDC:transfer(address,uint256) (24,943 gas, 6.98%)</title><rect x="226.9" y="125" width="82.4" height="15.0" fill="rgb(208,18,4)" rx="2" ry="2" />
+<text  x="229.90" y="135.5" >USDC:tran..</text>
+</g>
+<g >
+<title>0xfe3d12b21d2602868223e83149bdbbfb5d11e185:0x80184e12 (2,154 gas, 0.60%)</title><rect x="913.4" y="77" width="7.1" height="15.0" fill="rgb(246,191,45)" rx="2" ry="2" />
+<text  x="916.37" y="87.5" ></text>
+</g>
+<g >
+<title>WETH:transferFrom(address,address,uint256) (10,054 gas, 2.81%)</title><rect x="951.4" y="77" width="33.2" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="954.35" y="87.5" >WE..</text>
+</g>
+<g >
+<title>0x43506849d7c04f9138d1a2050bbf3a0c054402dd:transfer(address,uint256) (8,630 gas, 2.41%)</title><rect x="922.9" y="61" width="28.5" height="15.0" fill="rgb(222,78,18)" rx="2" ry="2" />
+<text  x="925.86" y="71.5" >0x..</text>
+</g>
+<g >
+<title>WETH:balanceOf(address) (487 gas, 0.14%)</title><rect x="911.8" y="77" width="1.6" height="15.0" fill="rgb(251,212,50)" rx="2" ry="2" />
+<text  x="914.76" y="87.5" ></text>
+</g>
+</g>
+</svg>

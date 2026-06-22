@@ -1,0 +1,70 @@
+# OverridesWsSource
+
+Streaming source for pAMM state overrides — the router default. Caches
+per-pAMM entries across frames (a frame only carries the pAMMs it updates),
+reconnects with backoff, and auto-closes when idle.
+
+```ts
+new OverridesWsSource(options?: OverridesWsSourceOptions)
+```
+
+## Usage
+
+```ts
+import { OverridesWsSource } from "propamm/overrides";
+import { PropAmmRouter } from "propamm/router";
+
+// the default: a router without options creates one internally
+const router = new PropAmmRouter(client);
+
+// or configure explicitly
+const source = new OverridesWsSource({ idleTimeoutMs: 0 });
+const router2 = new PropAmmRouter(client, "0x...", { overrides: source });
+```
+
+## Methods
+
+### getOverrides()
+
+```ts
+getOverrides(): Promise<OverridesSnapshot>
+```
+
+**Returns** [`Promise<OverridesSnapshot>`](/typescript/types#overridessnapshot) — the accumulated snapshot. Connects lazily on first use
+and waits for the first frame; after an idle close it reconnects and waits
+for a fresh frame instead of serving stale data. Throws on first-frame
+timeout or after `close()`.
+
+### close()
+
+```ts
+close(): void
+```
+
+Immediate, permanent teardown. Not needed for process exit — the idle
+timeout handles that.
+
+## Options
+
+### url (optional)
+
+- **Type:** `string`
+- **Default:** `wss://rpc.titanbuilder.xyz/ws/pamm_quote_stream`
+
+Stream endpoint.
+
+### firstFrameTimeoutMs (optional)
+
+- **Type:** `number`
+- **Default:** `5000`
+
+How long `getOverrides` waits for the first frame before throwing.
+
+### idleTimeoutMs (optional)
+
+- **Type:** `number`
+- **Default:** `30000`
+
+Close the socket after this long without a `getOverrides` call; the next
+call reconnects transparently. `0` closes right after each call; `Infinity`
+keeps the stream open until `close()`.

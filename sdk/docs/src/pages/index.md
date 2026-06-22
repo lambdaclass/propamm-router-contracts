@@ -1,0 +1,19 @@
+# Introduction
+
+SDKs for interacting with the [`PropAMMRouter`](/propamms/router) contract:
+quote and execute single-hop swaps across proprietary AMM venues, with a
+Uniswap V3 fallback.
+
+New to proprietary AMMs? Start with [What is a PropAMM?](/propamms/) for the
+concepts: why pAMMs exist, how builder-level sequencing makes them work on
+Ethereum, and how [makers](/propamms/makers) and [takers](/propamms/takers)
+integrate.
+
+Three implementations with the same surface:
+
+- **[TypeScript](/typescript/getting-started)** (`propamm`) — built on [viem](https://viem.sh).
+- **[Rust](/rust/getting-started)** (`propamm-sdk`) — built on [rex](https://github.com/lambdaclass/rex) / [ethrex](https://github.com/lambdaclass/ethrex).
+- **[Python](/python/getting-started)** (`propamm`) — built on [web3.py](https://web3py.readthedocs.io/).
+
+Both apply fresh pAMM state overrides to quotes automatically, so quoted
+prices reflect off-chain liquidity instead of stale on-chain state.
