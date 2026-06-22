@@ -119,12 +119,68 @@ let calldata = encode_calldata(abi::ADD_VENUE, &[Value::Address(venue)])?;
 let hash = client.send(router_address, calldata, None).await?;
 ```
 
+## Price levels
+
+Alongside the raw state overrides, Titan publishes prices it has *already
+quoted*, grouped per pAMM: for each pair, an `order_book` of rungs mapping an
+input amount to the output it would receive. This lets a taker read prices
+across a range of trade sizes without an `eth_call` per size. Rungs are either
+`Simulated` (from an EVM simulation) or `Interpolated` (a linear spline between
+simulated rungs, for finer granularity).
+
+The `PriceLevels` client wraps it, mirroring `PropAmmRouter`: a single type with
+a default snapshot source you can override.
+
+```rust
+use propamm_sdk::common::helpers::parse_units;
+use propamm_sdk::common::tokens::{USDC, WETH};
+use propamm_sdk::prices::PriceLevels;
+
+let prices = PriceLevels::new(); // default: one-shot HTTP snapshot source
+
+let snapshot = prices.get_price_levels().await?;
+// snapshot.pamms[i].pairs[j].order_book -> [{ amount_in, amount_out, variant }, ...]
+
+// Quote helpers are served from Titan's latest snapshot over HTTP, skipping the
+// on-chain eth_call that router.quote runs.
+let best = prices.get_quote(USDC, WETH, parse_units("1000", 6)?).await?;
+// TitanQuote { token_in, token_out, amount_in, amount_out, pamm, router, block_number, slot, .. }
+let pinned = prices.get_quote_venue(best.pamm, USDC, WETH, parse_units("1000", 6)?).await?;
+```
+
+The snapshot source defaults to a `PriceLevelsRpcSource` (one
+`titan_getPammPriceLevels` call per `get_price_levels`). For a live feed, pass a
+`PriceLevelsWsSource` instead — it streams complete snapshots, reconnects with
+backoff, and idle auto-closes, like `OverridesWsSource`. The stream is served
+from regional hosts (`eu.`, `ap.`, `us.`); pick the nearest:
+
+```rust
+use std::sync::Arc;
+use propamm_sdk::prices::{PriceLevels, PriceLevelsWsSource, PriceLevelsWsSourceConfig};
+
+let ws = PriceLevelsWsSource::new(PriceLevelsWsSourceConfig {
+    url: "wss://eu.rpc.titanbuilder.xyz/ws/pamm_price_levels".into(),
+    ..Default::default()
+});
+let prices = PriceLevels::with_source(Arc::new(ws));
+let snapshot = prices.get_price_levels().await?; // served from the live stream
+prices.close(); // close the stream socket when done (no-op for the HTTP default)
+```
+
+Passing a `PriceLevelsRpcSource` with a custom URL to `with_source` instead
+points both the snapshots and the quote helpers at that endpoint (the quotes are
+HTTP-only).
+
+A runnable version lives in [`examples/price_levels.rs`](examples/price_levels.rs)
+(`cargo run --example price_levels`; override the HTTP endpoint with `PRICE_LEVELS_URL`).
+
 ## Layout
 
 - `src/client.rs` — rex/ethrex-based contract client (`call` with state/block overrides, `send`, `wait_for_transaction`).
 - `src/router/mod.rs` — `PropAmmRouter` bindings (`quote`/`quote_with`, `swap`/`swap_with`, `swap_and_wait`(`_with`), `wait_for_swap`, `approve`/`allowance`, views) plus `MAX_FEE_BPS`.
 - `src/router/abi.rs` — hand-rolled `PropAMMRouter` ABI: signature constants (selector-tested), return/event decoding, and the custom-error table.
 - `src/overrides/mod.rs` — pAMM state-override sources (`OverridesWsSource`, `OverridesRpcSource`), payload parsing, and `to_state_override`.
+- `src/prices/mod.rs` — `PriceLevels` client plus its swappable snapshot sources (`PriceLevelsWsSource`, `PriceLevelsRpcSource`), snapshot parsing, and the Titan quote helpers (`get_quote`, `get_quote_venue`).
 - `src/common/tokens.rs` — `ETH_SENTINEL` and mainnet token addresses.
 - `src/common/pamms.rs` — pAMM venue addresses.
 - `src/common/helpers.rs` — `apply_slippage`, `deadline_in`, `parse_address`, and unit conversion (`parse_ether`, `parse_units`, `format_ether`, `format_units`).
