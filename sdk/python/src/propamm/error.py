@@ -58,6 +58,10 @@ class OverridesError(PropAmmError):
     """Failure while fetching or parsing pAMM state overrides."""
 
 
+class PricesError(PropAmmError):
+    """Failure while fetching or parsing pAMM price levels."""
+
+
 class TimeoutError(PropAmmError):  # intentionally shadows the builtin TimeoutError
     """An operation did not complete within its deadline."""
 
