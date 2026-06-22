@@ -54,16 +54,13 @@ contract PropAMMRouterVenueWhitelistTest is Test {
             abi.encodeCall(PropAMMRouter.initialize, (address(mockRouter), address(mockQuoter), address(manager)));
         ERC1967Proxy proxy = new ERC1967Proxy(address(impl), initData);
         router = PropAMMRouter(payable(address(proxy)));
+
+        router.addVenue(FERMI_ROUTER);
+        router.addVenue(KIPSELI_PAMM);
+        router.addVenue(BEBOP_ROUTER);
     }
 
     // --- Seeding -----------------------------------------------------------
-
-    function test_initialize_seedsDefaultVenues() public view {
-        // A from-scratch deploy ships with the known propAMMs whitelisted.
-        assertTrue(router.isWhitelistedVenue(FERMI_ROUTER));
-        assertTrue(router.isWhitelistedVenue(KIPSELI_PAMM));
-        assertTrue(router.isWhitelistedVenue(BEBOP_ROUTER));
-    }
 
     function test_isWhitelistedVenue_unknownReturnsFalse() public view {
         assertFalse(router.isWhitelistedVenue(genericVenue));

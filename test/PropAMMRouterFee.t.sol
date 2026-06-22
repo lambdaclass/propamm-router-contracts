@@ -45,6 +45,7 @@ contract PropAMMRouterFeeTest is Test {
         tokenIn = new MockERC20("In", "IN");
         tokenOut = new MockERC20("Out", "OUT");
         router = _deployRouter();
+        router.addVenue(BEBOP_ROUTER);
     }
 
     // Funds the user with tokenIn, pre-funds the mock swap router with tokenOut to
