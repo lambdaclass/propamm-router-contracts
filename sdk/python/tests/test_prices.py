@@ -29,8 +29,16 @@ def test_parse_price_levels_message_extracts_pamms_pairs_and_rungs():
                         "tokenIn": token_in,
                         "tokenOut": token_out,
                         "orderBook": [
-                            {"amountIn": "0x989680", "amountOut": "0x174b67393", "variant": "Simulated"},
-                            {"amountIn": "0xaa810a", "amountOut": "0x1a0781260", "variant": "Interpolated"},
+                            {
+                                "amountIn": "0x989680",
+                                "amountOut": "0x174b67393",
+                                "variant": "Simulated",
+                            },
+                            {
+                                "amountIn": "0xaa810a",
+                                "amountOut": "0x1a0781260",
+                                "variant": "Interpolated",
+                            },
                         ],
                     }
                 ],

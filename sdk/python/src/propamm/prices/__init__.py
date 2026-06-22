@@ -166,7 +166,9 @@ def parse_price_levels_message(raw: Any) -> PriceLevelsSnapshot:
         block_number=_parse_u64_field(raw.get("blockNumber", raw.get("block_number"))),
         slot=_parse_u64_field(raw.get("slot")),
         # Titan timestamps are nanoseconds; Python ints are unbounded, so no overflow.
-        timestamp_ns=timestamp if isinstance(timestamp, int) and not isinstance(timestamp, bool) else None,
+        timestamp_ns=timestamp
+        if isinstance(timestamp, int) and not isinstance(timestamp, bool)
+        else None,
         pamms=pamms,
     )
 
@@ -235,7 +237,9 @@ def _parse_titan_quote(raw: Any) -> TitanQuote:
         router=router,
         block_number=_parse_u64_field(raw.get("blockNumber", raw.get("block_number"))),
         slot=_parse_u64_field(raw.get("slot")),
-        timestamp_ns=timestamp if isinstance(timestamp, int) and not isinstance(timestamp, bool) else None,
+        timestamp_ns=timestamp
+        if isinstance(timestamp, int) and not isinstance(timestamp, bool)
+        else None,
     )
 
 

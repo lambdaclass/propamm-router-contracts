@@ -54,12 +54,7 @@ async def main() -> None:
 
     # Pick the first pAMM/pair that carries an order book to display.
     chosen = next(
-        (
-            (entry.pamm, pair)
-            for entry in snapshot.pamms
-            for pair in entry.pairs
-            if pair.order_book
-        ),
+        ((entry.pamm, pair) for entry in snapshot.pamms for pair in entry.pairs if pair.order_book),
         None,
     )
     if chosen is None:
