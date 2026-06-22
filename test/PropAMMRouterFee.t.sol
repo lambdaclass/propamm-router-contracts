@@ -45,6 +45,7 @@ contract PropAMMRouterFeeTest is Test {
         tokenIn = new MockERC20("In", "IN");
         tokenOut = new MockERC20("Out", "OUT");
         router = _deployRouter();
+        vm.prank(owner);
         router.addVenue(BEBOP_ROUTER);
     }
 
