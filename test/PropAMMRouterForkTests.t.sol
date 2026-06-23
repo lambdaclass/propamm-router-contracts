@@ -5,7 +5,6 @@ import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {IPropAMMRouter} from "../src/interfaces/IPropAMMRouter.sol";
-import {FERMI_ROUTER} from "../src/interfaces/IFermiSwapper.sol";
 import {PRIO_UPDATE_REGISTRY, IPrioUpdateRegistry} from "../test/interfaces/IPrioUpdateRegistry.sol";
 
 /// @title PropAMMRouterForkTests
