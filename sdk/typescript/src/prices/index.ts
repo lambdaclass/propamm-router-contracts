@@ -35,6 +35,7 @@
  */
 
 import { numberToHex, type Address } from "viem";
+import { WsSource } from "../ws-source.js";
 
 /** Whether a rung came from an EVM simulation or a spline interpolation. */
 export type PriceVariant = "Simulated" | "Interpolated";
@@ -395,9 +396,6 @@ export interface PriceLevelsWsSourceOptions {
   idleTimeoutMs?: number;
 }
 
-const RECONNECT_INITIAL_MS = 1_000;
-const RECONNECT_MAX_MS = 30_000;
-
 /**
  * Streaming source: connects lazily on the first `getPriceLevels()` call and
  * reconnects with exponential backoff. Unlike the overrides stream, each
@@ -406,172 +404,27 @@ const RECONNECT_MAX_MS = 30_000;
  * no explicit teardown is needed; `close()` remains available for immediate,
  * permanent teardown.
  */
-export class PriceLevelsWsSource implements PriceLevelsSource {
-  private readonly url: string;
-  private readonly firstFrameTimeoutMs: number;
-  private readonly idleTimeoutMs: number;
-
-  private ws?: WebSocket;
-  private closed = false;
-  private reconnectAttempts = 0;
-  private reconnectTimer?: ReturnType<typeof setTimeout>;
-  private idleTimer?: ReturnType<typeof setTimeout>;
-
+export class PriceLevelsWsSource extends WsSource<PriceLevelsSnapshot> implements PriceLevelsSource {
+  // Replaced outright on each frame: price-levels frames are complete snapshots.
   private snapshot: PriceLevelsSnapshot = { pamms: [] };
-  private hasFrame = false;
-  private frameWaiters: Array<{ resolve: () => void; reject: (error: Error) => void }> = [];
+
+  protected override get name() {
+    return "price-levels";
+  }
 
   constructor(options: PriceLevelsWsSourceOptions = {}) {
-    this.url = options.url ?? DEFAULT_PRICE_LEVELS_WS_URL;
-    this.firstFrameTimeoutMs = options.firstFrameTimeoutMs ?? 5_000;
-    this.idleTimeoutMs = options.idleTimeoutMs ?? 30_000;
+    super(options.url ?? DEFAULT_PRICE_LEVELS_WS_URL, options);
   }
 
-  async getPriceLevels(): Promise<PriceLevelsSnapshot> {
-    if (this.closed) {
-      throw new Error("price-levels source is closed");
-    }
-
-    try {
-      this.connect();
-      if (!this.hasFrame) {
-        await this.waitForFirstFrame();
-      }
-      // Hand out a copy so a later frame can't mutate the caller's snapshot.
-      return { ...this.snapshot, pamms: [...this.snapshot.pamms] };
-    } finally {
-      this.armIdleTimer();
-    }
+  protected override applyFrame(data: string): void {
+    this.snapshot = parsePriceLevelsMessage(JSON.parse(data));
   }
 
-  close(): void {
-    this.closed = true;
-    this.clearTimer("reconnectTimer");
-    this.clearTimer("idleTimer");
-    this.ws?.close();
-    this.ws = undefined;
-    this.failWaiters(new Error("price-levels source closed while waiting for the first frame"));
+  protected override copySnapshot(): PriceLevelsSnapshot {
+    return { ...this.snapshot, pamms: [...this.snapshot.pamms] };
   }
 
-  private connect(): void {
-    if (this.ws || this.reconnectTimer || this.closed) return;
-    if (typeof WebSocket === "undefined") {
-      throw new Error("no global WebSocket available (Node >= 22 or a browser is required)");
-    }
-
-    const ws = new WebSocket(this.url);
-    this.ws = ws;
-
-    ws.addEventListener("open", () => {
-      this.reconnectAttempts = 0;
-    });
-    ws.addEventListener("message", (event) => {
-      this.handleFrame(event.data);
-    });
-    ws.addEventListener("error", () => {
-      // The paired "close" event drives reconnection.
-    });
-    ws.addEventListener("close", () => {
-      if (this.ws !== ws) return;
-      this.ws = undefined;
-      this.scheduleReconnect();
-    });
+  getPriceLevels(): Promise<PriceLevelsSnapshot> {
+    return this.getSnapshot();
   }
-
-  private scheduleReconnect(): void {
-    if (this.closed || this.reconnectTimer) return;
-    const delay = Math.min(RECONNECT_INITIAL_MS * 2 ** this.reconnectAttempts, RECONNECT_MAX_MS);
-    this.reconnectAttempts += 1;
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = undefined;
-      this.connect();
-    }, delay);
-    unrefTimer(this.reconnectTimer);
-  }
-
-  /** (Re)start the idle countdown; unref'd so it never pins the process. */
-  private armIdleTimer(): void {
-    this.clearTimer("idleTimer");
-    if (this.closed || !Number.isFinite(this.idleTimeoutMs)) return;
-    this.idleTimer = setTimeout(() => {
-      this.idleTimer = undefined;
-      this.idleClose();
-    }, this.idleTimeoutMs);
-    unrefTimer(this.idleTimer);
-  }
-
-  /**
-   * Idle teardown: drop the socket (and any reconnection backoff) until the
-   * next `getPriceLevels()` call. `hasFrame` resets so the next call waits for
-   * a fresh complete snapshot instead of serving a stale one.
-   */
-  private idleClose(): void {
-    if (this.frameWaiters.length > 0) {
-      this.armIdleTimer();
-      return;
-    }
-    this.clearTimer("reconnectTimer");
-    this.reconnectAttempts = 0;
-    const ws = this.ws;
-    this.ws = undefined; // cleared first so the close handler doesn't reconnect
-    ws?.close();
-    this.hasFrame = false;
-  }
-
-  private clearTimer(name: "reconnectTimer" | "idleTimer"): void {
-    if (this[name] !== undefined) {
-      clearTimeout(this[name]);
-      this[name] = undefined;
-    }
-  }
-
-  private handleFrame(data: unknown): void {
-    if (typeof data !== "string") return;
-
-    let frame: PriceLevelsSnapshot;
-    try {
-      frame = parsePriceLevelsMessage(JSON.parse(data));
-    } catch {
-      return; // skip undecodable frames, like the reference consumers do
-    }
-
-    // Each frame is a complete snapshot, so it replaces the cached one.
-    this.snapshot = frame;
-    this.hasFrame = true;
-    const waiters = this.frameWaiters;
-    this.frameWaiters = [];
-    for (const waiter of waiters) waiter.resolve();
-  }
-
-  private async waitForFirstFrame(): Promise<void> {
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.frameWaiters = this.frameWaiters.filter((w) => w !== waiter);
-        reject(new Error(`no price-levels frame received within ${this.firstFrameTimeoutMs}ms`));
-      }, this.firstFrameTimeoutMs);
-      const waiter = {
-        resolve: () => {
-          clearTimeout(timer);
-          resolve();
-        },
-        reject: (error: Error) => {
-          clearTimeout(timer);
-          reject(error);
-        },
-      };
-      this.frameWaiters.push(waiter);
-    });
-  }
-
-  private failWaiters(error: Error): void {
-    const waiters = this.frameWaiters;
-    this.frameWaiters = [];
-    for (const waiter of waiters) waiter.reject(error);
-  }
-}
-
-// In Node, unref'd timers don't keep the event loop (and thus the process)
-// alive; browsers have no such concept, so the call is a no-op there.
-function unrefTimer(timer: ReturnType<typeof setTimeout>): void {
-  (timer as { unref?: () => void }).unref?.();
 }
