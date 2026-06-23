@@ -404,7 +404,10 @@ export interface PriceLevelsWsSourceOptions {
  * no explicit teardown is needed; `close()` remains available for immediate,
  * permanent teardown.
  */
-export class PriceLevelsWsSource extends WsSource<PriceLevelsSnapshot> implements PriceLevelsSource {
+export class PriceLevelsWsSource
+  extends WsSource<PriceLevelsSnapshot>
+  implements PriceLevelsSource
+{
   // Replaced outright on each frame: price-levels frames are complete snapshots.
   private snapshot: PriceLevelsSnapshot = { pamms: [] };
 
