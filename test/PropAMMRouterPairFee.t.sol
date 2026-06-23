@@ -226,13 +226,13 @@ contract PropAMMRouterPairFeeTest is Test {
     function test_quoteUniswapV3_usesResolvedFee() public {
         mockQuoter.setAmountOut(1000);
         router.setPairFee(address(tokenIn), address(tokenOut), 100);
-        router.quoteUniswapV3(address(tokenIn), address(tokenOut), 1 ether);
+        router.quoteVenueV1(router.fallbackSwapRouter(), address(tokenIn), address(tokenOut), 1 ether);
         assertEq(mockQuoter.lastFee(), 100);
     }
 
     function test_quoteUniswapV3_unconfigured_usesGlobalFee() public {
         mockQuoter.setAmountOut(1000);
-        router.quoteUniswapV3(address(tokenIn), address(tokenOut), 1 ether);
+        router.quoteVenueV1(router.fallbackSwapRouter(), address(tokenIn), address(tokenOut), 1 ether);
         assertEq(mockQuoter.lastFee(), 3000);
     }
 

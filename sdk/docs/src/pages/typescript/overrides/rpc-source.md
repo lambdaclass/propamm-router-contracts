@@ -1,0 +1,48 @@
+# OverridesRpcSource
+
+Fetch-on-demand source for pAMM state overrides: one
+`titan_getPammStateOverrides` HTTP call per `getOverrides()`. Nothing to
+manage; simplest for sporadic quoting.
+
+```ts
+new OverridesRpcSource(options?: OverridesRpcSourceOptions)
+```
+
+## Usage
+
+```ts
+import { OverridesRpcSource } from "propamm/overrides";
+import { PropAmmRouter } from "propamm/router";
+
+const source = new OverridesRpcSource();
+const router = new PropAmmRouter(client, "0x...", { overrides: source });
+
+// or per call
+await router.quote(WETH, USDC, amountIn, { overrides: source });
+```
+
+## Methods
+
+### getOverrides()
+
+```ts
+getOverrides(): Promise<OverridesSnapshot>
+```
+
+**Returns** [`Promise<OverridesSnapshot>`](/typescript/types#overridessnapshot) — a fresh snapshot fetched from the
+endpoint. Throws on HTTP or JSON-RPC errors.
+
+## Options
+
+### url (optional)
+
+- **Type:** `string`
+- **Default:** `https://rpc.titanbuilder.xyz`
+
+JSON-RPC endpoint.
+
+### fetch (optional)
+
+- **Type:** `typeof fetch`
+
+Custom fetch implementation.

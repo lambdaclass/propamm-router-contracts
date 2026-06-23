@@ -10,21 +10,24 @@ import {BEBOP_ROUTER} from "../src/interfaces/IBebopRouter.sol";
 /// the Uniswap V3 fallback fees (the global `fallbackFee` plus the owner-curated
 /// per-pair tiers for the deep mainnet pairs — the stablecoin pair and the two
 /// ETH/stable pairs) AND the default propAMM venue whitelist (Fermi, Kipseli,
-/// Bebop). Run by ROUTER_OWNER after an in-place proxy upgrade
-/// (`setFallbackFee`/`setPairFees`/`addVenue` are all onlyOwner).
+/// Bebop). Run after an in-place proxy upgrade by the AccessManager role holders
+/// that gate these selectors: `setFallbackFee`/`setPairFees` are `restricted` to
+/// `UPGRADER_ROLE`, `addVenue` to `LISTING_ROLE`. NOTE: both roles carry an
+/// execution delay, so against a configured manager these calls go through the
+/// manager's schedule/execute flow (see `Upgrade.s.sol`/`Execute.s.sol`), not the
+/// direct broadcast below — this script assumes a zero-delay (e.g. bootstrap-admin) context.
 /// @dev A fresh deploy gets this exact config from `initialize`
-/// (`fallbackFee = 3000` + `_seedDefaultPairFees` + `_seedDefaultVenues`), which is
+/// (`fallbackFee = 3000` + `_seedDefaultPairFees` + the inline `_addVenue` calls), which is
 /// initializer-gated and so never re-runs on upgrade; this script reproduces it for
 /// upgraded proxies. Setting `fallbackFee` is required, not just the per-pair tiers:
 /// a proxy that predates the per-pair fee map (an enum-era deployment) carries
-/// `fallbackFee = 0`, which makes `_resolveFee` return the invalid tier `0` for every
+/// `fallbackFee = 0`, which makes `resolvedFee` return the invalid tier `0` for every
 /// UNSEEDED pair and revert the Uniswap fallback. Likewise such a proxy has an EMPTY
 /// venue whitelist, so without re-adding the venues `swapV1` can only ever take the
 /// Uniswap fallback and never route the propAMMs. The `addVenue` calls are guarded by
-/// `isWhitelistedVenue` so the script stays idempotent (mirroring `_seedDefaultVenues`,
-/// which is itself idempotent) and safe to re-run. Keep the tiers and venue list in
-/// sync with the contract's `_seedDefaultPairFees` / `_seedDefaultVenues` when either
-/// changes.
+/// `isWhitelistedVenue` so the script stays idempotent and safe to re-run. Keep the
+/// tiers and venue list in sync with the contract's `_seedDefaultPairFees` and the
+/// inline `_addVenue` calls in `initialize` when either changes.
 contract SetupRouterVariables is Script {
     address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
     address constant USDT = 0xdAC17F958D2ee523a2206206994597C13D831ec7;
@@ -35,7 +38,7 @@ contract SetupRouterVariables is Script {
     /// retune it later via `setFallbackFee`.
     uint24 public constant FALLBACK_FEE = 3000;
 
-    /// @notice The pairs/tiers to seed. Edit here; both `run()` and the test use this.
+    /// @notice The pairs/tiers to seed. Both `run()` and the test use this.
     function seedData() public pure returns (address[] memory tokenA, address[] memory tokenB, uint24[] memory fees) {
         tokenA = new address[](3);
         tokenB = new address[](3);
@@ -55,9 +58,9 @@ contract SetupRouterVariables is Script {
         fees[2] = 500;
     }
 
-    /// @notice The default propAMM venues to whitelist — the same set
-    /// `_seedDefaultVenues` adds on a fresh deploy. Edit here; both `run()` and the
-    /// test use this.
+    /// @notice The default propAMM venues to whitelist — the same set `initialize`
+    /// adds on a fresh deploy via its inline `_addVenue` calls. Both `run()` and
+    /// the test use this.
     function venues() public pure returns (address[] memory list) {
         list = new address[](3);
         list[0] = FERMI_ROUTER;
@@ -70,8 +73,9 @@ contract SetupRouterVariables is Script {
         (address[] memory tokenA, address[] memory tokenB, uint24[] memory fees) = seedData();
         address[] memory venueList = venues();
 
-        // The broadcaster MUST be ROUTER_OWNER — setFallbackFee/setPairFees/addVenue
-        // are onlyOwner. Set the global fallback tier first so even pairs outside the
+        // The broadcaster MUST hold the AccessManager roles that gate these selectors
+        // (UPGRADER_ROLE for setFallbackFee/setPairFees, LISTING_ROLE for addVenue).
+        // Set the global fallback tier first so even pairs outside the
         // seeded set resolve to a valid tier, then apply the deep per-pair tiers, then
         // re-add the default propAMM venues. addVenue reverts on a duplicate, so guard
         // each with isWhitelistedVenue to keep the script idempotent / re-runnable.

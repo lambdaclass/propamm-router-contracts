@@ -1,0 +1,73 @@
+# OverridesWsSource
+
+Streaming source for pAMM state overrides — the router default. Caches
+per-pAMM entries across frames (a frame only carries the pAMMs it updates),
+reconnects with backoff, and drops the connection when idle.
+
+```rust
+pub fn new(config: OverridesWsSourceConfig) -> Self
+```
+
+## Usage
+
+```rust
+use std::sync::Arc;
+use std::time::Duration;
+use propamm::overrides::{OverridesWsSource, OverridesWsSourceConfig};
+use propamm::PropAmmRouter;
+
+// the default: a router built with `new` creates one internally
+let router = PropAmmRouter::new(client, address);
+
+// or configure explicitly
+let source = OverridesWsSource::new(OverridesWsSourceConfig {
+    idle_timeout: Duration::from_secs(5),
+    ..Default::default()
+});
+let router2 = PropAmmRouter::with_overrides(client, address, Arc::new(source));
+```
+
+## Methods
+
+### get_overrides()
+
+```rust
+pub async fn get_overrides(&self) -> Result<OverridesSnapshot>
+```
+
+**Returns** [`Result<OverridesSnapshot>`](/rust/types#overridessnapshot) — the accumulated snapshot. Connects lazily on first use
+and waits for the first frame; after an idle close it reconnects and waits
+for a fresh frame instead of serving stale data. Fails on first-frame
+timeout or after `close()`.
+
+### close()
+
+```rust
+pub fn close(&self)
+```
+
+Immediate, permanent teardown.
+
+## Config (`OverridesWsSourceConfig`)
+
+### url
+
+- **Type:** `String`
+- **Default:** `wss://rpc.titanbuilder.xyz/ws/pamm_quote_stream`
+
+Stream endpoint.
+
+### first_frame_timeout
+
+- **Type:** `Duration`
+- **Default:** 5s
+
+How long `get_overrides` waits for the first frame before failing.
+
+### idle_timeout
+
+- **Type:** `Duration`
+- **Default:** 30s
+
+Drop the connection after this long without a `get_overrides` call; the next
+call reconnects transparently.
