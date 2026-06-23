@@ -9,7 +9,6 @@ import {PropAMMRouter} from "../src/PropAMMRouter.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockSwapRouter02} from "./mocks/MockSwapRouter02.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
-import {SetupRouterVariables} from "../scripts/setupRouterVariables.s.sol";
 import "../src/libraries/Errors.sol";
 
 contract PropAMMRouterPairFeeTest is Test {
@@ -286,8 +285,22 @@ contract PropAMMRouterPairFeeTest is Test {
     }
 
     function test_seedStablePairs_resolveToSeededTiers() public {
-        SetupRouterVariables seed = new SetupRouterVariables();
-        (address[] memory a, address[] memory b, uint24[] memory f) = seed.seedData();
+        address[] memory a = new address[](3);
+        address[] memory b = new address[](3);
+        uint24[] memory f = new uint24[](3);
+
+        // USDC/USDT — stablecoin pair, deepest at 0.01%.
+        a[0] = USDC;
+        b[0] = USDT;
+        f[0] = 100;
+        // USDC/WETH — ETH/stable, deepest at 0.05%.
+        a[1] = USDC;
+        b[1] = WETH;
+        f[1] = 500;
+        // USDT/WETH — ETH/stable, deepest at 0.05%.
+        a[2] = USDT;
+        b[2] = WETH;
+        f[2] = 500;
 
         router.setPairFees(a, b, f);
 

@@ -3,7 +3,6 @@ pragma solidity ^0.8.35;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
@@ -15,7 +14,6 @@ import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/Pau
 import {IPropAMMRouter} from "./interfaces/IPropAMMRouter.sol";
 import {IPropAMM} from "./interfaces/IPropAMM.sol";
 import {IWETH} from "./interfaces/IWETH.sol";
-import {FERMI_ROUTER, IFermiSwapper} from "./interfaces/IFermiSwapper.sol";
 import {BEBOP_ROUTER, IBebopRouter} from "./interfaces/IBebopRouter.sol";
 import {UniV3Router} from "./libraries/UniV3Router.sol";
 import {FrontendFees} from "./libraries/FrontendFees.sol";
@@ -37,7 +35,6 @@ contract PropAMMRouter is
     UUPSUpgradeable
 {
     using SafeERC20 for IERC20;
-    using SafeCast for uint256;
     using EnumerableSet for EnumerableSet.AddressSet;
 
     /// @notice Fallback venue address.
@@ -103,10 +100,6 @@ contract PropAMMRouter is
         fallbackFee = 3000;
 
         _seedDefaultPairFees();
-
-        _addVenue(FERMI_ROUTER);
-        _addVenue(BEBOP_ROUTER);
-        _addVenue(0x71e790dd841c8A9061487cb3E78C288E75cE0B3d); // Kipseli
 
         __AccessManaged_init(authority_);
         __Pausable_init();
@@ -396,14 +389,7 @@ contract PropAMMRouter is
         // `_coreSwap` engages the Uniswap fallback.
         require(isWhitelistedVenue(venue), UnknownVenue());
 
-        if (venue == FERMI_ROUTER) {
-            IERC20(tokenIn).forceApprove(FERMI_ROUTER, amountIn);
-            int256 _amountIn = amountIn.toInt256();
-            IFermiSwapper(FERMI_ROUTER).fermiSwapWithAllowances(tokenIn, tokenOut, _amountIn, amountOutMin, recipient);
-
-            // Prevent later transfers if token was partially pulled
-            IERC20(tokenIn).forceApprove(FERMI_ROUTER, 0);
-        } else if (venue == BEBOP_ROUTER) {
+        if (venue == BEBOP_ROUTER) {
             uint256 balanceTokenOutBefore = IERC20(tokenOut).balanceOf(address(this));
 
             IERC20(tokenIn).forceApprove(BEBOP_ROUTER, amountIn);
@@ -520,9 +506,6 @@ contract PropAMMRouter is
         if (venue == fallbackSwapRouter) {
             amountOut =
                 UniV3Router.quoteExactIn(tokenIn, tokenOut, resolvedFee(tokenIn, tokenOut), amount, fallbackQuoter);
-        } else if (venue == FERMI_ROUTER) {
-            int256 amountInt256 = amount.toInt256();
-            (, amountOut) = IFermiSwapper(FERMI_ROUTER).quoteAmounts(tokenIn, tokenOut, amountInt256);
         } else if (venue == BEBOP_ROUTER) {
             amountOut = IBebopRouter(BEBOP_ROUTER).quote(tokenIn, tokenOut, amount);
         } else {
@@ -738,9 +721,8 @@ contract PropAMMRouter is
     /// (and quote) through it — including as an auto-selection candidate in
     /// `swapV1` / `quoteV1`, which iterate the whitelist.
     /// @dev Access-controlled via the AccessManager authority. Reverts `ZeroAddress` if `venue` is zero, or
-    /// `VenueAlreadyWhitelisted` if it is already listed. Other than the two
-    /// built-in propAMMs (Fermi and Bebop, which use their bespoke interfaces),
-    /// a venue is expected
+    /// `VenueAlreadyWhitelisted` if it is already listed. Other than the
+    /// built-in propAMMs Bebop, (which use their bespoke interface), a venue is expected
     /// to implement the common `IPropAMM` interface. Listing an address that does
     /// not (an EOA, the wrong contract, a not-yet-deployed adapter) is not a
     /// foot-gun: its `quote`/`swap` calls revert, so it is skipped by selection

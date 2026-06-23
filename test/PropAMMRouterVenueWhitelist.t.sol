@@ -10,7 +10,6 @@ import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockSwapRouter02} from "./mocks/MockSwapRouter02.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
 import {MockPropAMMExactOut} from "./mocks/MockPropAMMExactOut.sol";
-import {FERMI_ROUTER} from "../src/interfaces/IFermiSwapper.sol";
 import {BEBOP_ROUTER} from "../src/interfaces/IBebopRouter.sol";
 import "../src/libraries/Errors.sol";
 
@@ -22,6 +21,7 @@ contract PropAMMRouterVenueWhitelistTest is Test {
     MockERC20 internal tokenIn;
     MockERC20 internal tokenOut;
 
+    address constant FERMI_ROUTER = 0x5979458912F80B96d30D4220af8E2e4925A33320;
     address constant KIPSELI_PAMM = 0x71e790dd841c8A9061487cb3E78C288E75cE0B3d;
 
     address internal owner = address(this);
@@ -55,16 +55,13 @@ contract PropAMMRouterVenueWhitelistTest is Test {
             abi.encodeCall(PropAMMRouter.initialize, (address(mockRouter), address(mockQuoter), address(manager)));
         ERC1967Proxy proxy = new ERC1967Proxy(address(impl), initData);
         router = PropAMMRouter(payable(address(proxy)));
+
+        router.addVenue(FERMI_ROUTER);
+        router.addVenue(KIPSELI_PAMM);
+        router.addVenue(BEBOP_ROUTER);
     }
 
     // --- Seeding -----------------------------------------------------------
-
-    function test_initialize_seedsDefaultVenues() public view {
-        // A from-scratch deploy ships with the known propAMMs whitelisted.
-        assertTrue(router.isWhitelistedVenue(FERMI_ROUTER));
-        assertTrue(router.isWhitelistedVenue(KIPSELI_PAMM));
-        assertTrue(router.isWhitelistedVenue(BEBOP_ROUTER));
-    }
 
     function test_isWhitelistedVenue_unknownReturnsFalse() public view {
         assertFalse(router.isWhitelistedVenue(genericVenue));

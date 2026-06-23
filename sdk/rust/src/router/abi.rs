@@ -401,7 +401,6 @@ mod tests {
         "InvalidInitialization()",
         "NotInitializing()",
         "ReentrancyGuardReentrantCall()",
-        "SafeCastOverflowedUintToInt(uint256)",
         "SafeERC20FailedOperation(address)",
         "UUPSUnauthorizedCallContext()",
         "UUPSUnsupportedProxiableUUID(bytes32)",
