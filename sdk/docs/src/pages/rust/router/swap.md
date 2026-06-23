@@ -14,9 +14,9 @@ pub async fn swap_and_wait_with(&self, params: &SwapParams, opts: &SwapOptions) 
 ::: code-group
 
 ```rust [example.rs]
-use propamm_sdk::common::helpers::{apply_slippage, deadline_in, parse_ether};
-use propamm_sdk::common::tokens::{ETH_SENTINEL, USDC};
-use propamm_sdk::router::SwapParams;
+use propamm::common::helpers::{apply_slippage, deadline_in, parse_ether};
+use propamm::common::tokens::{ETH_SENTINEL, USDC};
+use propamm::router::SwapParams;
 
 let amount_in = parse_ether("1")?;
 let quote = router.quote(ETH_SENTINEL, USDC, amount_in).await?;
@@ -34,8 +34,8 @@ let hash = router
 ```
 
 ```rust [setup.rs]
-use propamm_sdk::common::helpers::parse_address;
-use propamm_sdk::{ContractClient, PropAmmRouter};
+use propamm::common::helpers::parse_address;
+use propamm::{ContractClient, PropAmmRouter};
 
 let client = ContractClient::connect_with_signer("https://...", "0x...")?;
 let me = client.signer_address().unwrap();
@@ -62,8 +62,8 @@ on-chain and fill via the best of them. Must be non-empty when present;
 `None` swaps through the best-quoting venue overall.
 
 ```rust
-use propamm_sdk::common::pamms::KIPSELI;
-use propamm_sdk::router::SwapOptions;
+use propamm::common::pamms::KIPSELI;
+use propamm::router::SwapOptions;
 
 let opts = SwapOptions {
     venues: Some(vec![KIPSELI]), // exactly this venue
@@ -80,7 +80,7 @@ receive after the fee, and the decoded result's `fee` field (via
 and recipient.
 
 ```rust
-use propamm_sdk::router::{FrontendFee, SwapOptions};
+use propamm::router::{FrontendFee, SwapOptions};
 
 let opts = SwapOptions {
     frontend_fee: Some(FrontendFee { bps: 25, recipient: fee_recipient }), // 0.25%

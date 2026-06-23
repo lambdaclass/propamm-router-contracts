@@ -11,7 +11,7 @@ pub fn apply_slippage(amount: U256, bps: u32) -> Result<U256>
 Shave basis points off an amount — derive `amount_out_min` from a quote.
 
 ```rust
-use propamm_sdk::common::helpers::apply_slippage;
+use propamm::common::helpers::apply_slippage;
 
 let min_out = apply_slippage(quote.amount_out, 50)?; // quote - 0.5%
 ```
@@ -29,7 +29,7 @@ pub fn deadline_in(seconds: u64) -> U256
 Unix-timestamp deadline some seconds from now, for swap `deadline` params.
 
 ```rust
-use propamm_sdk::common::helpers::deadline_in;
+use propamm::common::helpers::deadline_in;
 
 let deadline = deadline_in(300); // now + 5 min
 ```
@@ -45,7 +45,7 @@ pub fn parse_address(s: &str) -> Result<Address>
 Parse a 0x-prefixed (or bare) 20-byte hex address.
 
 ```rust
-use propamm_sdk::common::helpers::parse_address;
+use propamm::common::helpers::parse_address;
 
 let router_address = parse_address("0x4DdF368080CD7946db5b459aD591c350158175e1")?;
 ```
@@ -66,7 +66,7 @@ Parsing fails on malformed numbers, more fractional digits than `decimals`,
 or uint256 overflow. Formatting trims trailing zeros.
 
 ```rust
-use propamm_sdk::common::helpers::{format_units, parse_units};
+use propamm::common::helpers::{format_units, parse_units};
 
 parse_units("1.5", 6)?;            // 1500000
 format_units(1500000.into(), 6);   // "1.5"

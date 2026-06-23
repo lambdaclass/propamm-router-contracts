@@ -13,12 +13,12 @@
 //! swap reverts with `InsufficientOutput` there, raise SLIPPAGE_BPS (live
 //! chains fill at the quoted state normally).
 
-use propamm_sdk::common::helpers::{
+use propamm::common::helpers::{
     apply_slippage, deadline_in, format_ether, format_units, parse_address, parse_ether,
 };
-use propamm_sdk::common::tokens::{ETH_SENTINEL, USDC};
-use propamm_sdk::router::SwapParams;
-use propamm_sdk::{ContractClient, PropAmmRouter};
+use propamm::common::tokens::{ETH_SENTINEL, USDC};
+use propamm::router::SwapParams;
+use propamm::{ContractClient, PropAmmRouter};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
