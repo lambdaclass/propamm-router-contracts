@@ -99,10 +99,7 @@ impl<H: WsHandler> WsConnection<H> {
         result
     }
 
-    async fn wait_for_snapshot(
-        &self,
-        deadline: tokio::time::Instant,
-    ) -> Result<Arc<H::Snapshot>> {
+    async fn wait_for_snapshot(&self, deadline: tokio::time::Instant) -> Result<Arc<H::Snapshot>> {
         loop {
             // Register for notification BEFORE checking state, so a frame
             // landing in between can't be missed.
@@ -203,10 +200,7 @@ async fn idle_deadline<H: WsHandler>(
 
 /// True (and marks the snapshot as needing a fresh frame) when the source has
 /// been unused for longer than the idle timeout and nobody is waiting.
-async fn idle_expired<H: WsHandler>(
-    state: &WsState<H::Snapshot>,
-    idle_timeout: Duration,
-) -> bool {
+async fn idle_expired<H: WsHandler>(state: &WsState<H::Snapshot>, idle_timeout: Duration) -> bool {
     if state.waiters.load(Ordering::SeqCst) > 0 {
         return false;
     }
