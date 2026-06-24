@@ -219,8 +219,19 @@ const snapshot = await prices.getPriceLevels(); // served from the live stream
 prices.close(); // close the stream socket when done (no-op for the HTTP default)
 ```
 
-Passing a `PriceLevelsRpcSource` with a custom `url` instead points both the
-snapshots and the quote helpers at that endpoint (the quotes are HTTP-only).
+The quote helpers (`getQuote` / `getQuoteVenue`) are HTTP-only and default to
+`https://rpc.titanbuilder.xyz`. When pairing a `PriceLevelsWsSource` with a
+private or regional deployment, pass `rpcUrl` to route quotes to the same host:
+
+```ts
+const prices = new PriceLevels({
+  source: new PriceLevelsWsSource({ url: "wss://us.rpc.titanbuilder.xyz/ws/pamm_price_levels" }),
+  rpcUrl: "https://us.rpc.titanbuilder.xyz",
+});
+```
+
+Passing a `PriceLevelsRpcSource` with a custom `url` instead points both
+snapshots and quotes at that endpoint (and `rpcUrl` is ignored).
 
 A runnable version lives in [`examples/price-levels.ts`](examples/price-levels.ts)
 (`node examples/price-levels.ts`; override the HTTP endpoint with `PRICE_LEVELS_URL`).
