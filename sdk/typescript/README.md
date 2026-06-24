@@ -128,28 +128,24 @@ await router.fallbackSwapRouter(); // Uniswap fallback "venue" address (dynamic,
 In a browser app the viem clients come from the connected wallet, not an
 `rpcUrl`. Build the client with `ContractClient.fromClients` and use it exactly
 like the `router` above. Writes are then signed by the wallet (MetaMask,
-WalletConnect, ...) over its own transport: an `rpcUrl`-built client would send
-`eth_sendTransaction` to the RPC node, which holds no key for the user's account
-and rejects it.
+WalletConnect, ...) over its own transport.
 
 ```ts
 import { ContractClient } from "propamm/client";
-import { createPublicClient, createWalletClient, custom, http } from "viem";
-import { mainnet } from "propamm/common/chains";
+import { usePublicClient, useWalletClient } from "wagmi";
 
 // viem public client for reads and quote simulations
-const publicClient = createPublicClient({ chain: mainnet, transport: http() });
+const publicClient = usePublicClient();
 
-// viem wallet client for writes, signing through the injected wallet (MetaMask)
-const walletClient = createWalletClient({ chain: mainnet, transport: custom(window.ethereum) });
+// viem wallet client for writes, signing through the connected wallet (MetaMask)
+const { data: walletClient } = useWalletClient();
 
-// SDK client backed by the prebuilt viem clients
+// SDK client backed by the wallet's viem clients
 const client = ContractClient.fromClients({ publicClient, walletClient });
 ```
 
-In a wagmi app, `publicClient` / `walletClient` come straight from
-`usePublicClient` / `useWalletClient`. `walletClient` is optional — omit it for a
-read-only client that can still quote and read views.
+`walletClient` is `undefined` until a wallet connects; omit it (pass only
+`publicClient`) for a read-only client that can still quote and read views.
 
 ## State overrides
 
