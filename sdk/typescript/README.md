@@ -126,42 +126,30 @@ await router.fallbackSwapRouter(); // Uniswap fallback "venue" address (dynamic,
 ## Browser wallets (wagmi / MetaMask)
 
 In a browser app the viem clients come from the connected wallet, not an
-`rpcUrl`. Build the client with `ContractClient.fromClients` and pass the
-wallet's own clients — e.g. wagmi's `usePublicClient` / `useWalletClient`. Then
-writes are signed by the wallet (MetaMask, WalletConnect, ...) over its own
-transport, on the chain the wallet is on. An `rpcUrl`-built client cannot do
-this: it would send `eth_sendTransaction` to the RPC node, which holds no key
-for the user's account and rejects it.
+`rpcUrl`. Build the client with `ContractClient.fromClients` and use it exactly
+like the `router` above. Writes are then signed by the wallet (MetaMask,
+WalletConnect, ...) over its own transport: an `rpcUrl`-built client would send
+`eth_sendTransaction` to the RPC node, which holds no key for the user's account
+and rejects it.
 
 ```ts
 import { ContractClient } from "propamm/client";
-import { PropAmmRouter } from "propamm/router";
-import { USDC, WETH } from "propamm/common/tokens";
-import { applySlippage, deadlineIn, parseUnits } from "propamm/common/helpers";
-import { usePublicClient, useWalletClient } from "wagmi";
+import { createPublicClient, createWalletClient, custom, http } from "viem";
+import { mainnet } from "propamm/common/chains";
 
-const publicClient = usePublicClient();
-const { data: walletClient } = useWalletClient(); // undefined until a wallet connects
+// viem public client for reads and quote simulations
+const publicClient = createPublicClient({ chain: mainnet, transport: http() });
 
+// viem wallet client for writes, signing through the injected wallet (MetaMask)
+const walletClient = createWalletClient({ chain: mainnet, transport: custom(window.ethereum) });
+
+// SDK client backed by the prebuilt viem clients
 const client = ContractClient.fromClients({ publicClient, walletClient });
-const router = new PropAmmRouter(client); // defaults to the mainnet router proxy
-
-const amountIn = parseUnits("100", 6); // 100 USDC
-const { amountOut } = await router.quote(USDC, WETH, amountIn);
-
-await router.approve(USDC, amountIn); // prompts the wallet
-const result = await router.swapAndWait({
-  tokenIn: USDC,
-  tokenOut: WETH,
-  amountIn,
-  amountOutMin: applySlippage(amountOut, 50), // quote - 0.5%
-  recipient: walletClient.account.address,
-  deadline: deadlineIn(300),
-});
 ```
 
-`walletClient` is optional — omit it (pass only `publicClient`) for a read-only
-client that can still quote and read views.
+In a wagmi app, `publicClient` / `walletClient` come straight from
+`usePublicClient` / `useWalletClient`. `walletClient` is optional — omit it for a
+read-only client that can still quote and read views.
 
 ## State overrides
 
