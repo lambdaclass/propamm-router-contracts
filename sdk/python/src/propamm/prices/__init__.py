@@ -452,14 +452,22 @@ class PriceLevels:
       pushes snapshots, not quotes — so they always go through an RPC source.
     """
 
-    def __init__(self, source: PriceLevelsSource | None = None) -> None:
-        self.source: PriceLevelsSource = source or PriceLevelsRpcSource()
+    def __init__(
+        self,
+        source: PriceLevelsSource | None = None,
+        *,
+        rpc_url: str | None = None,
+    ) -> None:
+        _rpc_url = rpc_url or DEFAULT_PRICE_LEVELS_RPC_URL
+        self.source: PriceLevelsSource = source or PriceLevelsRpcSource(_rpc_url)
         # Quote helpers are HTTP-only. Reuse the snapshot source when it already
-        # speaks HTTP (so a custom endpoint covers both); otherwise use a default.
+        # speaks HTTP so a custom endpoint covers both; otherwise use rpc_url (or
+        # the default) so a WsSource paired with a private deployment doesn't
+        # silently route quotes to the public endpoint.
         if isinstance(self.source, PriceLevelsRpcSource):
             self._rpc = self.source
         else:
-            self._rpc = PriceLevelsRpcSource()
+            self._rpc = PriceLevelsRpcSource(_rpc_url)
 
     async def get_price_levels(self) -> PriceLevelsSnapshot:
         """Latest price-level snapshot from the configured source."""
