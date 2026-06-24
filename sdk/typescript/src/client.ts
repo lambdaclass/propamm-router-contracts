@@ -32,6 +32,22 @@ export interface ContractClientOptions {
   account?: Account;
 }
 
+/**
+ * Prebuilt viem clients for {@link ContractClient.fromClients} — the path for a
+ * browser/injected wallet such as MetaMask (e.g. wagmi's `usePublicClient` /
+ * `useWalletClient`). Such wallets sign over their own EIP-1193 transport,
+ * which a client built from `rpcUrl` cannot reach: a wallet client created with
+ * `http(rpcUrl)` sends `eth_sendTransaction` to the RPC node, which holds no
+ * key for the user's account and rejects it. Passing the wallet's own client
+ * routes the signing request to the wallet instead.
+ */
+export interface ProvidedClients {
+  /** Public client for reads and `eth_call` simulations. */
+  publicClient: PublicClient;
+  /** Wallet client for writes; its bound account is the signer. Omit for a read-only client. */
+  walletClient?: WalletClient;
+}
+
 export interface ReadParams {
   address: Address;
   abi: Abi;
@@ -58,19 +74,29 @@ export class ContractClient {
   readonly walletClient?: WalletClient;
   private readonly account?: Account;
 
-  constructor(options: ContractClientOptions) {
-    const transport = http(options.rpcUrl);
+  private constructor(publicClient: PublicClient, walletClient?: WalletClient, account?: Account) {
+    this.publicClient = publicClient;
+    this.walletClient = walletClient;
+    this.account = account;
+  }
 
-    this.publicClient = createPublicClient({ chain: options.chain, transport });
+  /**
+   * Build a client from an RPC endpoint. With an `account` (a local/private-key
+   * account) the wallet client signs locally and broadcasts via `rpcUrl`.
+   */
+  static fromRpc({ rpcUrl, chain, account }: ContractClientOptions): ContractClient {
+    const transport = http(rpcUrl);
+    const publicClient = createPublicClient({ chain, transport });
+    const walletClient = account ? createWalletClient({ account, chain, transport }) : undefined;
+    return new ContractClient(publicClient, walletClient, account);
+  }
 
-    if (options.account) {
-      this.account = options.account;
-      this.walletClient = createWalletClient({
-        account: options.account,
-        chain: options.chain,
-        transport,
-      });
-    }
+  /**
+   * Build a client from prebuilt viem clients instead of an RPC endpoint — use
+   * this to sign through a browser/injected wallet (see {@link ProvidedClients}).
+   */
+  static fromClients({ publicClient, walletClient }: ProvidedClients): ContractClient {
+    return new ContractClient(publicClient, walletClient, walletClient?.account);
   }
 
   /** Call a read-only (view/pure) contract function. */

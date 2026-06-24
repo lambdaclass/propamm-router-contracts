@@ -27,7 +27,7 @@ const ROUTER_ADDRESS = (process.env.ROUTER_ADDRESS ??
   "0x4DdF368080CD7946db5b459aD591c350158175e1") as Address;
 
 // No `account`: quotes are read-only, so no private key is required.
-const client = new ContractClient({ rpcUrl: RPC_URL, chain: anvil });
+const client = ContractClient.fromRpc({ rpcUrl: RPC_URL, chain: anvil });
 // Constructed with no options, so quotes apply fresh pAMM state overrides
 // streamed from Titan by default (see the README for details).
 const router = new PropAmmRouter(client, ROUTER_ADDRESS);

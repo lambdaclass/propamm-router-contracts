@@ -39,7 +39,7 @@ const ROUTER_ADDRESS = (process.env.ROUTER_ADDRESS ??
 const SLIPPAGE_BPS = Number(process.env.SLIPPAGE_BPS ?? 50);
 
 const account = privateKeyToAccount(PRIVATE_KEY);
-const client = new ContractClient({ rpcUrl: RPC_URL, chain: anvil, account });
+const client = ContractClient.fromRpc({ rpcUrl: RPC_URL, chain: anvil, account });
 const router = new PropAmmRouter(client, ROUTER_ADDRESS);
 
 const amountIn = parseEther("1");
