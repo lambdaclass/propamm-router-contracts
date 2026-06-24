@@ -181,3 +181,95 @@ interface OverridesSource {
   close?(): void;
 }
 ```
+
+## PriceLevelsSnapshot
+
+A parsed price-levels payload, returned by every source's `getPriceLevels()`.
+
+```ts
+interface PriceLevelsSnapshot {
+  blockNumber?: bigint;
+  slot?: bigint;
+  timestampNs?: bigint;
+  pamms: PammPriceLevels[];
+}
+```
+
+- `blockNumber` — block the levels were generated against.
+- `slot` — beacon slot the levels were generated against.
+- `timestampNs` — generation time in nanoseconds since epoch (approximate —
+  JSON serialization loses sub-millisecond precision for large values).
+- `pamms` — per-pAMM order books.
+
+## PammPriceLevels
+
+One pAMM's price levels across all pairs it quotes.
+
+```ts
+interface PammPriceLevels {
+  pamm: Address;
+  pairs: PairPriceLevels[];
+}
+```
+
+## PairPriceLevels
+
+The order book a pAMM quotes for one `tokenIn`/`tokenOut` pair.
+
+```ts
+interface PairPriceLevels {
+  tokenIn: Address;
+  tokenOut: Address;
+  orderBook: PriceLevel[];
+}
+```
+
+## PriceLevel
+
+One rung of a pair's order book.
+
+```ts
+interface PriceLevel {
+  amountIn: bigint;
+  amountOut: bigint;
+  variant: "Simulated" | "Interpolated";
+}
+```
+
+- `amountIn` / `amountOut` — amounts in atomic units.
+- `variant` — `"Simulated"` means the rung came from an EVM simulation;
+  `"Interpolated"` from a linear spline between simulated rungs.
+
+## TitanQuote
+
+Result of `getQuote` / `getQuoteVenue` (`titan_getPammQuote` /
+`titan_getPammQuoteVenue`).
+
+```ts
+interface TitanQuote {
+  tokenIn: Address;
+  tokenOut: Address;
+  amountIn: bigint;
+  amountOut: bigint;
+  pamm: Address;
+  router: Address;
+  blockNumber?: bigint;
+  slot?: bigint;
+  timestampNs?: bigint;
+}
+```
+
+- `pamm` — pAMM that produced the quote.
+- `router` — router associated with the quote.
+
+## PriceLevelsSource
+
+The interface both price-level sources implement — implement it to plug in a
+custom source.
+
+```ts
+interface PriceLevelsSource {
+  getPriceLevels(): Promise<PriceLevelsSnapshot | undefined>;
+  close?(): void;
+}
+```

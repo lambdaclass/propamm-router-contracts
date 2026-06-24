@@ -87,6 +87,16 @@ export default defineConfig({
               { text: "Utilities", link: "/typescript/overrides/utilities" },
             ],
           },
+          {
+            text: "Price levels",
+            collapsed: true,
+            items: [
+              { text: "PriceLevels", link: "/typescript/prices/price-levels" },
+              { text: "PriceLevelsWsSource", link: "/typescript/prices/ws-source" },
+              { text: "PriceLevelsRpcSource", link: "/typescript/prices/rpc-source" },
+              { text: "Utilities", link: "/typescript/prices/utilities" },
+            ],
+          },
           { text: "Helpers", link: "/typescript/helpers" },
           { text: "Types", link: "/typescript/types" },
         ],
