@@ -188,6 +188,103 @@ pub struct OverridesSnapshot {
 - `per_pamm` — pAMM address → overridden contract → storage slot → value
   (`ContractDiffs = HashMap<Address, HashMap<H256, U256>>`).
 
+## PriceLevelsSnapshot
+
+A parsed price-levels payload, returned by every source's `get_price_levels()`.
+
+```rust
+pub struct PriceLevelsSnapshot {
+    pub block_number: Option<u64>,
+    pub slot: Option<u64>,
+    pub timestamp_ns: Option<u64>,
+    pub pamms: Vec<PammPriceLevels>,
+}
+```
+
+- `block_number` — block the levels were generated against.
+- `slot` — beacon slot the levels were generated against.
+- `timestamp_ns` — generation time in nanoseconds since epoch.
+- `pamms` — per-pAMM order books.
+
+## PammPriceLevels
+
+One pAMM's price levels across all pairs it quotes.
+
+```rust
+pub struct PammPriceLevels {
+    pub pamm: Address,
+    pub pairs: Vec<PairPriceLevels>,
+}
+```
+
+## PairPriceLevels
+
+The order book a pAMM quotes for one `token_in`/`token_out` pair.
+
+```rust
+pub struct PairPriceLevels {
+    pub token_in: Address,
+    pub token_out: Address,
+    pub order_book: Vec<PriceLevel>,
+}
+```
+
+## PriceLevel
+
+One rung of a pair's order book.
+
+```rust
+pub struct PriceLevel {
+    pub amount_in: U256,
+    pub amount_out: U256,
+    pub variant: PriceVariant,
+}
+
+pub enum PriceVariant {
+    Simulated,
+    Interpolated,
+}
+```
+
+- `amount_in` / `amount_out` — amounts in atomic units.
+- `variant` — `Simulated` means the rung came from an EVM simulation;
+  `Interpolated` from a linear spline between simulated rungs.
+
+## TitanQuote
+
+Result of `get_quote` / `get_quote_venue` (`titan_getPammQuote` /
+`titan_getPammQuoteVenue`).
+
+```rust
+pub struct TitanQuote {
+    pub token_in: Address,
+    pub token_out: Address,
+    pub amount_in: U256,
+    pub amount_out: U256,
+    pub pamm: Address,
+    pub router: Address,
+    pub block_number: Option<u64>,
+    pub slot: Option<u64>,
+    pub timestamp_ns: Option<u64>,
+}
+```
+
+- `pamm` — pAMM that produced the quote.
+- `router` — router associated with the quote.
+
+## PriceLevelsSource
+
+The trait both price-level sources implement — implement it to plug in a custom
+source.
+
+```rust
+#[async_trait]
+pub trait PriceLevelsSource: Send + Sync {
+    async fn get_price_levels(&self) -> Result<Arc<PriceLevelsSnapshot>>;
+    fn close(&self) {}
+}
+```
+
 ## Error
 
 All fallible SDK calls return `Result<T, Error>`.

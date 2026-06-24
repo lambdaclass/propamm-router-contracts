@@ -118,6 +118,16 @@ export default defineConfig({
               { text: "Utilities", link: "/rust/overrides/utilities" },
             ],
           },
+          {
+            text: "Price levels",
+            collapsed: true,
+            items: [
+              { text: "PriceLevels", link: "/rust/prices/price-levels" },
+              { text: "PriceLevelsWsSource", link: "/rust/prices/ws-source" },
+              { text: "PriceLevelsRpcSource", link: "/rust/prices/rpc-source" },
+              { text: "Utilities", link: "/rust/prices/utilities" },
+            ],
+          },
           { text: "Helpers", link: "/rust/helpers" },
           { text: "Types", link: "/rust/types" },
         ],

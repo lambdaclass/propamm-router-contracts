@@ -524,6 +524,21 @@ impl PriceLevels {
         Self { source, rpc }
     }
 
+    /// Client with an explicit snapshot source and a specific RPC URL for the
+    /// quote helpers. Use this when pairing a [`PriceLevelsWsSource`] with a
+    /// private or regional deployment so quotes go to the same host as the
+    /// stream. When `source` is a [`PriceLevelsRpcSource`], `rpc_url` is
+    /// ignored and the source's own URL is reused.
+    pub fn with_source_and_rpc_url(
+        source: Arc<dyn PriceLevelsSource>,
+        rpc_url: impl Into<String>,
+    ) -> Self {
+        let rpc = source
+            .as_rpc_source()
+            .unwrap_or_else(|| PriceLevelsRpcSource::new(rpc_url));
+        Self { source, rpc }
+    }
+
     /// The snapshot source [`Self::get_price_levels`] pulls from.
     pub fn source(&self) -> &Arc<dyn PriceLevelsSource> {
         &self.source
