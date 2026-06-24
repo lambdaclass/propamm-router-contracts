@@ -23,7 +23,7 @@ import { mainnet } from "propamm/common/chains";
 import { privateKeyToAccount } from "propamm/common/accounts";
 
 const account = privateKeyToAccount("0x...");
-const client = new ContractClient({ rpcUrl: "https://...", chain: mainnet, account });
+const client = ContractClient.fromRpc({ rpcUrl: "https://...", chain: mainnet, account });
 const router = new PropAmmRouter(client); // defaults to the mainnet router proxy
 
 const amountIn = parseEther("1");
@@ -63,7 +63,7 @@ import { applySlippage, deadlineIn, parseEther, parseUnits } from "propamm/commo
 import { mainnet } from "propamm/common/chains";
 import { privateKeyToAccount } from "propamm/common/accounts";
 
-const client = new ContractClient({
+const client = ContractClient.fromRpc({
   rpcUrl: "http://localhost:8545",
   chain: mainnet,
   account: privateKeyToAccount("0x..."), // omit for read-only (quotes/views still work)

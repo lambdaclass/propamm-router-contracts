@@ -74,19 +74,21 @@ export class ContractClient {
   readonly walletClient?: WalletClient;
   private readonly account?: Account;
 
-  constructor(options: ContractClientOptions) {
-    const transport = http(options.rpcUrl);
+  private constructor(publicClient: PublicClient, walletClient?: WalletClient, account?: Account) {
+    this.publicClient = publicClient;
+    this.walletClient = walletClient;
+    this.account = account;
+  }
 
-    this.publicClient = createPublicClient({ chain: options.chain, transport });
-
-    if (options.account) {
-      this.account = options.account;
-      this.walletClient = createWalletClient({
-        account: options.account,
-        chain: options.chain,
-        transport,
-      });
-    }
+  /**
+   * Build a client from an RPC endpoint. With an `account` (a local/private-key
+   * account) the wallet client signs locally and broadcasts via `rpcUrl`.
+   */
+  static fromRpc({ rpcUrl, chain, account }: ContractClientOptions): ContractClient {
+    const transport = http(rpcUrl);
+    const publicClient = createPublicClient({ chain, transport });
+    const walletClient = account ? createWalletClient({ account, chain, transport }) : undefined;
+    return new ContractClient(publicClient, walletClient, account);
   }
 
   /**
@@ -94,14 +96,7 @@ export class ContractClient {
    * this to sign through a browser/injected wallet (see {@link ProvidedClients}).
    */
   static fromClients({ publicClient, walletClient }: ProvidedClients): ContractClient {
-    // Bypass the RPC constructor and inject the clients. The fields are
-    // readonly (assignable only in a constructor), so set them via Object.assign.
-    const client = Object.create(ContractClient.prototype) as ContractClient;
-    return Object.assign(client, {
-      publicClient,
-      walletClient,
-      account: walletClient?.account,
-    });
+    return new ContractClient(publicClient, walletClient, walletClient?.account);
   }
 
   /** Call a read-only (view/pure) contract function. */
