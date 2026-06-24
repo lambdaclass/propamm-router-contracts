@@ -10,11 +10,11 @@
 
 use std::sync::Arc;
 
-use propamm_sdk::common::helpers::{format_units, parse_address};
-use propamm_sdk::common::pamms::PAMMS;
-use propamm_sdk::common::tokens::{USDC, USDT, WETH};
-use propamm_sdk::prices::{PriceLevels, PriceLevelsRpcSource};
-use propamm_sdk::{Address, U256};
+use propamm::common::helpers::{format_units, parse_address};
+use propamm::common::pamms::PAMMS;
+use propamm::common::tokens::{USDC, USDT, WETH};
+use propamm::prices::{PriceLevels, PriceLevelsRpcSource};
+use propamm::{Address, U256};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

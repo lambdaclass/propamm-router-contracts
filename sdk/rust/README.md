@@ -131,9 +131,9 @@ The `PriceLevels` client wraps it, mirroring `PropAmmRouter`: a single type with
 a default snapshot source you can override.
 
 ```rust
-use propamm_sdk::common::helpers::parse_units;
-use propamm_sdk::common::tokens::{USDC, WETH};
-use propamm_sdk::prices::PriceLevels;
+use propamm::common::helpers::parse_units;
+use propamm::common::tokens::{USDC, WETH};
+use propamm::prices::PriceLevels;
 
 let prices = PriceLevels::new(); // default: one-shot HTTP snapshot source
 
@@ -155,7 +155,7 @@ from regional hosts (`eu.`, `ap.`, `us.`); pick the nearest:
 
 ```rust
 use std::sync::Arc;
-use propamm_sdk::prices::{PriceLevels, PriceLevelsWsSource, PriceLevelsWsSourceConfig};
+use propamm::prices::{PriceLevels, PriceLevelsWsSource, PriceLevelsWsSourceConfig};
 
 let ws = PriceLevelsWsSource::new(PriceLevelsWsSourceConfig {
     url: "wss://eu.rpc.titanbuilder.xyz/ws/pamm_price_levels".into(),
