@@ -123,6 +123,46 @@ await router.paused();
 await router.fallbackSwapRouter(); // Uniswap fallback "venue" address (dynamic, not in PAMMS)
 ```
 
+## Browser wallets (wagmi / MetaMask)
+
+In a browser app the viem clients come from the connected wallet, not an
+`rpcUrl`. Build the client with `ContractClient.fromClients` and pass the
+wallet's own clients — e.g. wagmi's `usePublicClient` / `useWalletClient`. Then
+writes are signed by the wallet (MetaMask, WalletConnect, ...) over its own
+transport, on the chain the wallet is on. An `rpcUrl`-built client cannot do
+this: it would send `eth_sendTransaction` to the RPC node, which holds no key
+for the user's account and rejects it.
+
+```ts
+import { ContractClient } from "propamm/client";
+import { PropAmmRouter } from "propamm/router";
+import { USDC, WETH } from "propamm/common/tokens";
+import { applySlippage, deadlineIn, parseUnits } from "propamm/common/helpers";
+import { usePublicClient, useWalletClient } from "wagmi";
+
+const publicClient = usePublicClient();
+const { data: walletClient } = useWalletClient(); // undefined until a wallet connects
+
+const client = ContractClient.fromClients({ publicClient, walletClient });
+const router = new PropAmmRouter(client); // defaults to the mainnet router proxy
+
+const amountIn = parseUnits("100", 6); // 100 USDC
+const { amountOut } = await router.quote(USDC, WETH, amountIn);
+
+await router.approve(USDC, amountIn); // prompts the wallet
+const result = await router.swapAndWait({
+  tokenIn: USDC,
+  tokenOut: WETH,
+  amountIn,
+  amountOutMin: applySlippage(amountOut, 50), // quote - 0.5%
+  recipient: walletClient.account.address,
+  deadline: deadlineIn(300),
+});
+```
+
+`walletClient` is optional — omit it (pass only `publicClient`) for a read-only
+client that can still quote and read views.
+
 ## State overrides
 
 The pAMM venues price off-chain liquidity that on-chain state does not
@@ -178,7 +218,7 @@ await client.write({
 
 Source modules map 1:1 to import paths (`src/<path>.ts` → `propamm/<path>`):
 
-- `src/client.ts` — generic viem-based contract client (`read`/`call`/`write`/`waitForTransaction`); `call` accepts state and block overrides.
+- `src/client.ts` — generic viem-based contract client (`read`/`call`/`write`/`waitForTransaction`); `call` accepts state and block overrides; `ContractClient.fromClients` builds one from prebuilt viem clients (browser wallets).
 - `src/router/index.ts` — `PropAmmRouter` bindings (`quote`, `swap`, `swapAndWait`, `waitForSwap`, `approve`/`allowance`, views) plus `MAX_FEE_BPS`.
 - `src/router/abi.ts` — human-readable `PropAMMRouter` ABI (functions, events, errors).
 - `src/overrides/index.ts` — pAMM state-override sources (`OverridesWsSource`, `OverridesRpcSource`), payload parsing, and `toStateOverride`.
