@@ -169,6 +169,16 @@ export default defineConfig({
               { text: "Utilities", link: "/python/overrides/utilities" },
             ],
           },
+          {
+            text: "Price levels",
+            collapsed: true,
+            items: [
+              { text: "PriceLevels", link: "/python/prices/price-levels" },
+              { text: "PriceLevelsWsSource", link: "/python/prices/ws-source" },
+              { text: "PriceLevelsRpcSource", link: "/python/prices/rpc-source" },
+              { text: "Utilities", link: "/python/prices/utilities" },
+            ],
+          },
           { text: "Helpers", link: "/python/helpers" },
           { text: "Types", link: "/python/types" },
         ],

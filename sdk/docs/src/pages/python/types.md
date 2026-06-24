@@ -170,3 +170,93 @@ class OverridesSource(abc.ABC):
     async def get_overrides(self) -> OverridesSnapshot | None: ...
     async def close(self) -> None: ...  # optional teardown; default no-op
 ```
+
+## PriceLevelsSnapshot
+
+A parsed price-levels payload, returned by every source's `get_price_levels()`.
+
+```python
+@dataclass
+class PriceLevelsSnapshot:
+    block_number: int | None = None
+    slot: int | None = None
+    timestamp_ns: int | None = None
+    pamms: list[PammPriceLevels] = ...
+```
+
+- `block_number` — block the levels were generated against.
+- `slot` — beacon slot the levels were generated against.
+- `timestamp_ns` — generation time in nanoseconds since epoch.
+- `pamms` — per-pAMM order books.
+
+## PammPriceLevels
+
+One pAMM's price levels across all pairs it quotes.
+
+```python
+@dataclass
+class PammPriceLevels:
+    pamm: ChecksumAddress
+    pairs: list[PairPriceLevels] = ...
+```
+
+## PairPriceLevels
+
+The order book a pAMM quotes for one `token_in`/`token_out` pair.
+
+```python
+@dataclass
+class PairPriceLevels:
+    token_in: ChecksumAddress
+    token_out: ChecksumAddress
+    order_book: list[PriceLevel] = ...
+```
+
+## PriceLevel
+
+One rung of a pair's order book.
+
+```python
+@dataclass
+class PriceLevel:
+    amount_in: int
+    amount_out: int
+    variant: Literal["Simulated", "Interpolated"]
+```
+
+- `amount_in` / `amount_out` — amounts in atomic units.
+- `variant` — `"Simulated"` means the rung came from an EVM simulation;
+  `"Interpolated"` from a linear spline between simulated rungs.
+
+## TitanQuote
+
+Result of `get_quote` / `get_quote_venue` (`titan_getPammQuote` /
+`titan_getPammQuoteVenue`).
+
+```python
+@dataclass
+class TitanQuote:
+    token_in: ChecksumAddress
+    token_out: ChecksumAddress
+    amount_in: int
+    amount_out: int
+    pamm: ChecksumAddress
+    router: ChecksumAddress
+    block_number: int | None = None
+    slot: int | None = None
+    timestamp_ns: int | None = None
+```
+
+- `pamm` — pAMM that produced the quote.
+- `router` — router associated with the quote.
+
+## PriceLevelsSource
+
+The abstract base both price-level sources implement — subclass it to plug in a
+custom source.
+
+```python
+class PriceLevelsSource(abc.ABC):
+    async def get_price_levels(self) -> PriceLevelsSnapshot: ...
+    async def close(self) -> None: ...  # default no-op
+```
