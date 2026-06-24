@@ -3,8 +3,8 @@
 //! source — verify against `forge inspect PropAMMRouter methodIdentifiers`),
 //! return-tuple decoding, event decoding, and a custom-error table.
 //!
-//! Self-call-only internals (`_dispatchVenue`, `_dispatchQuoteVenue`) and
-//! UUPS plumbing are intentionally omitted.
+//! The self-call-only internal (`_dispatchVenue`) and UUPS plumbing are
+//! intentionally omitted.
 
 use std::fmt::Write as _;
 
@@ -32,7 +32,6 @@ pub const SWAP_VIA_SELECTED_VENUES_WITH_FEE: &str = "swapViaSelectedVenuesWithFe
 pub const QUOTE: &str = "quoteV1(address,address,uint256)";
 pub const QUOTE_VENUE: &str = "quoteVenueV1(address,address,address,uint256)";
 pub const QUOTE_SELECTED_VENUES: &str = "quoteSelectedVenuesV1(address[],address,address,uint256)";
-pub const QUOTE_UNISWAP_V3: &str = "quoteUniswapV3(address,address,uint256)";
 
 // Views
 pub const FALLBACK_SWAP_ROUTER: &str = "fallbackSwapRouter()";
@@ -88,7 +87,6 @@ pub const FUNCTIONS: &[&str] = &[
     QUOTE,
     QUOTE_VENUE,
     QUOTE_SELECTED_VENUES,
-    QUOTE_UNISWAP_V3,
     FALLBACK_SWAP_ROUTER,
     FALLBACK_QUOTER,
     FALLBACK_FEE,
@@ -331,7 +329,6 @@ mod tests {
             (QUOTE, "04f9caa2"),
             (QUOTE_VENUE, "221ee81f"),
             (QUOTE_SELECTED_VENUES, "824bfccd"),
-            (QUOTE_UNISWAP_V3, "64d40acb"),
             (FALLBACK_SWAP_ROUTER, "2f61968b"),
             (GET_WHITELISTED_VENUES, "d7d008fc"),
             (PAUSED, "5c975abb"),
@@ -372,7 +369,6 @@ mod tests {
     /// Functions present in the contract ABI that the SDK deliberately does
     /// not bind: self-call internals, UUPS/AccessManaged plumbing.
     const OMITTED_FUNCTIONS: &[&str] = &[
-        "_dispatchQuoteVenue(address,address,address,uint256)",
         "_dispatchVenue(address,address,address,uint256,uint256,address,uint256,uint256)",
         "initialize(address,address,address)",
         "proxiableUUID()",
@@ -405,7 +401,6 @@ mod tests {
         "InvalidInitialization()",
         "NotInitializing()",
         "ReentrancyGuardReentrantCall()",
-        "SafeCastOverflowedUintToInt(uint256)",
         "SafeERC20FailedOperation(address)",
         "UUPSUnauthorizedCallContext()",
         "UUPSUnsupportedProxiableUUID(bytes32)",
