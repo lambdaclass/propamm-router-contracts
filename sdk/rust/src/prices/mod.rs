@@ -33,23 +33,15 @@
 //! }
 //! ```
 
-use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
-    time::{Duration, Instant},
-};
+use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use ethrex_common::{Address, U256};
-use futures_util::StreamExt;
 use serde_json::Value;
-use tokio::sync::{Mutex, Notify};
-use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 use crate::common::helpers::parse_address;
 use crate::error::{Error, Result};
+use crate::ws::{WsConnection, WsHandler};
 
 pub const DEFAULT_PRICE_LEVELS_RPC_URL: &str = "https://rpc.titanbuilder.xyz";
 /// Default price-levels stream endpoint. The stream is served from regional
@@ -435,8 +427,31 @@ impl Default for PriceLevelsWsSourceConfig {
     }
 }
 
-const RECONNECT_INITIAL: Duration = Duration::from_secs(1);
-const RECONNECT_MAX: Duration = Duration::from_secs(30);
+struct PriceLevelsWsHandler;
+
+impl WsHandler for PriceLevelsWsHandler {
+    type Snapshot = PriceLevelsSnapshot;
+
+    fn apply_frame(snapshot: &mut Arc<Self::Snapshot>, text: &str) -> bool {
+        let Ok(value) = serde_json::from_str::<Value>(text) else {
+            return false;
+        };
+        let Ok(frame) = parse_price_levels_message(&value) else {
+            return false;
+        };
+        // Each frame is a complete snapshot, so it replaces the cached one.
+        *snapshot = Arc::new(frame);
+        true
+    }
+
+    fn closed_error() -> Error {
+        Error::Prices("price-levels source is closed".into())
+    }
+
+    fn timeout_error(timeout: Duration) -> Error {
+        Error::Timeout(format!("no price-levels frame received within {timeout:?}"))
+    }
+}
 
 /// Streaming source: connects lazily on the first `get_price_levels` call and
 /// reconnects with exponential backoff. Unlike the overrides stream, each
@@ -445,26 +460,7 @@ const RECONNECT_MAX: Duration = Duration::from_secs(30);
 /// and re-established on demand, so no explicit teardown is needed;
 /// [`PriceLevelsSource::close`] tears down immediately and permanently.
 pub struct PriceLevelsWsSource {
-    config: PriceLevelsWsSourceConfig,
-    state: Arc<WsState>,
-}
-
-#[derive(Default)]
-struct WsShared {
-    snapshot: Arc<PriceLevelsSnapshot>,
-    has_frame: bool,
-    closed: bool,
-    last_use: Option<Instant>,
-    task: Option<tokio::task::JoinHandle<()>>,
-}
-
-#[derive(Default)]
-struct WsState {
-    shared: Mutex<WsShared>,
-    frame_notify: Notify,
-    /// Calls currently waiting for a first frame — idle teardown is deferred
-    /// while any exist (matters when `idle_timeout` is very small).
-    waiters: AtomicUsize,
+    conn: WsConnection<PriceLevelsWsHandler>,
 }
 
 impl Default for PriceLevelsWsSource {
@@ -476,35 +472,7 @@ impl Default for PriceLevelsWsSource {
 impl PriceLevelsWsSource {
     pub fn new(config: PriceLevelsWsSourceConfig) -> Self {
         Self {
-            config,
-            state: Arc::new(WsState::default()),
-        }
-    }
-
-    async fn wait_for_snapshot(
-        &self,
-        deadline: tokio::time::Instant,
-    ) -> Result<Arc<PriceLevelsSnapshot>> {
-        loop {
-            // Register for notification BEFORE checking state, so a frame
-            // landing in between can't be missed.
-            let notified = self.state.frame_notify.notified();
-            {
-                let shared = self.state.shared.lock().await;
-                if shared.closed {
-                    return Err(Error::Prices("price-levels source is closed".into()));
-                }
-                if shared.has_frame {
-                    // Arc clone: one refcount bump, not a deep copy.
-                    return Ok(shared.snapshot.clone());
-                }
-            }
-            if tokio::time::timeout_at(deadline, notified).await.is_err() {
-                return Err(Error::Timeout(format!(
-                    "no price-levels frame received within {:?}",
-                    self.config.first_frame_timeout
-                )));
-            }
+            conn: WsConnection::new(config.url, config.idle_timeout, config.first_frame_timeout),
         }
     }
 }
@@ -512,129 +480,12 @@ impl PriceLevelsWsSource {
 #[async_trait]
 impl PriceLevelsSource for PriceLevelsWsSource {
     async fn get_price_levels(&self) -> Result<Arc<PriceLevelsSnapshot>> {
-        // Warm path: a single lock acquisition. Record demand, ensure the read
-        // loop is alive (respawn if it died), then hand out a buffered frame's
-        // Arc immediately if present.
-        {
-            let mut shared = self.state.shared.lock().await;
-            if shared.closed {
-                return Err(Error::Prices("price-levels source is closed".into()));
-            }
-            shared.last_use = Some(Instant::now());
-            let running = shared.task.as_ref().is_some_and(|t| !t.is_finished());
-            if !running {
-                shared.task = Some(tokio::spawn(run_ws_loop(
-                    self.state.clone(),
-                    self.config.clone(),
-                )));
-            }
-            if shared.has_frame {
-                return Ok(shared.snapshot.clone());
-            }
-        }
-
-        let deadline = tokio::time::Instant::now() + self.config.first_frame_timeout;
-        self.state.waiters.fetch_add(1, Ordering::SeqCst);
-        let result = self.wait_for_snapshot(deadline).await;
-        self.state.waiters.fetch_sub(1, Ordering::SeqCst);
-        result
+        self.conn.get_snapshot().await
     }
 
     fn close(&self) {
-        let state = self.state.clone();
-        tokio::spawn(async move {
-            let mut shared = state.shared.lock().await;
-            shared.closed = true;
-            if let Some(task) = shared.task.take() {
-                task.abort();
-            }
-            drop(shared);
-            state.frame_notify.notify_waiters();
-        });
+        self.conn.close();
     }
-}
-
-/// Background read loop: connect, replace the shared snapshot with each frame,
-/// and exit when idle (resetting `has_frame` so the next call waits for fresh
-/// data).
-async fn run_ws_loop(state: Arc<WsState>, config: PriceLevelsWsSourceConfig) {
-    let mut backoff = RECONNECT_INITIAL;
-
-    loop {
-        if let Ok((stream, _)) = connect_async(&config.url).await {
-            backoff = RECONNECT_INITIAL;
-            let (_, mut read) = stream.split();
-
-            loop {
-                let idle_deadline = idle_deadline(&state, config.idle_timeout).await;
-                tokio::select! {
-                    message = read.next() => match message {
-                        Some(Ok(Message::Text(text))) => {
-                            handle_frame(&state, text.as_str()).await;
-                        }
-                        Some(Ok(_)) => {}
-                        Some(Err(_)) | None => break, // reconnect
-                    },
-                    _ = tokio::time::sleep_until(idle_deadline) => {
-                        if idle_expired(&state, config.idle_timeout).await {
-                            return;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Between reconnect attempts, still honor the idle timeout so a dead
-        // endpoint doesn't keep an unused source reconnecting forever.
-        tokio::time::sleep(backoff).await;
-        backoff = (backoff * 2).min(RECONNECT_MAX);
-        if idle_expired(&state, config.idle_timeout).await {
-            return;
-        }
-    }
-}
-
-async fn handle_frame(state: &WsState, text: &str) {
-    let Ok(value) = serde_json::from_str::<Value>(text) else {
-        return; // skip undecodable frames, like the reference consumers do
-    };
-    let Ok(frame) = parse_price_levels_message(&value) else {
-        return;
-    };
-
-    let mut shared = state.shared.lock().await;
-    // Each frame is a complete snapshot, so it replaces the cached one.
-    shared.snapshot = Arc::new(frame);
-    shared.has_frame = true;
-    drop(shared);
-    state.frame_notify.notify_waiters();
-}
-
-async fn idle_deadline(state: &WsState, idle_timeout: Duration) -> tokio::time::Instant {
-    // While a call is waiting for its first frame, push the deadline out so a
-    // tiny idle_timeout can't tear the connection down before delivery.
-    if state.waiters.load(Ordering::SeqCst) > 0 {
-        return tokio::time::Instant::now() + Duration::from_secs(1);
-    }
-    let shared = state.shared.lock().await;
-    let last_use = shared.last_use.unwrap_or_else(Instant::now);
-    tokio::time::Instant::now() + idle_timeout.saturating_sub(last_use.elapsed())
-}
-
-/// True (and marks the snapshot as needing a fresh frame) when the source has
-/// been unused for longer than the idle timeout and nobody is waiting.
-async fn idle_expired(state: &WsState, idle_timeout: Duration) -> bool {
-    if state.waiters.load(Ordering::SeqCst) > 0 {
-        return false;
-    }
-    let mut shared = state.shared.lock().await;
-    let expired = shared
-        .last_use
-        .is_none_or(|last_use| last_use.elapsed() >= idle_timeout);
-    if expired {
-        shared.has_frame = false;
-    }
-    expired
 }
 
 /// Entry point for Titan's pAMM price levels, structured like

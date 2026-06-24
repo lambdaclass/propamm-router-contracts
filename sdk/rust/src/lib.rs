@@ -11,6 +11,7 @@ pub mod error;
 pub mod overrides;
 pub mod prices;
 pub mod router;
+pub(crate) mod ws;
 
 pub use client::{CallOverrides, ContractClient};
 pub use error::{Error, Result};

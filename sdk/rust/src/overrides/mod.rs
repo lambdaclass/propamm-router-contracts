@@ -17,27 +17,18 @@
 //! }
 //! ```
 
-use std::{
-    collections::HashMap,
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
-    time::{Duration, Instant},
-};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use ethrex_common::{Address, H256, U256};
-use futures_util::StreamExt;
 use hex_literal::hex;
 use rex_sdk::client::eth::StateOverrideSet;
 use serde_json::Value;
-use tokio::sync::{Mutex, Notify};
-use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 use crate::common::helpers::parse_address;
 use crate::common::pamms::BEBOP;
 use crate::error::{Error, Result};
+use crate::ws::{WsConnection, WsHandler};
 
 pub const DEFAULT_OVERRIDES_RPC_URL: &str = "https://rpc.titanbuilder.xyz";
 pub const DEFAULT_OVERRIDES_WS_URL: &str = "wss://rpc.titanbuilder.xyz/ws/pamm_quote_stream";
@@ -296,8 +287,42 @@ impl Default for OverridesWsSourceConfig {
     }
 }
 
-const RECONNECT_INITIAL: Duration = Duration::from_secs(1);
-const RECONNECT_MAX: Duration = Duration::from_secs(30);
+struct OverridesWsHandler;
+
+impl WsHandler for OverridesWsHandler {
+    type Snapshot = OverridesSnapshot;
+
+    fn apply_frame(snapshot: &mut Arc<Self::Snapshot>, text: &str) -> bool {
+        let Ok(value) = serde_json::from_str::<Value>(text) else {
+            return false;
+        };
+        let Ok(frame) = parse_overrides_message(&value) else {
+            return false;
+        };
+        // `make_mut` clones only when a reader still holds the Arc; readers keep
+        // it only transiently (across one quote), so frames usually mutate in
+        // place rather than deep-copying.
+        let s = Arc::make_mut(snapshot);
+        // A frame only carries the pAMMs it updates; entries for other pAMMs
+        // stay cached from earlier frames.
+        s.per_pamm.extend(frame.per_pamm);
+        if frame.block_number.is_some() {
+            s.block_number = frame.block_number;
+        }
+        if frame.timestamp_ns.is_some() {
+            s.timestamp_ns = frame.timestamp_ns;
+        }
+        true
+    }
+
+    fn closed_error() -> Error {
+        Error::Overrides("overrides source is closed".into())
+    }
+
+    fn timeout_error(timeout: Duration) -> Error {
+        Error::Timeout(format!("no overrides frame received within {timeout:?}"))
+    }
+}
 
 /// Streaming source: connects lazily on the first `get_overrides` call and
 /// accumulates per-pAMM entries across frames (a frame only carries the pAMMs
@@ -306,26 +331,7 @@ const RECONNECT_MAX: Duration = Duration::from_secs(30);
 /// so no explicit teardown is needed; [`OverridesSource::close`] tears down
 /// immediately and permanently.
 pub struct OverridesWsSource {
-    config: OverridesWsSourceConfig,
-    state: Arc<WsState>,
-}
-
-#[derive(Default)]
-struct WsShared {
-    snapshot: Arc<OverridesSnapshot>,
-    has_frame: bool,
-    closed: bool,
-    last_use: Option<Instant>,
-    task: Option<tokio::task::JoinHandle<()>>,
-}
-
-#[derive(Default)]
-struct WsState {
-    shared: Mutex<WsShared>,
-    frame_notify: Notify,
-    /// Calls currently waiting for a first frame — idle teardown is deferred
-    /// while any exist (matters when `idle_timeout` is very small).
-    waiters: AtomicUsize,
+    conn: WsConnection<OverridesWsHandler>,
 }
 
 impl Default for OverridesWsSource {
@@ -337,35 +343,7 @@ impl Default for OverridesWsSource {
 impl OverridesWsSource {
     pub fn new(config: OverridesWsSourceConfig) -> Self {
         Self {
-            config,
-            state: Arc::new(WsState::default()),
-        }
-    }
-
-    async fn wait_for_snapshot(
-        &self,
-        deadline: tokio::time::Instant,
-    ) -> Result<Arc<OverridesSnapshot>> {
-        loop {
-            // Register for notification BEFORE checking state, so a frame
-            // landing in between can't be missed.
-            let notified = self.state.frame_notify.notified();
-            {
-                let shared = self.state.shared.lock().await;
-                if shared.closed {
-                    return Err(Error::Overrides("overrides source is closed".into()));
-                }
-                if shared.has_frame {
-                    // Arc clone: one refcount bump, not a deep map copy.
-                    return Ok(shared.snapshot.clone());
-                }
-            }
-            if tokio::time::timeout_at(deadline, notified).await.is_err() {
-                return Err(Error::Timeout(format!(
-                    "no overrides frame received within {:?}",
-                    self.config.first_frame_timeout
-                )));
-            }
+            conn: WsConnection::new(config.url, config.idle_timeout, config.first_frame_timeout),
         }
     }
 }
@@ -373,146 +351,12 @@ impl OverridesWsSource {
 #[async_trait]
 impl OverridesSource for OverridesWsSource {
     async fn get_overrides(&self) -> Result<Arc<OverridesSnapshot>> {
-        // Warm path: a single lock acquisition. Record demand, ensure the read
-        // loop is alive (respawn if it died — checked even when a frame is
-        // buffered, so an unexpectedly-dead loop can't leave us serving a
-        // forever-stale snapshot), then hand out a buffered frame's Arc
-        // immediately if present. Spawning under the lock is safe: `tokio::spawn`
-        // is synchronous, so it can neither race a concurrent idle teardown nor
-        // deadlock on the lock the spawned loop will later take.
-        {
-            let mut shared = self.state.shared.lock().await;
-            if shared.closed {
-                return Err(Error::Overrides("overrides source is closed".into()));
-            }
-            shared.last_use = Some(Instant::now());
-            let running = shared.task.as_ref().is_some_and(|t| !t.is_finished());
-            if !running {
-                shared.task = Some(tokio::spawn(run_ws_loop(
-                    self.state.clone(),
-                    self.config.clone(),
-                )));
-            }
-            if shared.has_frame {
-                return Ok(shared.snapshot.clone());
-            }
-        }
-
-        let deadline = tokio::time::Instant::now() + self.config.first_frame_timeout;
-        self.state.waiters.fetch_add(1, Ordering::SeqCst);
-        let result = self.wait_for_snapshot(deadline).await;
-        self.state.waiters.fetch_sub(1, Ordering::SeqCst);
-        result
+        self.conn.get_snapshot().await
     }
 
     fn close(&self) {
-        let state = self.state.clone();
-        tokio::spawn(async move {
-            let mut shared = state.shared.lock().await;
-            shared.closed = true;
-            if let Some(task) = shared.task.take() {
-                task.abort();
-            }
-            drop(shared);
-            state.frame_notify.notify_waiters();
-        });
+        self.conn.close();
     }
-}
-
-/// Background read loop: connect, merge frames into the shared snapshot, and
-/// exit when idle (keeping accumulated entries but resetting `has_frame` so
-/// the next call waits for fresh data).
-async fn run_ws_loop(state: Arc<WsState>, config: OverridesWsSourceConfig) {
-    let mut backoff = RECONNECT_INITIAL;
-
-    loop {
-        if let Ok((stream, _)) = connect_async(&config.url).await {
-            backoff = RECONNECT_INITIAL;
-            let (_, mut read) = stream.split();
-
-            loop {
-                let idle_deadline = idle_deadline(&state, config.idle_timeout).await;
-                tokio::select! {
-                    message = read.next() => match message {
-                        Some(Ok(Message::Text(text))) => {
-                            handle_frame(&state, text.as_str()).await;
-                        }
-                        Some(Ok(_)) => {}
-                        Some(Err(_)) | None => break, // reconnect
-                    },
-                    _ = tokio::time::sleep_until(idle_deadline) => {
-                        if idle_expired(&state, config.idle_timeout).await {
-                            return;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Between reconnect attempts, still honor the idle timeout so a dead
-        // endpoint doesn't keep an unused source reconnecting forever.
-        tokio::time::sleep(backoff).await;
-        backoff = (backoff * 2).min(RECONNECT_MAX);
-        if idle_expired(&state, config.idle_timeout).await {
-            return;
-        }
-    }
-}
-
-async fn handle_frame(state: &WsState, text: &str) {
-    let Ok(value) = serde_json::from_str::<Value>(text) else {
-        return; // skip undecodable frames, like the reference consumers do
-    };
-    let Ok(frame) = parse_overrides_message(&value) else {
-        return;
-    };
-
-    let mut shared = state.shared.lock().await;
-    {
-        // `make_mut` clones only when a reader still holds the Arc; readers keep
-        // it only transiently (across one quote), so frames usually mutate in
-        // place rather than deep-copying.
-        let snapshot = Arc::make_mut(&mut shared.snapshot);
-        // A frame only carries the pAMMs it updates; entries for other pAMMs
-        // stay cached from earlier frames.
-        snapshot.per_pamm.extend(frame.per_pamm);
-        if frame.block_number.is_some() {
-            snapshot.block_number = frame.block_number;
-        }
-        if frame.timestamp_ns.is_some() {
-            snapshot.timestamp_ns = frame.timestamp_ns;
-        }
-    }
-    shared.has_frame = true;
-    drop(shared);
-    state.frame_notify.notify_waiters();
-}
-
-async fn idle_deadline(state: &WsState, idle_timeout: Duration) -> tokio::time::Instant {
-    // While a call is waiting for its first frame, push the deadline out so a
-    // tiny idle_timeout can't tear the connection down before delivery.
-    if state.waiters.load(Ordering::SeqCst) > 0 {
-        return tokio::time::Instant::now() + Duration::from_secs(1);
-    }
-    let shared = state.shared.lock().await;
-    let last_use = shared.last_use.unwrap_or_else(Instant::now);
-    tokio::time::Instant::now() + idle_timeout.saturating_sub(last_use.elapsed())
-}
-
-/// True (and marks the snapshot as needing a fresh frame) when the source has
-/// been unused for longer than the idle timeout and nobody is waiting.
-async fn idle_expired(state: &WsState, idle_timeout: Duration) -> bool {
-    if state.waiters.load(Ordering::SeqCst) > 0 {
-        return false;
-    }
-    let mut shared = state.shared.lock().await;
-    let expired = shared
-        .last_use
-        .is_none_or(|last_use| last_use.elapsed() >= idle_timeout);
-    if expired {
-        shared.has_frame = false;
-    }
-    expired
 }
 
 #[cfg(test)]
