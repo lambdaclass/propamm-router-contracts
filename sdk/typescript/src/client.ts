@@ -23,46 +23,30 @@ import {
 } from "viem";
 import { getContractError } from "viem/utils";
 
-/**
- * Build viem clients internally from an RPC endpoint. The optional `account`
- * (a local/private-key account) signs locally and broadcasts via `rpcUrl`.
- */
-export interface RpcClientOptions {
+export interface ContractClientOptions {
   /** JSON-RPC endpoint, e.g. `http://localhost:8545`. */
   rpcUrl: string;
   /** Target chain (e.g. `mainnet` or `anvil` from `propamm/common/chains`). */
   chain: Chain;
   /** Account used to sign transactions. Omit for a read-only client. */
   account?: Account;
-  publicClient?: never;
-  walletClient?: never;
 }
 
 /**
- * Use viem clients built elsewhere. This is the path for a browser/injected
- * wallet such as MetaMask (e.g. wagmi's `usePublicClient` / `useWalletClient`):
- * such wallets sign over their own EIP-1193 transport, which a client built
- * from `rpcUrl` cannot reach — a wallet client created with `http(rpcUrl)`
- * sends `eth_sendTransaction` to the RPC node, which holds no key for the
- * user's account and rejects it. Passing the wallet's own client routes the
- * signing request to the wallet instead.
+ * Prebuilt viem clients for {@link ContractClient.fromClients} — the path for a
+ * browser/injected wallet such as MetaMask (e.g. wagmi's `usePublicClient` /
+ * `useWalletClient`). Such wallets sign over their own EIP-1193 transport,
+ * which a client built from `rpcUrl` cannot reach: a wallet client created with
+ * `http(rpcUrl)` sends `eth_sendTransaction` to the RPC node, which holds no
+ * key for the user's account and rejects it. Passing the wallet's own client
+ * routes the signing request to the wallet instead.
  */
-export interface ProvidedClientOptions {
+export interface ProvidedClients {
   /** Public client for reads and `eth_call` simulations. */
   publicClient: PublicClient;
   /** Wallet client for writes; its bound account is the signer. Omit for a read-only client. */
   walletClient?: WalletClient;
-  rpcUrl?: never;
-  chain?: never;
-  account?: never;
 }
-
-/**
- * Either an RPC endpoint to build clients from, or prebuilt viem clients — not
- * a mix. The `never` fields make the two shapes mutually exclusive at compile
- * time.
- */
-export type ContractClientOptions = RpcClientOptions | ProvidedClientOptions;
 
 export interface ReadParams {
   address: Address;
@@ -91,26 +75,33 @@ export class ContractClient {
   private readonly account?: Account;
 
   constructor(options: ContractClientOptions) {
-    if (options.publicClient) {
-      // Prebuilt clients (e.g. from wagmi): used verbatim. The wallet client
-      // signs over its own transport; its bound account is the signer.
-      this.publicClient = options.publicClient;
-      this.walletClient = options.walletClient;
-      this.account = options.walletClient?.account;
-    } else {
-      // Build http clients from `rpcUrl`/`chain`. A local `account` also gets a
-      // wallet client that signs locally and broadcasts via `rpcUrl`.
-      const transport = http(options.rpcUrl);
-      this.publicClient = createPublicClient({ chain: options.chain, transport });
-      if (options.account) {
-        this.account = options.account;
-        this.walletClient = createWalletClient({
-          account: options.account,
-          chain: options.chain,
-          transport,
-        });
-      }
+    const transport = http(options.rpcUrl);
+
+    this.publicClient = createPublicClient({ chain: options.chain, transport });
+
+    if (options.account) {
+      this.account = options.account;
+      this.walletClient = createWalletClient({
+        account: options.account,
+        chain: options.chain,
+        transport,
+      });
     }
+  }
+
+  /**
+   * Build a client from prebuilt viem clients instead of an RPC endpoint — use
+   * this to sign through a browser/injected wallet (see {@link ProvidedClients}).
+   */
+  static fromClients({ publicClient, walletClient }: ProvidedClients): ContractClient {
+    // Bypass the RPC constructor and inject the clients. The fields are
+    // readonly (assignable only in a constructor), so set them via Object.assign.
+    const client = Object.create(ContractClient.prototype) as ContractClient;
+    return Object.assign(client, {
+      publicClient,
+      walletClient,
+      account: walletClient?.account,
+    });
   }
 
   /** Call a read-only (view/pure) contract function. */
