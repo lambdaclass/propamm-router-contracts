@@ -3,8 +3,8 @@ import { parseAbi } from "viem";
 /**
  * Public ABI of `PropAMMRouter` (src/PropAMMRouter.sol), kept as
  * human-readable signatures so viem can fully infer argument and return
- * types. Self-call-only internals (`_dispatchVenue`, `_dispatchQuoteVenue`)
- * and UUPS plumbing are intentionally omitted.
+ * types. The self-call-only internal (`_dispatchVenue`) and UUPS plumbing
+ * are intentionally omitted.
  */
 export const propAmmRouterAbi = parseAbi([
   "struct FrontendFee { uint16 bps; address recipient; }",
@@ -21,7 +21,6 @@ export const propAmmRouterAbi = parseAbi([
   "function quoteV1(address tokenIn, address tokenOut, uint256 amount) returns (uint256 bestQuote, address venue)",
   "function quoteVenueV1(address venue, address tokenIn, address tokenOut, uint256 amount) returns (uint256 amountOut, address quotedVenue)",
   "function quoteSelectedVenuesV1(address[] venues, address tokenIn, address tokenOut, uint256 amountIn) returns (uint256 bestAmountOut, address bestVenue)",
-  "function quoteUniswapV3(address tokenIn, address tokenOut, uint256 amount) returns (uint256 amountOut)",
 
   // Views
   "function fallbackSwapRouter() view returns (address)",

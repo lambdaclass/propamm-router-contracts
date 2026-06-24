@@ -10,8 +10,8 @@ pub async fn approve(&self, token: Address, amount: U256) -> Result<H256>
 ## Usage
 
 ```rust
-use propamm_sdk::common::helpers::parse_units;
-use propamm_sdk::common::tokens::USDC;
+use propamm::common::helpers::parse_units;
+use propamm::common::tokens::USDC;
 
 let hash = router.approve(USDC, parse_units("100", 6)?).await?;
 router.client().wait_for_transaction(hash).await?;
