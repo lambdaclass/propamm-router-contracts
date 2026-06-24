@@ -17,15 +17,15 @@ pub async fn quote_with(&self, token_in: Address, token_out: Address, amount_in:
 ::: code-group
 
 ```rust [example.rs]
-use propamm_sdk::common::helpers::parse_ether;
-use propamm_sdk::common::tokens::{ETH_SENTINEL, USDC};
+use propamm::common::helpers::parse_ether;
+use propamm::common::tokens::{ETH_SENTINEL, USDC};
 
 let quote: Quote = router.quote(ETH_SENTINEL, USDC, parse_ether("1")?).await?;
 ```
 
 ```rust [setup.rs]
-use propamm_sdk::common::helpers::parse_address;
-use propamm_sdk::{ContractClient, PropAmmRouter};
+use propamm::common::helpers::parse_address;
+use propamm::{ContractClient, PropAmmRouter};
 
 let client = ContractClient::connect("https://...")?;
 let router = PropAmmRouter::new(client, parse_address("0x...")?);
@@ -65,7 +65,7 @@ Exact input amount, in atomic units.
 Same, plus [`opts: &QuoteOptions`](/rust/types#quoteoptions):
 
 ```rust
-use propamm_sdk::router::{QuoteOptions, QuoteOverrides};
+use propamm::router::{QuoteOptions, QuoteOverrides};
 
 let opts = QuoteOptions {
     overrides: QuoteOverrides::Skip,
@@ -80,7 +80,7 @@ listed venue can be priced, the call does **not** fail: it falls back to
 the Uniswap V3 quote and reports the fallback router as `venue`.
 
 ```rust
-use propamm_sdk::common::pamms::{BEBOP, FERMI};
+use propamm::common::pamms::{BEBOP, FERMI};
 
 let opts = QuoteOptions {
     venues: Some(vec![FERMI, BEBOP]),

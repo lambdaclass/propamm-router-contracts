@@ -4,6 +4,15 @@
   "packageManager": "pnpm@11.8.0",
   "description": "TypeScript SDK for interacting with the PropAMM contracts",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lambdaclass/propamm-router-contracts.git",
+    "directory": "sdk/typescript"
+  },
+  "homepage": "https://github.com/lambdaclass/propamm-router-contracts/tree/main/sdk/typescript#readme",
+  "bugs": {
+    "url": "https://github.com/lambdaclass/propamm-router-contracts/issues"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

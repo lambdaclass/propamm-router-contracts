@@ -1,7 +1,7 @@
 # Types
 
-Shared types across the Rust SDK. Import from `propamm_sdk::router` /
-`propamm_sdk::client` / `propamm_sdk::overrides`; primitives (`Address`,
+Shared types across the Rust SDK. Import from `propamm::router` /
+`propamm::client` / `propamm::overrides`; primitives (`Address`,
 `H256`, `U256`, `TxHash` — ethrex types) re-export from the crate root.
 
 ## SwapParams

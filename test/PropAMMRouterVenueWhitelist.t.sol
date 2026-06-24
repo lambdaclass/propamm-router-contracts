@@ -9,7 +9,7 @@ import {PropAMMRouter} from "../src/PropAMMRouter.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockSwapRouter02} from "./mocks/MockSwapRouter02.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
-import {FERMI_ROUTER} from "../src/interfaces/IFermiSwapper.sol";
+import {MockPropAMMExactOut} from "./mocks/MockPropAMMExactOut.sol";
 import {BEBOP_ROUTER} from "../src/interfaces/IBebopRouter.sol";
 import "../src/libraries/Errors.sol";
 
@@ -21,6 +21,7 @@ contract PropAMMRouterVenueWhitelistTest is Test {
     MockERC20 internal tokenIn;
     MockERC20 internal tokenOut;
 
+    address constant FERMI_ROUTER = 0x5979458912F80B96d30D4220af8E2e4925A33320;
     address constant KIPSELI_PAMM = 0x71e790dd841c8A9061487cb3E78C288E75cE0B3d;
 
     address internal owner = address(this);
@@ -54,16 +55,13 @@ contract PropAMMRouterVenueWhitelistTest is Test {
             abi.encodeCall(PropAMMRouter.initialize, (address(mockRouter), address(mockQuoter), address(manager)));
         ERC1967Proxy proxy = new ERC1967Proxy(address(impl), initData);
         router = PropAMMRouter(payable(address(proxy)));
+
+        router.addVenue(FERMI_ROUTER);
+        router.addVenue(KIPSELI_PAMM);
+        router.addVenue(BEBOP_ROUTER);
     }
 
     // --- Seeding -----------------------------------------------------------
-
-    function test_initialize_seedsDefaultVenues() public view {
-        // A from-scratch deploy ships with the known propAMMs whitelisted.
-        assertTrue(router.isWhitelistedVenue(FERMI_ROUTER));
-        assertTrue(router.isWhitelistedVenue(KIPSELI_PAMM));
-        assertTrue(router.isWhitelistedVenue(BEBOP_ROUTER));
-    }
 
     function test_isWhitelistedVenue_unknownReturnsFalse() public view {
         assertFalse(router.isWhitelistedVenue(genericVenue));
@@ -202,6 +200,39 @@ contract PropAMMRouterVenueWhitelistTest is Test {
         mockQuoter.setAmountOut(1000);
         (uint256 out,) = router.quoteVenueV1(address(mockRouter), address(tokenIn), address(tokenOut), 1 ether);
         assertEq(out, 1000);
+    }
+
+    // --- quoteVenueV1 prices exactly the asked venue (no silent fallback) ---
+
+    function test_quoteVenueV1_pricesAskedVenue() public {
+        // A whitelisted propAMM is quoted directly and reports itself as the
+        // `quotedVenue` — not the Uniswap fallback. The fallback quoter is set to
+        // a distinct value so a stray fallback would be visible in `out`.
+        MockPropAMMExactOut venue = new MockPropAMMExactOut(1, 1); // quote == amountIn
+        router.addVenue(address(venue));
+        mockQuoter.setAmountOut(777);
+
+        (uint256 out, address quotedVenue) =
+            router.quoteVenueV1(address(venue), address(tokenIn), address(tokenOut), 1 ether);
+
+        assertEq(out, 1 ether);
+        assertEq(quotedVenue, address(venue));
+    }
+
+    function test_quoteVenueV1_revertingVenueSurfacesRevert() public {
+        // New behaviour: when a whitelisted venue's quoter reverts, `quoteVenueV1`
+        // surfaces that revert. It previously caught the failure and silently
+        // re-quoted the Uniswap fallback, returning `(uniswapQuote, fallback)`.
+        MockPropAMMExactOut venue = new MockPropAMMExactOut(1, 1);
+        venue.setActive(false); // `quote` now reverts "inactive"
+        router.addVenue(address(venue));
+
+        // The fallback could price the pair, proving the revert is surfaced rather
+        // than masked by a fallback quote.
+        mockQuoter.setAmountOut(1000);
+
+        vm.expectRevert(bytes("inactive"));
+        router.quoteVenueV1(address(venue), address(tokenIn), address(tokenOut), 1 ether);
     }
 
     function test_swapViaVenueV1_nonWhitelistedReverts() public {

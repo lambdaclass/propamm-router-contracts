@@ -203,8 +203,7 @@ interface IPropAMMRouter {
         returns (uint256 bestQuote, address venue);
 
     /// @notice Quotes `amount` of `tokenIn` against a single venue — a whitelisted
-    /// propAMM or the public-venue fallback. If the venue quote fails, it falls back
-    /// to quoting Uniswap V3.
+    /// propAMM or the public-venue fallback.
     /// @dev Reverts `UnknownVenue` if `venue` is neither a whitelisted propAMM nor the
     /// fallback address.
     /// @param venue The venue to quote against — a propAMM address, or the
@@ -213,15 +212,14 @@ interface IPropAMMRouter {
     /// @param tokenOut The token being bought.
     /// @param amount The amount of `tokenIn` to quote.
     /// @return amountOut The amount of `tokenOut` quoted by `venue`.
-    /// @return quotedVenue The asked venue if the quote succeeded, or the fallback
-    /// venue address in other case.
+    /// @return quotedVenue The asked venue. Kept for retro-compatibility.
     function quoteVenueV1(address venue, address tokenIn, address tokenOut, uint256 amount)
         external
         returns (uint256 amountOut, address quotedVenue);
 
     /// @notice Quotes `amountIn` of `tokenIn` across a caller-selected set of
-    /// venues and returns the best output and the venue that produced it, or
-    /// the public-venue fallback if all considered venues reverted.
+    /// venues and returns the best output and the venue that produced it.
+    /// Reverts `NoQuotesAvailable` if none of `venues` can be priced.
     /// @param venues The venues to consider — a subset of the available venues.
     /// @param tokenIn The token being sold.
     /// @param tokenOut The token being bought.
