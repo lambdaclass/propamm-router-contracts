@@ -174,6 +174,68 @@ await client.write({
 });
 ```
 
+## Price levels
+
+Alongside the raw state overrides, Titan publishes prices it has _already
+quoted_, grouped per pAMM: for each pair, an `orderBook` of rungs mapping an
+input amount to the output it would receive. This lets a taker read prices
+across a range of trade sizes without an `eth_call` per size. Rungs are either
+`Simulated` (from an EVM simulation) or `Interpolated` (a linear spline between
+simulated rungs, for finer granularity).
+
+The `PriceLevels` client wraps it, mirroring `PropAmmRouter`: a single class
+with a default snapshot source you can override in the constructor.
+
+```ts
+import { PriceLevels } from "propamm/prices";
+import { USDC, WETH } from "propamm/common/tokens";
+import { parseUnits } from "propamm/common/helpers";
+
+const prices = new PriceLevels(); // default: one-shot HTTP snapshot source
+
+const snapshot = await prices.getPriceLevels();
+// snapshot.pamms[i].pairs[j].orderBook -> [{ amountIn, amountOut, variant }, ...]
+
+// Quote helpers are served from Titan's latest snapshot over HTTP, skipping the
+// on-chain eth_call that router.quote runs.
+const best = await prices.getQuote(USDC, WETH, parseUnits("1000", 6));
+// { tokenIn, tokenOut, amountIn, amountOut, pamm, router, blockNumber, slot }
+const pinned = await prices.getQuoteVenue(best.pamm, USDC, WETH, parseUnits("1000", 6));
+```
+
+The snapshot source defaults to a `PriceLevelsRpcSource` (one
+`titan_getPammPriceLevels` call per `getPriceLevels`). For a live feed, pass a
+`PriceLevelsWsSource` instead — it streams complete snapshots, reconnects with
+backoff, and idle auto-closes, like `OverridesWsSource`. The stream is served
+from regional hosts (`eu.`, `ap.`, `us.`); pick the nearest:
+
+```ts
+import { PriceLevels, PriceLevelsWsSource } from "propamm/prices";
+
+const prices = new PriceLevels({
+  source: new PriceLevelsWsSource({ url: "wss://eu.rpc.titanbuilder.xyz/ws/pamm_price_levels" }),
+});
+const snapshot = await prices.getPriceLevels(); // served from the live stream
+prices.close(); // close the stream socket when done (no-op for the HTTP default)
+```
+
+The quote helpers (`getQuote` / `getQuoteVenue`) are HTTP-only and default to
+`https://rpc.titanbuilder.xyz`. When pairing a `PriceLevelsWsSource` with a
+private or regional deployment, pass `rpcUrl` to route quotes to the same host:
+
+```ts
+const prices = new PriceLevels({
+  source: new PriceLevelsWsSource({ url: "wss://us.rpc.titanbuilder.xyz/ws/pamm_price_levels" }),
+  rpcUrl: "https://us.rpc.titanbuilder.xyz",
+});
+```
+
+Passing a `PriceLevelsRpcSource` with a custom `url` instead points both
+snapshots and quotes at that endpoint (and `rpcUrl` is ignored).
+
+A runnable version lives in [`examples/price-levels.ts`](examples/price-levels.ts)
+(`node examples/price-levels.ts`; override the HTTP endpoint with `PRICE_LEVELS_URL`).
+
 ## Layout
 
 Source modules map 1:1 to import paths (`src/<path>.ts` → `propamm/<path>`):
@@ -182,6 +244,7 @@ Source modules map 1:1 to import paths (`src/<path>.ts` → `propamm/<path>`):
 - `src/router/index.ts` — `PropAmmRouter` bindings (`quote`, `swap`, `swapAndWait`, `waitForSwap`, `approve`/`allowance`, views) plus `MAX_FEE_BPS`.
 - `src/router/abi.ts` — human-readable `PropAMMRouter` ABI (functions, events, errors).
 - `src/overrides/index.ts` — pAMM state-override sources (`OverridesWsSource`, `OverridesRpcSource`), payload parsing, and `toStateOverride`.
+- `src/prices/index.ts` — `PriceLevels` client plus its swappable snapshot sources (`PriceLevelsWsSource`, `PriceLevelsRpcSource`), snapshot parsing, and the Titan quote helpers (`getQuote`, `getQuoteVenue`).
 - `src/common/tokens.ts` — `ETH_SENTINEL` and mainnet token addresses.
 - `src/common/pamms.ts` — `PAMMS` name → venue address mapping.
 - `src/common/helpers.ts` — `applySlippage`, `deadlineIn`, and unit conversion (`parseEther`, `parseUnits`, `formatEther`, `formatUnits`).
