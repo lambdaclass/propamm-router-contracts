@@ -91,6 +91,7 @@ with `RPC_URL` / `PRIVATE_KEY` / `ROUTER_ADDRESS` / `SLIPPAGE_BPS`.
 | `propamm.router` | `PropAmmRouter` bindings: quotes, swaps, ERC-20, views. |
 | `propamm.router.abi` | Vendored router ABI and custom-error naming. |
 | `propamm.overrides` | pAMM state-override sources (`OverridesRpcSource`, `OverridesWsSource`). |
+| `propamm.prices` | `PriceLevels` client + price-level sources (`PriceLevelsRpcSource`, `PriceLevelsWsSource`) and the Titan quote helpers. |
 | `propamm.common` | `tokens`, `pamms`, `helpers`, `accounts`. |
 
 ## Quotes & state overrides
@@ -105,3 +106,54 @@ block number/timestamp, so venues price fresh off-chain liquidity. Pass
 > Note: quotes apply fresh overrides, but a fork still *executes* swaps against
 > its frozen state — if a swap reverts with `InsufficientOutput` on a fork,
 > raise the slippage. Live chains fill at the quoted state normally.
+
+## Price levels
+
+Alongside the raw state overrides, Titan publishes prices it has *already
+quoted*, grouped per pAMM: for each pair, an `order_book` of rungs mapping an
+input amount to the output it would receive. This lets a taker read prices
+across a range of trade sizes without an `eth_call` per size. Rungs are either
+`Simulated` (from an EVM simulation) or `Interpolated` (a linear spline between
+simulated rungs, for finer granularity).
+
+The `PriceLevels` client wraps it, mirroring `PropAmmRouter`: a single class
+with a default snapshot source you can override.
+
+```python
+from propamm import PriceLevels
+from propamm.common.helpers import parse_units
+from propamm.common.tokens import USDC, WETH
+
+prices = PriceLevels()  # default: one-shot HTTP snapshot source
+
+snapshot = await prices.get_price_levels()
+# snapshot.pamms[i].pairs[j].order_book -> [PriceLevel(amount_in, amount_out, variant), ...]
+
+# Quote helpers are served from Titan's latest snapshot over HTTP, skipping the
+# on-chain eth_call that router.quote runs.
+best = await prices.get_quote(USDC, WETH, parse_units("1000", 6))
+# TitanQuote(token_in, token_out, amount_in, amount_out, pamm, router, block_number, slot, ...)
+pinned = await prices.get_quote_venue(best.pamm, USDC, WETH, parse_units("1000", 6))
+```
+
+The snapshot source defaults to a `PriceLevelsRpcSource` (one
+`titan_getPammPriceLevels` call per `get_price_levels`). For a live feed, pass a
+`PriceLevelsWsSource` instead — it streams complete snapshots, reconnects with
+backoff, and idle auto-closes, like `OverridesWsSource`. The stream is served
+from regional hosts (`eu.`, `ap.`, `us.`); pick the nearest:
+
+```python
+from propamm import PriceLevels, PriceLevelsWsSource
+
+prices = PriceLevels(
+    PriceLevelsWsSource("wss://eu.rpc.titanbuilder.xyz/ws/pamm_price_levels")
+)
+snapshot = await prices.get_price_levels()  # served from the live stream
+await prices.close()  # close the stream socket when done (no-op for the HTTP default)
+```
+
+Passing a `PriceLevelsRpcSource` with a custom URL instead points both the
+snapshots and the quote helpers at that endpoint (the quotes are HTTP-only).
+
+A runnable version lives in [`examples/price_levels.py`](examples/price_levels.py)
+(`python3 examples/price_levels.py`; override the HTTP endpoint with `PRICE_LEVELS_URL`).
