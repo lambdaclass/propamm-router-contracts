@@ -24,12 +24,29 @@ import {
 import { getContractError } from "viem/utils";
 
 export interface ContractClientOptions {
-  /** JSON-RPC endpoint, e.g. `http://localhost:8545`. */
-  rpcUrl: string;
-  /** Target chain (e.g. `mainnet` or `anvil` from `propamm/common/chains`). */
-  chain: Chain;
-  /** Account used to sign transactions. Omit for a read-only client. */
+  /** JSON-RPC endpoint, e.g. `http://localhost:8545`. Required unless a `publicClient` is supplied. */
+  rpcUrl?: string;
+  /** Target chain (e.g. `mainnet` or `anvil` from `propamm/common/chains`). Required unless prebuilt clients are supplied. */
+  chain?: Chain;
+  /** Account used to sign transactions. Omit for a read-only client, or when supplying a `walletClient`. */
   account?: Account;
+  /**
+   * Prebuilt viem public client for reads and `eth_call` simulations. When
+   * supplied it is used verbatim and `rpcUrl`/`chain` are ignored for reads.
+   */
+  publicClient?: PublicClient;
+  /**
+   * Prebuilt viem wallet client for writes. Supply this to sign through a
+   * browser/injected wallet such as MetaMask (e.g. wagmi's `useWalletClient`).
+   *
+   * Such wallets sign over their own EIP-1193 transport, which a client built
+   * from `rpcUrl` cannot reach: a wallet client created with `http(rpcUrl)`
+   * sends `eth_sendTransaction` to the RPC node, which holds no key for the
+   * user's account and rejects it. Passing the wallet's own client routes the
+   * signing request to the wallet instead. The client's bound account is used
+   * as the signer (falling back to `account`).
+   */
+  walletClient?: WalletClient;
 }
 
 export interface ReadParams {
@@ -59,16 +76,33 @@ export class ContractClient {
   private readonly account?: Account;
 
   constructor(options: ContractClientOptions) {
-    const transport = http(options.rpcUrl);
+    // A prebuilt public client (e.g. from wagmi) is used as-is; otherwise build
+    // an http client from `rpcUrl`/`chain`.
+    if (options.publicClient) {
+      this.publicClient = options.publicClient;
+    } else {
+      if (!options.rpcUrl) {
+        throw new Error("ContractClient requires either `publicClient` or `rpcUrl`");
+      }
+      this.publicClient = createPublicClient({
+        chain: options.chain,
+        transport: http(options.rpcUrl),
+      });
+    }
 
-    this.publicClient = createPublicClient({ chain: options.chain, transport });
-
-    if (options.account) {
+    // A prebuilt wallet client (e.g. an injected/browser wallet from wagmi)
+    // signs over its own transport, so it is used verbatim and its bound account
+    // is the signer. Otherwise a local `account` gets an http wallet client that
+    // signs locally and broadcasts via `rpcUrl`.
+    if (options.walletClient) {
+      this.walletClient = options.walletClient;
+      this.account = options.walletClient.account ?? options.account;
+    } else if (options.account) {
       this.account = options.account;
       this.walletClient = createWalletClient({
         account: options.account,
         chain: options.chain,
-        transport,
+        transport: http(options.rpcUrl),
       });
     }
   }
