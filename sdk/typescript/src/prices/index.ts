@@ -103,11 +103,17 @@ export interface PriceLevelsOptions {
   /**
    * Source the price-level snapshot (`getPriceLevels`) is pulled from. Defaults
    * to a one-shot `PriceLevelsRpcSource`; pass a `PriceLevelsWsSource` for a
-   * live stream. The quote helpers always go over HTTP JSON-RPC and reuse this
-   * source when it is already a `PriceLevelsRpcSource`, so a custom endpoint
-   * covers both.
+   * live stream.
    */
   source?: PriceLevelsSource;
+  /**
+   * Titan JSON-RPC endpoint used by the quote helpers (`getQuote` /
+   * `getQuoteVenue`). Ignored when `source` is a `PriceLevelsRpcSource` (its
+   * URL is reused). Required when pairing a `PriceLevelsWsSource` with a
+   * private or regional Titan deployment; defaults to
+   * `DEFAULT_PRICE_LEVELS_RPC_URL` otherwise.
+   */
+  rpcUrl?: string;
 }
 
 /**
@@ -130,11 +136,11 @@ export class PriceLevels {
   private readonly rpc: PriceLevelsRpcSource;
 
   constructor(options: PriceLevelsOptions = {}) {
-    this.source = options.source ?? new PriceLevelsRpcSource();
-    // The quote helpers are HTTP-only. Reuse the snapshot source when it already
-    // speaks HTTP (so a custom endpoint covers both); otherwise use the default.
+    this.source = options.source ?? new PriceLevelsRpcSource({ url: options.rpcUrl });
     this.rpc =
-      this.source instanceof PriceLevelsRpcSource ? this.source : new PriceLevelsRpcSource();
+      this.source instanceof PriceLevelsRpcSource
+        ? this.source
+        : new PriceLevelsRpcSource({ url: options.rpcUrl });
   }
 
   /** Latest price-level snapshot from the configured source. */
