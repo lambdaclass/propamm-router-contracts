@@ -38,6 +38,10 @@ pub enum Error {
     #[error("overrides error: {0}")]
     Overrides(String),
 
+    /// Failure while fetching or parsing pAMM price levels.
+    #[error("price levels error: {0}")]
+    Prices(String),
+
     /// An operation did not complete within its deadline.
     #[error("timeout: {0}")]
     Timeout(String),
