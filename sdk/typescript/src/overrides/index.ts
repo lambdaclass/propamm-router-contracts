@@ -20,6 +20,7 @@
 
 import { padHex, type Address, type Hex, type StateOverride } from "viem";
 import { BEBOP } from "../common/pamms.js";
+import { WsSource } from "../ws-source.js";
 
 /** Storage slot diffs for one contract: slot → value (0x-prefixed, lowercased). */
 export type SlotDiffs = Record<Hex, Hex>;
@@ -214,9 +215,6 @@ export interface OverridesWsSourceOptions {
   idleTimeoutMs?: number;
 }
 
-const RECONNECT_INITIAL_MS = 1_000;
-const RECONNECT_MAX_MS = 30_000;
-
 /**
  * Streaming source: connects lazily on the first `getOverrides()` call and
  * accumulates per-pAMM entries across frames (a frame only carries the pAMMs
@@ -225,177 +223,30 @@ const RECONNECT_MAX_MS = 30_000;
  * `idleTimeoutMs` without calls, so no explicit teardown is needed; `close()`
  * remains available for immediate, permanent teardown.
  */
-export class OverridesWsSource implements OverridesSource {
-  private readonly url: string;
-  private readonly firstFrameTimeoutMs: number;
-  private readonly idleTimeoutMs: number;
-
-  private ws?: WebSocket;
-  private closed = false;
-  private reconnectAttempts = 0;
-  private reconnectTimer?: ReturnType<typeof setTimeout>;
-  private idleTimer?: ReturnType<typeof setTimeout>;
-
+export class OverridesWsSource extends WsSource<OverridesSnapshot> implements OverridesSource {
+  // Mutated in place: frames carry deltas, so entries for absent pAMMs are kept.
   private readonly snapshot: OverridesSnapshot = { perPamm: {} };
-  private hasFrame = false;
-  private frameWaiters: Array<{ resolve: () => void; reject: (error: Error) => void }> = [];
+
+  protected override get name() {
+    return "overrides";
+  }
 
   constructor(options: OverridesWsSourceOptions = {}) {
-    this.url = options.url ?? DEFAULT_OVERRIDES_WS_URL;
-    this.firstFrameTimeoutMs = options.firstFrameTimeoutMs ?? 5_000;
-    this.idleTimeoutMs = options.idleTimeoutMs ?? 30_000;
+    super(options.url ?? DEFAULT_OVERRIDES_WS_URL, options);
   }
 
-  async getOverrides(): Promise<OverridesSnapshot> {
-    if (this.closed) {
-      throw new Error("overrides source is closed");
-    }
-
-    try {
-      this.connect();
-      if (!this.hasFrame) {
-        await this.waitForFirstFrame();
-      }
-      // Hand out a copy so a later frame can't mutate the caller's snapshot.
-      return { ...this.snapshot, perPamm: { ...this.snapshot.perPamm } };
-    } finally {
-      this.armIdleTimer();
-    }
-  }
-
-  close(): void {
-    this.closed = true;
-    this.clearTimer("reconnectTimer");
-    this.clearTimer("idleTimer");
-    this.ws?.close();
-    this.ws = undefined;
-    this.failWaiters(new Error("overrides source closed while waiting for the first frame"));
-  }
-
-  private connect(): void {
-    if (this.ws || this.reconnectTimer || this.closed) return;
-    if (typeof WebSocket === "undefined") {
-      throw new Error("no global WebSocket available (Node >= 22 or a browser is required)");
-    }
-
-    const ws = new WebSocket(this.url);
-    this.ws = ws;
-
-    ws.addEventListener("open", () => {
-      this.reconnectAttempts = 0;
-    });
-    ws.addEventListener("message", (event) => {
-      this.handleFrame(event.data);
-    });
-    ws.addEventListener("error", () => {
-      // The paired "close" event drives reconnection.
-    });
-    ws.addEventListener("close", () => {
-      if (this.ws !== ws) return;
-      this.ws = undefined;
-      this.scheduleReconnect();
-    });
-  }
-
-  private scheduleReconnect(): void {
-    if (this.closed || this.reconnectTimer) return;
-    const delay = Math.min(RECONNECT_INITIAL_MS * 2 ** this.reconnectAttempts, RECONNECT_MAX_MS);
-    this.reconnectAttempts += 1;
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = undefined;
-      this.connect();
-    }, delay);
-    unrefTimer(this.reconnectTimer);
-  }
-
-  /** (Re)start the idle countdown; unref'd so it never pins the process. */
-  private armIdleTimer(): void {
-    this.clearTimer("idleTimer");
-    if (this.closed || !Number.isFinite(this.idleTimeoutMs)) return;
-    this.idleTimer = setTimeout(() => {
-      this.idleTimer = undefined;
-      this.idleClose();
-    }, this.idleTimeoutMs);
-    unrefTimer(this.idleTimer);
-  }
-
-  /**
-   * Idle teardown: drop the socket (and any reconnection backoff) until the
-   * next `getOverrides()` call. The accumulated per-pAMM entries are kept —
-   * frames only carry deltas — but `hasFrame` resets so the next call waits
-   * for a fresh frame instead of serving a stale snapshot.
-   */
-  private idleClose(): void {
-    if (this.frameWaiters.length > 0) {
-      this.armIdleTimer();
-      return;
-    }
-    this.clearTimer("reconnectTimer");
-    this.reconnectAttempts = 0;
-    const ws = this.ws;
-    this.ws = undefined; // cleared first so the close handler doesn't reconnect
-    ws?.close();
-    this.hasFrame = false;
-  }
-
-  private clearTimer(name: "reconnectTimer" | "idleTimer"): void {
-    if (this[name] !== undefined) {
-      clearTimeout(this[name]);
-      this[name] = undefined;
-    }
-  }
-
-  private handleFrame(data: unknown): void {
-    if (typeof data !== "string") return;
-
-    let frame: OverridesSnapshot;
-    try {
-      frame = parseOverridesMessage(JSON.parse(data));
-    } catch {
-      return; // skip undecodable frames, like the reference consumers do
-    }
-
-    // A frame only carries the pAMMs it updates; entries for other pAMMs
-    // stay cached from earlier frames.
+  protected override applyFrame(data: string): void {
+    const frame = parseOverridesMessage(JSON.parse(data));
     Object.assign(this.snapshot.perPamm, frame.perPamm);
     if (frame.blockNumber !== undefined) this.snapshot.blockNumber = frame.blockNumber;
     if (frame.timestampNs !== undefined) this.snapshot.timestampNs = frame.timestampNs;
-
-    this.hasFrame = true;
-    const waiters = this.frameWaiters;
-    this.frameWaiters = [];
-    for (const waiter of waiters) waiter.resolve();
   }
 
-  private async waitForFirstFrame(): Promise<void> {
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.frameWaiters = this.frameWaiters.filter((w) => w !== waiter);
-        reject(new Error(`no overrides frame received within ${this.firstFrameTimeoutMs}ms`));
-      }, this.firstFrameTimeoutMs);
-      const waiter = {
-        resolve: () => {
-          clearTimeout(timer);
-          resolve();
-        },
-        reject: (error: Error) => {
-          clearTimeout(timer);
-          reject(error);
-        },
-      };
-      this.frameWaiters.push(waiter);
-    });
+  protected override copySnapshot(): OverridesSnapshot {
+    return { ...this.snapshot, perPamm: { ...this.snapshot.perPamm } };
   }
 
-  private failWaiters(error: Error): void {
-    const waiters = this.frameWaiters;
-    this.frameWaiters = [];
-    for (const waiter of waiters) waiter.reject(error);
+  getOverrides(): Promise<OverridesSnapshot> {
+    return this.getSnapshot();
   }
-}
-
-// In Node, unref'd timers don't keep the event loop (and thus the process)
-// alive; browsers have no such concept, so the call is a no-op there.
-function unrefTimer(timer: ReturnType<typeof setTimeout>): void {
-  (timer as { unref?: () => void }).unref?.();
 }

@@ -17,4 +17,16 @@ export type {
 export { OverridesRpcSource, OverridesWsSource } from "./overrides/index.js";
 export type { OverridesSnapshot, OverridesSource } from "./overrides/index.js";
 
+export { PriceLevels, PriceLevelsRpcSource, PriceLevelsWsSource } from "./prices/index.js";
+export type {
+  PairPriceLevels,
+  PammPriceLevels,
+  PriceLevel,
+  PriceLevelsOptions,
+  PriceLevelsSnapshot,
+  PriceLevelsSource,
+  PriceVariant,
+  TitanQuote,
+} from "./prices/index.js";
+
 export type { Account, Address, Chain, Hash } from "viem";
