@@ -14,7 +14,7 @@ import { mainnet } from "propamm/common/chains";
 import { privateKeyToAccount } from "propamm/common/accounts";
 
 const account = privateKeyToAccount("0x...");
-const client = new ContractClient({
+const client = ContractClient.fromRpc({
   rpcUrl: "https://...",
   chain: mainnet,
   account, // omit for a read-only client (quotes and views still work)
@@ -42,3 +42,28 @@ address to target a testnet or local-fork deployment.
 The quote already reflects fresh off-chain liquidity — pAMM state overrides
 are applied automatically. Native ETH input is signalled with `ETH_SENTINEL`
 (no ERC-20 approval needed; `msg.value` is attached automatically).
+
+## Browser wallets
+
+`ContractClient.fromRpc` builds its own viem clients from an RPC URL. In a
+browser app the clients instead come from the connected wallet, so build the
+client with `ContractClient.fromClients` and pass the wallet's own clients —
+e.g. wagmi's `usePublicClient` / `useWalletClient`. Writes are then signed by
+the wallet (MetaMask, WalletConnect, ...) over its own transport.
+
+```ts
+import { ContractClient } from "propamm/client";
+import { usePublicClient, useWalletClient } from "wagmi";
+
+// viem public client for reads and quote simulations
+const publicClient = usePublicClient();
+
+// viem wallet client for writes, signing through the connected wallet (MetaMask)
+const { data: walletClient } = useWalletClient();
+
+// SDK client backed by the wallet's viem clients
+const client = ContractClient.fromClients({ publicClient, walletClient });
+```
+
+`walletClient` is `undefined` until a wallet connects; omit it (pass only
+`publicClient`) for a read-only client that can still quote and read views.
