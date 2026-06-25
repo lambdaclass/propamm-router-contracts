@@ -1,6 +1,6 @@
 {
   "name": "propamm",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "packageManager": "pnpm@11.8.0",
   "description": "TypeScript SDK for interacting with the PropAMM contracts",
   "license": "MIT",
