@@ -12,6 +12,13 @@ All notable changes to the TypeScript SDK (`propamm`) are documented here.
   wallet instead of a raw private key.
   ([#56](https://github.com/lambdaclass/propamm-router-contracts/pull/56))
 
+### Changed
+
+- **Breaking:** the `ContractClient` constructor is now private. Build a client
+  from an RPC URL with the new `ContractClient.fromRpc` static method instead of
+  `new ContractClient(...)`.
+  ([#56](https://github.com/lambdaclass/propamm-router-contracts/pull/56))
+
 ## [1.1.0] - 2026-06-24
 
 ### Added
