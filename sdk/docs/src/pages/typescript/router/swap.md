@@ -36,7 +36,7 @@ import { mainnet } from "propamm/common/chains";
 import { privateKeyToAccount } from "propamm/common/accounts";
 
 export const account = privateKeyToAccount("0x...");
-export const client = new ContractClient({
+export const client = ContractClient.fromRpc({
   rpcUrl: "https://...",
   chain: mainnet,
   account,
