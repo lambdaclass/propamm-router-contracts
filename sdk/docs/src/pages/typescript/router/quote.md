@@ -32,7 +32,7 @@ import { ContractClient } from "propamm/client";
 import { PropAmmRouter } from "propamm/router";
 import { mainnet } from "propamm/common/chains";
 
-export const client = new ContractClient({
+export const client = ContractClient.fromRpc({
   rpcUrl: "https://...",
   chain: mainnet,
 });

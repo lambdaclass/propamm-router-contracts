@@ -21,6 +21,8 @@ from ..common.helpers import parse_address
 from ..common.tokens import ETH_SENTINEL
 from ..error import InvalidInputError, MissingEventError, RevertError, TransactionRevertedError
 from ..overrides import (
+    BEACON_GENESIS_TS,
+    SECS_PER_SLOT,
     OverridesSnapshot,
     OverridesSource,
     OverridesWsSource,
@@ -329,7 +331,10 @@ class PropAmmRouter:
         Returns ``None`` when no overrides apply (the quote runs via web3's
         plain ``.call()``). The snapshot's block number and timestamp are
         attached only alongside overrides — venues revert when the simulated
-        block context doesn't match their pushed state.
+        block context doesn't match their pushed state. The timestamp is the
+        slot's canonical block time (``genesis + slot*12``), falling back to the
+        emit time when no slot is present; venues validate ``block.timestamp``
+        against the state they pushed, which is keyed to the slot.
         """
         chosen = opts.overrides
         if chosen is None:
@@ -350,9 +355,19 @@ class PropAmmRouter:
             return None
 
         overrides: dict[str, Any] = {"state_override": state, "block_number": snapshot.block_number}
-        if snapshot.timestamp_ns is not None:
-            overrides["block_timestamp"] = snapshot.timestamp_ns // 1_000_000_000
+        block_timestamp = _block_time_secs(snapshot)
+        if block_timestamp is not None:
+            overrides["block_timestamp"] = block_timestamp
         return overrides
+
+
+def _block_time_secs(snapshot: OverridesSnapshot) -> int | None:
+    """Canonical block time (seconds) from the beacon slot; emit time as fallback."""
+    if snapshot.slot is not None:
+        return BEACON_GENESIS_TS + snapshot.slot * SECS_PER_SLOT
+    if snapshot.timestamp_ns is not None:
+        return snapshot.timestamp_ns // 1_000_000_000
+    return None
 
 
 def _venue_dispatch(venues: list[str] | None) -> tuple[str, list]:
