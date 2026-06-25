@@ -2,6 +2,16 @@
 
 All notable changes to the TypeScript SDK (`propamm`) are documented here.
 
+## [1.2.1] - 2026-06-25
+
+### Fixed
+
+- State-override quotes now pin the simulated `block.timestamp` to the beacon
+  slot's canonical block time (`genesis + slot*12`) instead of the frame's emit
+  time, falling back to the emit time when no slot is present. Venues validate
+  `block.timestamp` against the state they pushed, which is keyed to the slot.
+  ([#61](https://github.com/lambdaclass/propamm-router-contracts/pull/61))
+
 ## [1.2.0] - 2026-06-25
 
 ### Added
