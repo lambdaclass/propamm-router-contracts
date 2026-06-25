@@ -17,7 +17,9 @@ import {
 import { propAmmRouterAbi } from "./abi.js";
 import { ETH_SENTINEL } from "../common/tokens.js";
 import {
+  BEACON_GENESIS_TS,
   OverridesWsSource,
+  SECS_PER_SLOT,
   toStateOverride,
   type OverridesSnapshot,
   type OverridesSource,
@@ -352,9 +354,11 @@ export class PropAmmRouter {
    * per-call source/snapshot (or the router's attached source), then flatten
    * the snapshot into viem's state-override format. The snapshot's block
    * number and timestamp are attached only alongside overrides — venues
-   * revert when the simulated block context doesn't match their pushed state
-   * (the timestamp matters on forks, whose `block.timestamp` lags the
-   * snapshot's freshness window).
+   * revert when the simulated block context doesn't match their pushed state.
+   * The timestamp is the slot's canonical block time (`genesis + slot*12`),
+   * falling back to the emit time when no slot is present; venues validate
+   * `block.timestamp` against the state they pushed, which is keyed to the slot,
+   * not to the frame's emit time.
    */
   private async resolveOverrides(
     opts?: QuoteOptions,
@@ -371,10 +375,20 @@ export class PropAmmRouter {
     return {
       stateOverride,
       blockNumber: snapshot.blockNumber,
-      blockTimestamp:
-        snapshot.timestampNs !== undefined ? snapshot.timestampNs / 1_000_000_000n : undefined,
+      blockTimestamp: blockTimeSecs(snapshot),
     };
   }
+}
+
+/**
+ * Canonical block time (seconds) for a snapshot: derived from the beacon slot
+ * (`genesis + slot*12`), falling back to the emit timestamp when no slot is
+ * present, or `undefined` when neither is known.
+ */
+function blockTimeSecs(snapshot: OverridesSnapshot): bigint | undefined {
+  if (snapshot.slot !== undefined) return BEACON_GENESIS_TS + snapshot.slot * SECS_PER_SLOT;
+  if (snapshot.timestampNs !== undefined) return snapshot.timestampNs / 1_000_000_000n;
+  return undefined;
 }
 
 /** Quote selector per venue-restriction mode. */
