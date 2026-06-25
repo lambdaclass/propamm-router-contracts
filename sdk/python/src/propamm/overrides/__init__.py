@@ -41,6 +41,13 @@ DEFAULT_OVERRIDES_WS_URL = "wss://rpc.titanbuilder.xyz/ws/pamm_quote_stream"
 #: on-chain Bebop price cannot win a best-quote selection it could never fill.
 BEBOP_DEFAULT_SLOT = "0x3ca381a3d43d4e593578057c4abe441ad9df02f080defd17d2b6e6190cdcd936"
 
+#: Mainnet beacon-chain genesis time and slot length. The canonical timestamp of
+#: a block is ``genesis + slot * 12``; venues check ``block.timestamp`` against
+#: the state they pushed, so quote sims must pin this slot-derived time (not the
+#: frame's emit time). Matches Titan's reference ``quoter.py``.
+BEACON_GENESIS_TS = 1_606_824_023
+SECS_PER_SLOT = 12
+
 _BEBOP_LOWER = BEBOP.lower()
 # Deprecated Bebop deployment still whitelisted on the router; it receives no
 # fresh overrides, so its stale on-chain price is always neutralized (see
@@ -61,6 +68,8 @@ class OverridesSnapshot:
 
     #: Block the overrides were generated against.
     block_number: int | None = None
+    #: Beacon-chain slot the overrides were generated against.
+    slot: int | None = None
     #: Generation time in nanoseconds since epoch.
     timestamp_ns: int | None = None
     #: pAMM address (lowercased) -> contract address (lowercased) -> slot diffs.
@@ -70,6 +79,7 @@ class OverridesSnapshot:
         """A deep-ish copy so a later frame can't mutate a handed-out snapshot."""
         return OverridesSnapshot(
             block_number=self.block_number,
+            slot=self.slot,
             timestamp_ns=self.timestamp_ns,
             per_pamm={
                 pamm: {contract: dict(slots) for contract, slots in contracts.items()}
@@ -148,6 +158,7 @@ def parse_overrides_message(raw: Any) -> OverridesSnapshot:
 
     return OverridesSnapshot(
         block_number=_parse_block_number(raw.get("blockNumber", raw.get("block_number"))),
+        slot=_parse_block_number(raw.get("slot")),
         timestamp_ns=raw["timestamp"] if isinstance(raw.get("timestamp"), int) else None,
         per_pamm=per_pamm,
     )
@@ -370,6 +381,8 @@ class OverridesWsSource(OverridesSource):
         self._snapshot.per_pamm.update(copy.deepcopy(frame.per_pamm))
         if frame.block_number is not None:
             self._snapshot.block_number = frame.block_number
+        if frame.slot is not None:
+            self._snapshot.slot = frame.slot
         if frame.timestamp_ns is not None:
             self._snapshot.timestamp_ns = frame.timestamp_ns
         self._has_frame = True
