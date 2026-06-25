@@ -99,6 +99,7 @@ export default defineConfig({
           },
           { text: "Helpers", link: "/typescript/helpers" },
           { text: "Types", link: "/typescript/types" },
+          { text: "Changelog", link: "/typescript/changelog" },
         ],
       },
       {
@@ -140,6 +141,7 @@ export default defineConfig({
           },
           { text: "Helpers", link: "/rust/helpers" },
           { text: "Types", link: "/rust/types" },
+          { text: "Changelog", link: "/rust/changelog" },
         ],
       },
       {
@@ -181,6 +183,7 @@ export default defineConfig({
           },
           { text: "Helpers", link: "/python/helpers" },
           { text: "Types", link: "/python/types" },
+          { text: "Changelog", link: "/python/changelog" },
         ],
       },
     ],
