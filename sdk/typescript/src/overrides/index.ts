@@ -31,11 +31,22 @@ export type ContractDiffs = Record<Address, SlotDiffs>;
 export interface OverridesSnapshot {
   /** Block the overrides were generated against. */
   blockNumber?: bigint;
+  /** Beacon-chain slot the overrides were generated against. */
+  slot?: bigint;
   /** Generation time in nanoseconds since epoch. */
   timestampNs?: bigint;
   /** pAMM address → contract address → slot diffs. */
   perPamm: Record<Address, ContractDiffs>;
 }
+
+/**
+ * Mainnet beacon-chain genesis time and slot length. The canonical timestamp
+ * of a block is `genesis + slot*12`; venues check `block.timestamp` against the
+ * state they pushed, so quote sims must pin this slot-derived time (not the
+ * frame's emit time). Matches Titan's reference `quoter.py`.
+ */
+export const BEACON_GENESIS_TS = 1_606_824_023n;
+export const SECS_PER_SLOT = 12n;
 
 /** Anything quotes can pull override snapshots from. */
 export interface OverridesSource {
@@ -81,6 +92,7 @@ export function parseOverridesMessage(raw: unknown): OverridesSnapshot {
 
   return {
     blockNumber: parseBlockNumber(message["blockNumber"] ?? message["block_number"]),
+    slot: parseBlockNumber(message["slot"]),
     timestampNs:
       typeof message["timestamp"] === "number" ? BigInt(message["timestamp"]) : undefined,
     perPamm,
@@ -239,6 +251,7 @@ export class OverridesWsSource extends WsSource<OverridesSnapshot> implements Ov
     const frame = parseOverridesMessage(JSON.parse(data));
     Object.assign(this.snapshot.perPamm, frame.perPamm);
     if (frame.blockNumber !== undefined) this.snapshot.blockNumber = frame.blockNumber;
+    if (frame.slot !== undefined) this.snapshot.slot = frame.slot;
     if (frame.timestampNs !== undefined) this.snapshot.timestampNs = frame.timestampNs;
   }
 
