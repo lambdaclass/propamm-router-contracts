@@ -40,6 +40,13 @@ pub const BEBOP_DEFAULT_SLOT: H256 = H256(hex!(
     "3ca381a3d43d4e593578057c4abe441ad9df02f080defd17d2b6e6190cdcd936"
 ));
 
+/// Mainnet beacon-chain genesis time and slot length. The canonical timestamp
+/// of a block is `genesis + slot*12`; venues check `block.timestamp` against the
+/// state they pushed, so quote sims must pin this slot-derived time (not the
+/// frame's emit time). Matches Titan's reference `quoter.py`.
+pub const BEACON_GENESIS_TS: u64 = 1_606_824_023;
+pub const SECS_PER_SLOT: u64 = 12;
+
 /// Storage slot diffs for one contract: slot → value.
 pub type SlotDiffs = HashMap<H256, U256>;
 /// Per-contract slot diffs: contract address → slots.
@@ -50,10 +57,24 @@ pub type ContractDiffs = HashMap<Address, SlotDiffs>;
 pub struct OverridesSnapshot {
     /// Block the overrides were generated against.
     pub block_number: Option<u64>,
+    /// Beacon-chain slot the overrides were generated against.
+    pub slot: Option<u64>,
     /// Generation time in nanoseconds since epoch.
     pub timestamp_ns: Option<u64>,
     /// pAMM address → contract address → slot diffs.
     pub per_pamm: HashMap<Address, ContractDiffs>,
+}
+
+impl OverridesSnapshot {
+    /// Canonical block time (seconds) from the beacon slot; emit timestamp as
+    /// fallback. Venues validate `block.timestamp` against the state they
+    /// pushed, which is keyed to the slot, not to the frame's emit time.
+    pub fn block_time_secs(&self) -> Option<u64> {
+        match self.slot {
+            Some(slot) => Some(BEACON_GENESIS_TS + slot * SECS_PER_SLOT),
+            None => self.timestamp_ns.map(|ns| ns / 1_000_000_000),
+        }
+    }
 }
 
 /// Anything quotes can pull override snapshots from.
@@ -95,6 +116,7 @@ pub fn parse_overrides_message(raw: &Value) -> Result<OverridesSnapshot> {
             .get("blockNumber")
             .or_else(|| object.get("block_number"))
             .and_then(parse_block_number),
+        slot: object.get("slot").and_then(parse_block_number),
         timestamp_ns: object.get("timestamp").and_then(Value::as_u64),
         per_pamm,
     })
@@ -309,6 +331,9 @@ impl WsHandler for OverridesWsHandler {
         if frame.block_number.is_some() {
             s.block_number = frame.block_number;
         }
+        if frame.slot.is_some() {
+            s.slot = frame.slot;
+        }
         if frame.timestamp_ns.is_some() {
             s.timestamp_ns = frame.timestamp_ns;
         }
@@ -424,6 +449,7 @@ mod tests {
         per_pamm.insert(pamm, contracts);
         OverridesSnapshot {
             block_number,
+            slot: None,
             timestamp_ns: None,
             per_pamm,
         }
@@ -453,7 +479,7 @@ mod tests {
             r#"{{
                 "blockNumber": 24285034,
                 "timestamp": 1700000000000000000,
-                "slot": "meta-key-ignored",
+                "slot": 11833333,
                 "{pamm}": {{ "stateOverride": {{
                     "{contract}": {{ "stateDiff": {{ "0x1": "0x2a" }} }}
                 }} }}
@@ -463,6 +489,9 @@ mod tests {
         let snapshot = parse_overrides_message(&message).unwrap();
 
         assert_eq!(snapshot.block_number, Some(24_285_034));
+        assert_eq!(snapshot.slot, Some(11_833_333));
+        // Canonical block time is genesis + slot*12, not the emit timestamp.
+        assert_eq!(snapshot.block_time_secs(), Some(1_748_824_019));
         assert_eq!(snapshot.timestamp_ns, Some(1_700_000_000_000_000_000));
         assert_eq!(snapshot.per_pamm.len(), 1);
         let pamm = parse_address(pamm).unwrap();

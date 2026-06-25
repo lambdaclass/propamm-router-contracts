@@ -504,7 +504,8 @@ impl PropAmmRouter {
             state: Some(state),
             block: Some(BlockOverrideSet {
                 number: snapshot.block_number,
-                time: snapshot.timestamp_ns.map(|ns| ns / 1_000_000_000),
+                // Canonical slot time (genesis + slot*12); emit time as fallback.
+                time: snapshot.block_time_secs(),
                 ..Default::default()
             }),
         })
