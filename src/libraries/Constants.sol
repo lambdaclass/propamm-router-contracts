@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.35;
+
 // Mainnet token addresses for the default per-pair fallback tiers seeded by
 // `initialize` (see `_seedDefaultPairFees`). Mainnet-specific by design: on
 // other chains these point at the wrong tokens, which is harmless — they are
