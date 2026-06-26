@@ -6,6 +6,9 @@ on:
       - main
     paths:
       - "sdk/docs/**"
+      - "sdk/python/CHANGELOG.md"
+      - "sdk/rust/CHANGELOG.md"
+      - "sdk/typescript/CHANGELOG.md"
   workflow_dispatch:
 
 permissions:
