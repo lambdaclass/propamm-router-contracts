@@ -369,6 +369,7 @@ mod tests {
     /// not bind: self-call internals, UUPS/AccessManaged plumbing.
     const OMITTED_FUNCTIONS: &[&str] = &[
         "_dispatchVenue(address,address,address,uint256,uint256,address,uint256,uint256)",
+        "_quoteVenueUnchecked(address,address,address,uint256)",
         "initialize(address,address,address)",
         "proxiableUUID()",
         "upgradeToAndCall(address,bytes)",
