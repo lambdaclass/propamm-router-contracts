@@ -1433,11 +1433,6 @@
   },
   {
     "type": "error",
-    "name": "TokenOutBalanceDecreased",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "UUPSUnauthorizedCallContext",
     "inputs": []
   },
