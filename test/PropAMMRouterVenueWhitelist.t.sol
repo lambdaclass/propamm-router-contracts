@@ -10,7 +10,6 @@ import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockSwapRouter02} from "./mocks/MockSwapRouter02.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
 import {MockPropAMMExactOut} from "./mocks/MockPropAMMExactOut.sol";
-import {BEBOP_ROUTER} from "../src/interfaces/IBebopRouter.sol";
 import "../src/libraries/Errors.sol";
 
 contract PropAMMRouterVenueWhitelistTest is Test {
@@ -23,6 +22,7 @@ contract PropAMMRouterVenueWhitelistTest is Test {
 
     address constant FERMI_ROUTER = 0x5979458912F80B96d30D4220af8E2e4925A33320;
     address constant KIPSELI_PAMM = 0x71e790dd841c8A9061487cb3E78C288E75cE0B3d;
+    address constant BEBOP_ROUTER = 0xdB13ad0fcD134E9c48f2fDaEa8f6751a0F5349ca;
 
     address internal owner = address(this);
     address internal stranger = address(0xBEEF);

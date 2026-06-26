@@ -83,7 +83,7 @@ ROUTER_FNS = {
 
 # Quote/transfer selectors (4-byte).
 SEL_QUOTE_VENUE = "0x221ee81f"   # quoteVenueV1(address,address,address,uint256)
-SEL_QUOTE = "0xb6466384"         # quote(address,address,uint256) (IPropAMM/Bebop)
+SEL_QUOTE = "0xb6466384"         # quote(address,address,uint256) (IPropAMM)
 SEL_QUOTE_AMOUNTS = "0x300aa47f"  # quoteAmounts(address,address,int256) (Fermi builtin)
 SEL_TRANSFER = "0xa9059cbb"      # transfer(address,uint256)
 SEL_TRANSFER_FROM = "0x23b872dd"  # transferFrom(address,address,uint256)

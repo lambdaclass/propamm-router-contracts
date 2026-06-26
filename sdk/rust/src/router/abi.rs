@@ -131,7 +131,6 @@ const ERROR_SIGNATURES: &[&str] = &[
     "InsufficientOutput(uint256,uint256)",
     "Expired()",
     "NoQuotesAvailable()",
-    "TokenOutBalanceDecreased()",
     "InvalidFallbackFee(uint24)",
     "ZeroAddress()",
     "ArrayLengthMismatch()",
