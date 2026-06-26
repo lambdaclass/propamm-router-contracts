@@ -362,7 +362,7 @@ contract PropAMMRouter is
         return (amountOut, fallbackSwapRouter);
     }
 
-    /// @notice Executes a swap on a venue with funds already held by this contract.
+    /// @notice Executes a swap on a venue, sourcing `tokenIn` from `payer`.
     /// @dev Reverts `UnknownVenue` for non-whitelisted addresses, or
     /// bubbles up the underlying propAMM router's revert.
     /// @param venue The venue to route the swap through.
@@ -371,6 +371,8 @@ contract PropAMMRouter is
     /// @param amountIn The exact amount of `tokenIn` to sell.
     /// @param amountOutMin The minimum acceptable amount of `tokenOut`; an
     /// under-fill below this triggers a revert here so the fallback engages.
+    /// @param payer Account `tokenIn` is taken from: the router (`address(this)`)
+    /// commonly for wrapped ETH, otherwise the caller.
     /// @param recipient The address that will receive `tokenOut`.
     /// @param deadline Unix timestamp after which the swap is no longer valid;
     /// @param prevTokenOutBalance `recipient`'s `tokenOut` balance snapshotted
