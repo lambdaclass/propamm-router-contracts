@@ -110,13 +110,7 @@ contract PropAMMRouterEthTest is Test {
         // `deadVenue` has no code, so `_dispatchVenue` reverts (the WETH
         // safeTransfer to it rolls back) and `_coreSwap` engages the fallback.
         (uint256 amountOut, address executedVenue) = router.swapViaVenueV1{value: AMOUNT_IN}(
-            address(deadVenue),
-            ETH_SENTINEL,
-            address(tokenOut),
-            AMOUNT_IN,
-            AMOUNT_IN,
-            recipient,
-            block.timestamp + 1
+            address(deadVenue), ETH_SENTINEL, address(tokenOut), AMOUNT_IN, AMOUNT_IN, recipient, block.timestamp + 1
         );
 
         assertEq(executedVenue, address(fallbackRouter), "should fall back to Uniswap");
