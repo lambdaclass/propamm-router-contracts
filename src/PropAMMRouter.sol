@@ -14,7 +14,6 @@ import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/Pau
 import {IPropAMMRouter} from "./interfaces/IPropAMMRouter.sol";
 import {IPropAMM} from "./interfaces/IPropAMM.sol";
 import {IWETH} from "./interfaces/IWETH.sol";
-import {BEBOP_ROUTER, IBebopRouter} from "./interfaces/IBebopRouter.sol";
 import {UniV3Router} from "./libraries/UniV3Router.sol";
 import {FrontendFees} from "./libraries/FrontendFees.sol";
 import {ETH_SENTINEL, USDC, USDT, WETH} from "./libraries/Constants.sol";
@@ -367,7 +366,6 @@ contract PropAMMRouter is
     /// under-fill below this triggers a revert here so the fallback engages.
     /// @param recipient The address that will receive `tokenOut`.
     /// @param deadline Unix timestamp after which the swap is no longer valid;
-    /// only honored by venues that enforce it (e.g. Bebop).
     /// @param prevTokenOutBalance `recipient`'s `tokenOut` balance snapshotted
     /// by `_coreSwap` before this call, passed through so the delivered delta
     /// can be computed without re-reading the pre-balance.
@@ -389,34 +387,12 @@ contract PropAMMRouter is
         // `_coreSwap` engages the Uniswap fallback.
         require(isWhitelistedVenue(venue), UnknownVenue());
 
-        if (venue == BEBOP_ROUTER) {
-            uint256 balanceTokenOutBefore = IERC20(tokenOut).balanceOf(address(this));
-
-            IERC20(tokenIn).forceApprove(BEBOP_ROUTER, amountIn);
-            IBebopRouter(BEBOP_ROUTER).swap(tokenIn, tokenOut, amountIn, amountOutMin, deadline);
-
-            // Prevent later transfers if token was partially pulled
-            IERC20(tokenIn).forceApprove(BEBOP_ROUTER, 0);
-
-            // Bebop's swap function has no `recipient` argument, it
-            // delivers `tokenOut` to `msg.sender`, which here is this
-            // router, so it is required to transfer the received tokens
-            // to the actual recipient
-            uint256 balanceTokenOut = IERC20(tokenOut).balanceOf(address(this));
-            require(balanceTokenOut >= balanceTokenOutBefore, TokenOutBalanceDecreased());
-            uint256 received = balanceTokenOut - balanceTokenOutBefore;
-            if (received > 0 && recipient != address(this)) {
-                IERC20(tokenOut).safeTransfer(recipient, received);
-            }
-        } else {
-            // Any other whitelisted venue speaks the common `IPropAMM` interface.
-            // Push-payment model: transfer `tokenIn` first, then let the venue
-            // consume it and deliver `tokenOut` straight to `recipient`. A revert
-            // (or an under-delivery caught below) rolls back this transfer via the
-            // `_coreSwap` self-call `try/catch` and engages the Uniswap fallback.
-            IERC20(tokenIn).safeTransfer(venue, amountIn);
-            IPropAMM(venue).swap(tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
-        }
+        // Push-payment model: transfer `tokenIn` first, then let the venue
+        // consume it and deliver `tokenOut` straight to `recipient`. A revert
+        // (or an under-delivery caught below) rolls back this transfer via the
+        // `_coreSwap` self-call `try/catch` and engages the Uniswap fallback.
+        IERC20(tokenIn).safeTransfer(venue, amountIn);
+        IPropAMM(venue).swap(tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
 
         amountOut = IERC20(tokenOut).balanceOf(recipient) - prevTokenOutBalance;
         require(amountOut >= amountOutMin, InsufficientOutput(amountOutMin, amountOut));
@@ -506,10 +482,7 @@ contract PropAMMRouter is
         if (venue == fallbackSwapRouter) {
             amountOut =
                 UniV3Router.quoteExactIn(tokenIn, tokenOut, resolvedFee(tokenIn, tokenOut), amount, fallbackQuoter);
-        } else if (venue == BEBOP_ROUTER) {
-            amountOut = IBebopRouter(BEBOP_ROUTER).quote(tokenIn, tokenOut, amount);
         } else {
-            // Any other whitelisted venue speaks the common `IPropAMM` interface.
             amountOut = IPropAMM(venue).quote(tokenIn, tokenOut, amount);
         }
     }
@@ -721,8 +694,7 @@ contract PropAMMRouter is
     /// (and quote) through it — including as an auto-selection candidate in
     /// `swapV1` / `quoteV1`, which iterate the whitelist.
     /// @dev Access-controlled via the AccessManager authority. Reverts `ZeroAddress` if `venue` is zero, or
-    /// `VenueAlreadyWhitelisted` if it is already listed. Other than the
-    /// built-in propAMMs Bebop, (which use their bespoke interface), a venue is expected
+    /// `VenueAlreadyWhitelisted` if it is already listed. A venue is expected
     /// to implement the common `IPropAMM` interface. Listing an address that does
     /// not (an EOA, the wrong contract, a not-yet-deployed adapter) is not a
     /// foot-gun: its `quote`/`swap` calls revert, so it is skipped by selection
