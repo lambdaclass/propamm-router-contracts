@@ -299,14 +299,15 @@ contract PropAMMRouter is
         require(block.timestamp <= deadline, Expired());
 
         address tokenIn_ = tokenIn;
+        address payer = msg.sender;
         if (tokenIn == ETH_SENTINEL) {
             // If tokenIn is ETH, we wrap it and use WETH as the tokenIn for swap
             require(msg.value == amountIn, InvalidValue(amountIn, msg.value));
             IWETH(WETH).deposit{value: msg.value}();
             tokenIn_ = WETH;
+            payer = address(this);
         } else {
             require(msg.value == 0, InvalidValue(0, msg.value));
-            IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
         }
 
         address tokenOut_ = tokenOut;
@@ -322,7 +323,7 @@ contract PropAMMRouter is
 
         if (venue != fallbackSwapRouter) {
             try this._dispatchVenue(
-                venue, tokenIn_, tokenOut_, amountIn, amountOutMin, recipient_, deadline, prevTokenOutBalance
+                venue, tokenIn_, tokenOut_, amountIn, amountOutMin, payer, recipient_, deadline, prevTokenOutBalance
             ) returns (
                 uint256 amountOut_
             ) {
@@ -336,6 +337,9 @@ contract PropAMMRouter is
             }
         }
 
+        if (tokenIn != ETH_SENTINEL) {
+            IERC20(tokenIn_).safeTransferFrom(msg.sender, address(this), amountIn);
+        }
         UniV3Router.swapExactIn(
             tokenIn_,
             tokenOut_,
@@ -377,6 +381,7 @@ contract PropAMMRouter is
         address tokenOut,
         uint256 amountIn,
         uint256 amountOutMin,
+        address payer,
         address recipient,
         uint256 deadline,
         uint256 prevTokenOutBalance
@@ -391,7 +396,11 @@ contract PropAMMRouter is
         // consume it and deliver `tokenOut` straight to `recipient`. A revert
         // (or an under-delivery caught below) rolls back this transfer via the
         // `_coreSwap` self-call `try/catch` and engages the Uniswap fallback.
-        IERC20(tokenIn).safeTransfer(venue, amountIn);
+        if (payer == address(this)) {
+            IERC20(tokenIn).safeTransfer(venue, amountIn);
+        } else {
+            IERC20(tokenIn).safeTransferFrom(payer, venue, amountIn);
+        }
         IPropAMM(venue).swap(tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
 
         amountOut = IERC20(tokenOut).balanceOf(recipient) - prevTokenOutBalance;
