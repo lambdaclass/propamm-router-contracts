@@ -482,16 +482,38 @@ contract PropAMMRouter is
         returns (uint256 amountOut, address quotedVenue)
     {
         require(_isVenue(venue), UnknownVenue());
+        quotedVenue = venue;
+        amountOut = _quoteVenue(venue, tokenIn, tokenOut, amount);
+    }
 
+    /// @notice Quotes `venue` without the `_isVenue` whitelist gate. Self-only.
+    /// @param venue The venue to quote (trusted to be a whitelisted propAMM or
+    /// the fallback by the self-caller).
+    /// @param tokenIn The address of the token being sold.
+    /// @param tokenOut The address of the token being bought.
+    /// @param amount The exact amount of `tokenIn` to quote against.
+    /// @return amountOut The amount of `tokenOut` the venue would produce.
+    function _quoteVenueUnchecked(address venue, address tokenIn, address tokenOut, uint256 amount)
+        external
+        returns (uint256 amountOut)
+    {
+        require(msg.sender == address(this), OnlySelf());
+        amountOut = _quoteVenue(venue, tokenIn, tokenOut, amount);
+    }
+
+    /// @dev Shared quote body for `quoteVenueV1` (whitelist-gated) and
+    /// `_quoteVenueUnchecked` (self-only). Resolves the ETH sentinel to WETH and
+    /// dispatches to the fallback quoter, Bebop, or the common `IPropAMM` interface.
+    function _quoteVenue(address venue, address tokenIn, address tokenOut, uint256 amount)
+        private
+        returns (uint256 amountOut)
+    {
         if (tokenIn == ETH_SENTINEL) {
             tokenIn = WETH;
         }
         if (tokenOut == ETH_SENTINEL) {
             tokenOut = WETH;
         }
-
-        // The asked venue. Kept for retro-compatibility.
-        quotedVenue = venue;
 
         if (venue == fallbackSwapRouter) {
             amountOut =
@@ -543,9 +565,7 @@ contract PropAMMRouter is
         uint256 venueCount = whitelistedVenueCount();
         for (uint256 i = 0; i < venueCount; i++) {
             address candidate = whitelistedVenueAt(i);
-            try this.quoteVenueV1(candidate, tokenIn, tokenOut, amount) returns (
-                uint256 amountOut, address _quotedVenue
-            ) {
+            try this._quoteVenueUnchecked(candidate, tokenIn, tokenOut, amount) returns (uint256 amountOut) {
                 if (amountOut > bestQuote) {
                     bestQuote = amountOut;
                     venue = candidate;
@@ -557,9 +577,7 @@ contract PropAMMRouter is
         // `venue` is `fallbackSwapRouter`, which `_coreSwap` (via `swapV1`)
         // treats as the Uniswap fallback. Callers may also name that address
         // directly through `swapViaVenueV1` / `quoteVenueV1`.
-        try this.quoteVenueV1(fallbackSwapRouter, tokenIn, tokenOut, amount) returns (
-            uint256 amountOut, address _quotedVenue
-        ) {
+        try this._quoteVenueUnchecked(fallbackSwapRouter, tokenIn, tokenOut, amount) returns (uint256 amountOut) {
             if (amountOut > bestQuote) {
                 bestQuote = amountOut;
                 venue = fallbackSwapRouter;
