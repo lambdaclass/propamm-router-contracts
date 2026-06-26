@@ -337,6 +337,9 @@ contract PropAMMRouter is
             }
         }
 
+        // Uniswap is pull-based, so the router needs to pull the tokens from the sender.
+        // If the input token is ETH, it was already wrapped and the router already
+        // has the WETH.
         if (tokenIn != ETH_SENTINEL) {
             IERC20(tokenIn_).safeTransferFrom(msg.sender, address(this), amountIn);
         }
