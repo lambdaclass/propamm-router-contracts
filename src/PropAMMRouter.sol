@@ -540,6 +540,40 @@ contract PropAMMRouter is
         }
     }
 
+    /// @notice Finds the venue offering the best `tokenOut` for `amount` of
+    /// `tokenIn` across the whitelisted propAMMs and the fallback.
+    /// @dev Iterates the live venue whitelist (`_whitelistedVenues`), so venues
+    /// added or removed via `addVenue` / `removeVenue` are reflected without a
+    /// contract upgrade.
+    /// Each venue is queried in its own `try/catch` so a reverting venue —
+    /// including one listed ahead of its interface — is simply skipped. Returns
+    /// `(0, fallbackSwapRouter)` when nothing can be priced — callers that need a
+    /// hard failure (e.g. `quoteV1`) check the zero quote; `swapV1` instead lets
+    /// `_coreSwap` route the `fallbackSwapRouter` to the fallback. The returned
+    /// `venue` is either a whitelisted propAMM or `fallbackSwapRouter`.
+    /// @param tokenIn The address of the token being sold.
+    /// @param tokenOut The address of the token being bought.
+    /// @param amount The exact amount of `tokenIn` to quote against.
+    /// @return bestQuote The best `tokenOut` amount found across all venues.
+    /// @return venue The venue that produced `bestQuote`.
+    function _pickBestVenue(address tokenIn, address tokenOut, uint256 amount)
+        internal
+        returns (uint256 bestQuote, address venue)
+    {
+        (bestQuote, venue) = _pickBestPropAMM(tokenIn, tokenOut, amount);
+
+        address fallbackRouter = fallbackSwapRouter;
+        if (venue == address(0)) {
+            venue = fallbackRouter;
+        }
+        try this._quoteVenueUnchecked(fallbackRouter, tokenIn, tokenOut, amount) returns (uint256 amountOut) {
+            if (amountOut > bestQuote) {
+                bestQuote = amountOut;
+                venue = fallbackRouter;
+            }
+        } catch {}
+    }
+
     /// @notice Finds the whitelisted propAMM offering the best `tokenOut` for
     /// `amount` of `tokenIn`.
     /// @dev Iterates the live venue whitelist (`_whitelistedVenues`), so venues
@@ -569,37 +603,6 @@ contract PropAMMRouter is
                 }
             } catch {}
         }
-    }
-
-    /// @notice Finds the venue offering the best `tokenOut` for `amount` of
-    /// `tokenIn` across the whitelisted propAMMs and the Uniswap fallback.
-    /// @dev Delegates to `_pickBestPropAMM` for the propAMMs, then compares the
-    /// Uniswap fallback (defaulting to it when no propAMM could be priced). Returns
-    /// `(0, fallbackSwapRouter)` when nothing can be priced — `quoteV1` checks the
-    /// zero quote for a hard failure. Used only by `quoteV1`, which runs off-chain
-    /// (`eth_call`) where the Uniswap quote is free; the swap entrypoints use
-    /// `_pickBestPropAMM` to skip the expensive on-chain Uniswap quote.
-    /// @param tokenIn The address of the token being sold.
-    /// @param tokenOut The address of the token being bought.
-    /// @param amount The exact amount of `tokenIn` to quote against.
-    /// @return bestQuote The best `tokenOut` amount found across all venues.
-    /// @return venue The venue that produced `bestQuote`.
-    function _pickBestVenue(address tokenIn, address tokenOut, uint256 amount)
-        internal
-        returns (uint256 bestQuote, address venue)
-    {
-        (bestQuote, venue) = _pickBestPropAMM(tokenIn, tokenOut, amount);
-
-        address fallbackRouter = fallbackSwapRouter;
-        if (venue == address(0)) {
-            venue = fallbackRouter;
-        }
-        try this._quoteVenueUnchecked(fallbackRouter, tokenIn, tokenOut, amount) returns (uint256 amountOut) {
-            if (amountOut > bestQuote) {
-                bestQuote = amountOut;
-                venue = fallbackRouter;
-            }
-        } catch {}
     }
 
     /// @notice Finds the venue offering the best `tokenOut` for `amount` of
