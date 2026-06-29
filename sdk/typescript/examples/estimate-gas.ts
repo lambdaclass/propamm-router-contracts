@@ -1,27 +1,20 @@
 /**
- * Show the gas gap a swap's route can hide, via `eth_simulateV1` (the only
- * estimator that can override `block.timestamp`, which a pAMM validates against
- * its pushed state). Estimates three routes against one Titan override snapshot,
- * all pinned to its block + slot timestamp:
+ * Show, per pAMM (Fermi and Kipseli), how the gas and executed venue of a
+ * `swapViaVenueV1` change under three state overrides — via `eth_simulateV1`,
+ * the only estimator that can override `block.timestamp` (which a pAMM validates
+ * against its pushed state). All runs force the same venue and pin one Titan
+ * snapshot's block + slot timestamp; only the override differs:
  *
- *   1. live          — no override; mainnet state prices the live route
- *   2. pAMM route    — the SDK's real pAMM overrides + the venue `quote` picked
- *                      forced (`venues: [venue]`), pricing the cheap pAMM path
- *   3. fallback route — `toDisablingStateOverride` zeroes the pAMM price slots
- *                      so the router drops to Uniswap V3 — the worst case
- *
- * The gap between (2) and (3) is the under-estimation the SDK's worst-case gas
- * pinning closes: `quote` sees the cheap pAMM route, but if that pAMM is
- * unavailable at execution the tx pays the fallback's (much higher) gas.
+ *   no overrides       — none; the venue can't price, so the router falls back
+ *   overrides          — the SDK's real pAMM overrides, making the venue priceable
+ *   modified overrides — `toDisablingStateOverride` zeroes the price slots, so
+ *                        the router drops to the Uniswap V3 fallback
  *
  *   pnpm build
  *   node examples/estimate-gas.ts
  *
  * Override with RPC_URL / PRIVATE_KEY / ROUTER_ADDRESS. `amountOutMin` is 0 so
  * the estimate never reverts on slippage regardless of which route it prices.
- * Route 2 forces the venue because on public nodes `eth_simulateV1` doesn't
- * apply the timestamp override the way `eth_call` does, so auto-selection
- * (`swapV1`) would let the pAMM lose `_pickBestVenue` and fall back (see below).
  */
 import { ContractClient } from "propamm/client";
 import { PropAmmRouter, type SwapOptions } from "propamm/router";
@@ -33,6 +26,7 @@ import {
   toStateOverride,
   type OverridesSnapshot,
 } from "propamm/overrides";
+import { BEBOP, FERMI, KIPSELI } from "propamm/common/pamms";
 import { ETH_SENTINEL, USDC } from "propamm/common/tokens";
 import { deadlineIn, parseEther } from "propamm/common/helpers";
 import { anvil } from "propamm/common/chains";
@@ -58,22 +52,18 @@ const account = privateKeyToAccount(PRIVATE_KEY);
 const client = ContractClient.fromRpc({ rpcUrl: RPC_URL, chain: anvil, account });
 const router = new PropAmmRouter(client, ROUTER_ADDRESS);
 
-const amountIn = parseEther("1");
+const amountIn = parseEther("0.1");
 
 // One snapshot drives BOTH the quote and the estimate overrides — they must
 // agree, or the estimate prices a venue the override doesn't actually cover.
 const snapshot = await new OverridesRpcSource().getOverrides();
+// Zero out Bebop: drop any pushed Bebop entry so `bebopDefault` zeroes its
+// registry slot — a stale on-chain Bebop price can't win a quote it can't fill.
+delete snapshot.perPamm[BEBOP.toLowerCase() as Address];
 const pammOverride = toStateOverride(snapshot);
 const bn = snapshot.blockNumber;
 const ts = blockTime(snapshot);
 console.log(`pAMM overrides: ${pammOverride.length} contract(s) @ block ${bn ?? "latest"}`);
-
-const fallbackRouter = await router.fallbackSwapRouter();
-const { amountOut, venue } = await router.quote(ETH_SENTINEL, USDC, amountIn, {
-  overrides: snapshot,
-});
-const viaPamm = venue.toLowerCase() !== fallbackRouter.toLowerCase();
-console.log(`quote: 1 ETH -> ${amountOut} USDC via ${venue} ${viaPamm ? "(pAMM)" : "(fallback)"}`);
 
 const params = {
   tokenIn: ETH_SENTINEL,
@@ -89,64 +79,40 @@ const params = {
 // override below (it targets the account, the route overrides target venues).
 const balanceOverride: StateOverride = [{ address: account.address, balance: parseEther("2") }];
 
-async function estimate(
-  label: string,
-  opts: SwapOptions,
-  routeOverride?: StateOverride,
-  blockNumber?: bigint,
-  blockTimestamp?: bigint,
-) {
-  const stateOverride = [...balanceOverride, ...(routeOverride ?? [])];
-  try {
-    const gas = await router.estimateGasWithStateOverride(
-      params,
-      opts,
-      stateOverride,
-      blockNumber,
-      blockTimestamp,
-    );
-    console.log(`${label}: ${gas} gas`);
-    return gas;
-  } catch (err) {
-    console.log(`${label}: estimate reverted (${(err as Error).message.split("\n")[0]})`);
-    return undefined;
-  }
-}
+// The three simulations: same venue set + block context, only the state
+// override differs — isolating the override's effect on gas and executed venue.
+const SIMULATIONS = [
+  { name: "no overrides      ", override: undefined as StateOverride | undefined },
+  { name: "overrides         ", override: pammOverride },
+  { name: "modified overrides", override: toDisablingStateOverride(snapshot) },
+];
 
-// All estimates pin the snapshot's block + slot-derived timestamp (so a pAMM,
-// which validates `block.timestamp` against the state it pushed, is priceable)
-// and route through the `eth_simulateV1` estimator — `eth_estimateGas` can't
-// override the timestamp.
-//
-// Route 2 FORCES the venue `quote` picked (`venues: [venue]` → swapViaVenueV1)
-// to price the pAMM path. Auto-selection (`swapV1`) is unreliable here: on
-// public nodes `eth_simulateV1` doesn't apply `blockOverrides.time` the way
-// `eth_call` does, so the pAMM's quote loses inside `_pickBestVenue` and the
-// router falls back — even though `quote` (an `eth_call`) selects it. Forcing
-// the venue still executes the pAMM swap, which is what we want to price.
-await estimate("1. live           ", {}, undefined, bn, ts);
-const pamm = await estimate("2. pAMM route     ", { venues: [venue] }, pammOverride, bn, ts);
-// Disable the pAMMs by zeroing their pushed price slots — state only, no code
-// override — so the router drops to the Uniswap V3 fallback.
-const fallback = await estimate(
-  "3. fallback route ",
-  {},
-  toDisablingStateOverride(snapshot),
-  bn,
-  ts,
-);
+const VENUES: { name: string; address: Address }[] = [
+  { name: "Fermi", address: FERMI },
+  { name: "Kipseli", address: KIPSELI },
+];
 
-if (pamm !== undefined && fallback !== undefined) {
-  const diff = fallback - pamm;
-  const pct =
-    pamm === BigInt(0) ? "n/a" : `${(Number((diff * BigInt(10000)) / pamm) / 100).toFixed(2)}%`;
-  console.log(
-    `\nunder-estimation risk (fallback - pAMM): ${diff >= BigInt(0) ? "+" : ""}${diff} gas (${pct})`,
-  );
-  if (diff === BigInt(0)) {
-    console.log(
-      "(pAMM route == fallback: the pAMM wasn't selected at estimate time — the override\n" +
-        " snapshot may be stale relative to the node's head, or the venue isn't priceable.)",
-    );
+// Force the requested venue (`venues: [address]` → swapViaVenueV1) and route
+// through `eth_simulateV1` (pinned block + timestamp), since `eth_estimateGas`
+// can't override `block.timestamp`, which a pAMM validates against pushed state.
+for (const { name, address } of VENUES) {
+  console.log(`\n${name} (${address})`);
+  const opts: SwapOptions = { venues: [address] };
+  for (const sim of SIMULATIONS) {
+    const stateOverride = [...balanceOverride, ...(sim.override ?? [])];
+    try {
+      const { gas, executedVenue } = await router.estimateGasWithStateOverride(
+        params,
+        opts,
+        stateOverride,
+        bn,
+        ts,
+      );
+      console.log(
+        `Simulation: ${sim.name} - gas consumed: ${gas} - requested venue: ${address} - executed venue: ${executedVenue}`,
+      );
+    } catch (err) {
+      console.log(`Simulation: ${sim.name} - reverted (${(err as Error).message.split("\n")[0]})`);
+    }
   }
 }

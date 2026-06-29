@@ -17,6 +17,7 @@ import {
   type BaseError,
   type Chain,
   type Hash,
+  type Hex,
   type PublicClient,
   type StateOverride,
   type WalletClient,
@@ -271,9 +272,10 @@ export class ContractClient {
    * directly in one round-trip, no binary search. Use this to price a route
    * gated on block context (e.g. a pAMM that validates `block.timestamp`
    * against pushed state). Requires a node that implements `eth_simulateV1`.
-   * Throws (decoded) if the simulated call reverts.
+   * Throws (decoded) if the simulated call reverts. Returns the gas used plus
+   * the call's raw return data, for the caller to decode.
    */
-  async estimateGasViaSimulateV1(params: CallParams): Promise<bigint> {
+  async estimateGasViaSimulateV1(params: CallParams): Promise<{ gasUsed: bigint; data: Hex }> {
     const calldata = encodeFunctionData({
       abi: params.abi,
       functionName: params.functionName,
@@ -305,7 +307,7 @@ export class ContractClient {
     if (call.status !== "success") {
       throw call.error ?? new Error(`eth_simulateV1: ${params.functionName} reverted`);
     }
-    return call.gasUsed;
+    return { gasUsed: call.gasUsed, data: call.data };
   }
 
   /** Wait until a transaction is mined and return its receipt. */

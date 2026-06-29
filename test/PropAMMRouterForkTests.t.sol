@@ -95,6 +95,68 @@ contract PropAMMRouterForkTests is Test {
         _runSwapViaVenueV1(UNISWAP_ROUTER_02);
     }
 
+    /// @dev Swaps via Fermi but DELIBERATELY skips `_updateFermiPrice()`, so
+    /// Fermi's stale lane makes its `_dispatchVenue` self-call revert inside
+    /// `_coreSwap`; the `try/catch` then engages the Uniswap V3 fallback. This is
+    /// the gas worst case the SDK over-estimates against: a quote may pick the
+    /// cheaper Fermi fill, but if Fermi is unavailable at execution the tx pays
+    /// for the failed Fermi attempt PLUS the full Uniswap fallback.
+    ///
+    /// Measures both the direct Uniswap-fallback gas and the
+    /// Fermi-attempt-then-fallback gas, and logs the difference — the
+    /// failed-dispatch overhead a naive (Fermi-priced) estimate would miss.
+    function test_swapViaVenueV1Fermi_fallsBackToUniswap() public {
+        // The Uniswap V3 SwapRouter02 is the router's fallback venue. Measure
+        // each path from the SAME state (snapshot + revert) so the first swap
+        // can't warm storage for the second and skew the comparison.
+        address fallbackRouter = UNISWAP_ROUTER_02;
+        uint256 snap = vm.snapshotState();
+
+        // P2: venue == Fermi, but its stale lane reverts the dispatch, so the
+        // router falls back to Uniswap V3 after paying for the failed attempt.
+        (uint256 outFermi, uint256 gasFermi) = _swapExpectingFallback(NEW_FERMI_ROUTER, fallbackRouter);
+
+        vm.revertToState(snap);
+
+        // P1: venue == fallback, so `_coreSwap` skips the dispatch and goes
+        // straight to Uniswap V3.
+        (uint256 outFallback, uint256 gasFallback) = _swapExpectingFallback(fallbackRouter, fallbackRouter);
+
+        emit log_named_uint("gas: Uniswap fallback only             ", gasFallback);
+        emit log_named_uint("gas: Fermi attempt -> Uniswap fallback ", gasFermi);
+        emit log_named_uint("gas: failed-Fermi-dispatch overhead    ", gasFermi - gasFallback);
+
+        assertGt(outFallback, 0, "fallback produced no output");
+        assertGt(outFermi, 0, "fermi-fallback produced no output");
+        assertGt(gasFermi, gasFallback, "Fermi attempt should cost more than the direct fallback");
+    }
+
+    function test_swapViaVenueV1Kipseli_fallsBackToUniswap() public {
+        // The Uniswap V3 SwapRouter02 is the router's fallback venue. Measure
+        // each path from the SAME state (snapshot + revert) so the first swap
+        // can't warm storage for the second and skew the comparison.
+        address fallbackRouter = UNISWAP_ROUTER_02;
+        uint256 snap = vm.snapshotState();
+
+        // P2: venue == Fermi, but its stale lane reverts the dispatch, so the
+        // router falls back to Uniswap V3 after paying for the failed attempt.
+        (uint256 outKipseli, uint256 gasKipseli) = _swapExpectingFallback(NEW_KIPSELI_PAMM, fallbackRouter);
+
+        vm.revertToState(snap);
+
+        // P1: venue == fallback, so `_coreSwap` skips the dispatch and goes
+        // straight to Uniswap V3.
+        (uint256 outFallback, uint256 gasFallback) = _swapExpectingFallback(fallbackRouter, fallbackRouter);
+
+        emit log_named_uint("gas: Uniswap fallback only             ", gasFallback);
+        emit log_named_uint("gas: Kipseli attempt -> Uniswap fallback ", gasKipseli);
+        emit log_named_uint("gas: failed-Kipseli-dispatch overhead    ", gasKipseli - gasFallback);
+
+        assertGt(outFallback, 0, "fallback produced no output");
+        assertGt(outKipseli, 0, "Kipseli-fallback produced no output");
+        assertGt(gasKipseli, gasFallback, "Kipseli attempt should cost more than the direct fallback");
+    }
+
     /// @dev Republishes the new Kipseli PAMM's pricing lane in the
     /// `PrioUpdateRegistry`, mirroring the mainnet updater transaction so the
     /// venue can quote and settle the swap. Authorizes this test contract as the
@@ -188,6 +250,31 @@ contract PropAMMRouterForkTests is Test {
 
         assertTrue(executedVenue == venue, "wrong execution venue for pinned swapViaVenueV1");
         assertGe(amountOut, amountOutMin, "amountOut < amountOutMin");
+        assertEq(amountOut, IERC20(WETH).balanceOf(taker) - wethBalanceBeforeSwap, "amountOut != delta");
+    }
+
+    /// @dev Runs `swapViaVenueV1(venue, ...)` with no min-out, measuring the gas
+    /// the router call consumes (via `gasleft()`) and asserting it settled
+    /// through `expectedVenue`. Uses `amountOutMin = 0` so the swap can't revert
+    /// on slippage regardless of which route ultimately fills it.
+    /// @return amountOut WETH delivered to the taker.
+    /// @return gasUsed Gas consumed by the `swapViaVenueV1` call.
+    function _swapExpectingFallback(address venue, address expectedVenue)
+        internal
+        returns (uint256 amountOut, uint256 gasUsed)
+    {
+        uint256 amountOutMin = 0;
+        uint256 deadline = block.timestamp + 120;
+        uint256 wethBalanceBeforeSwap = IERC20(WETH).balanceOf(taker);
+
+        vm.prank(taker);
+        uint256 gasBefore = gasleft();
+        address executedVenue;
+        (amountOut, executedVenue) =
+            router.swapViaVenueV1(venue, USDC, WETH, AMOUNT_IN, amountOutMin, taker, deadline);
+        gasUsed = gasBefore - gasleft();
+
+        assertEq(executedVenue, expectedVenue, "unexpected execution venue");
         assertEq(amountOut, IERC20(WETH).balanceOf(taker) - wethBalanceBeforeSwap, "amountOut != delta");
     }
 }

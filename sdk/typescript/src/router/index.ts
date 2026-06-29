@@ -5,6 +5,7 @@
  */
 
 import {
+  decodeFunctionResult,
   erc20Abi,
   isAddressEqual,
   parseEventLogs,
@@ -53,6 +54,18 @@ export interface FrontendFee {
 export interface Quote {
   amountOut: bigint;
   venue: Address;
+}
+
+/**
+ * Result of `estimateGasWithStateOverride`. `amountOut`/`executedVenue` are
+ * present only on the `eth_simulateV1` path (when a `blockTimestamp` is given),
+ * decoded from the swap's return value; the `eth_estimateGas` path yields a gas
+ * limit only.
+ */
+export interface SwapGasEstimate {
+  gas: bigint;
+  amountOut?: bigint;
+  executedVenue?: Address;
 }
 
 export interface PropAmmRouterOptions {
@@ -216,7 +229,7 @@ export class PropAmmRouter {
     stateOverride?: StateOverride,
     blockNumber?: bigint,
     blockTimestamp?: bigint,
-  ): Promise<bigint> {
+  ): Promise<SwapGasEstimate> {
     const { functionName, args, value } = this.buildSwapCall(params, opts);
     const base = {
       address: this.address,
@@ -227,9 +240,24 @@ export class PropAmmRouter {
       stateOverride,
       blockNumber,
     };
-    return blockTimestamp === undefined
-      ? this.client.estimateGas(base)
-      : this.client.estimateGasViaSimulateV1({ ...base, blockTimestamp });
+
+    // The `eth_estimateGas` path can't return the swap's output (only a gas
+    // limit); the `eth_simulateV1` path returns the call's data, which we decode
+    // into `(amountOut, executedVenue)`.
+    if (blockTimestamp === undefined) {
+      return { gas: await this.client.estimateGas(base) };
+    }
+    const { gasUsed, data } = await this.client.estimateGasViaSimulateV1({
+      ...base,
+      blockTimestamp,
+    });
+    const decoded = decodeFunctionResult({ abi: propAmmRouterAbi, functionName, data });
+    // Swap selectors return `(amountOut, executedVenue)`; the fee-on-venue
+    // selector returns just `amountOut` (executedVenue undefined).
+    const [amountOut, executedVenue] = (Array.isArray(decoded)
+      ? decoded
+      : [decoded]) as unknown as [bigint, Address?];
+    return { gas: gasUsed, amountOut, executedVenue };
   }
 
   /** Same as `swap`, but waits for the receipt and decodes the result. */
@@ -352,10 +380,7 @@ export class PropAmmRouter {
    * `value` (set only for native-ETH input). Shared by `swap` and
    * `estimateGasWithStateOverride`.
    */
-  private buildSwapCall(
-    params: SwapParams,
-    opts: SwapOptions,
-  ): { functionName: string; args: readonly unknown[]; value: bigint | undefined } {
+  private buildSwapCall(params: SwapParams, opts: SwapOptions) {
     const { mode, venueArgs } = venueDispatch(opts.venues);
     const fee = opts.frontendFee;
     if (fee) validateFee(fee);
