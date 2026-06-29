@@ -122,11 +122,10 @@ contract PropAMMRouter is
 
     /// @inheritdoc IPropAMMRouter
     /// @dev Picks the best-quoting whitelisted propAMM via `_pickBestPropAMM`, then
-    /// executes through `_coreSwap`. Routes straight to the Uniswap fallback — without
-    /// paying for an on-chain Uniswap quote — when no propAMM can be priced or the best
-    /// propAMM quote is below `amountOutMin`. Quotes are advisory: `_coreSwap` enforces
-    /// `amountOutMin` against the delivered balance delta and engages the Uniswap
-    /// fallback there if the chosen propAMM under-delivers.
+    /// executes through `_coreSwap`. Routes straight to the Uniswap fallback when 
+    /// no propAMM can be priced or the best propAMM quote is below `amountOutMin`. 
+    /// Quotes are advisory: `_coreSwap` enforces `amountOutMin` against the delivered
+    /// balance delta and engages the Uniswap fallback there if the chosen propAMM under-delivers.
     function swapV1(
         address tokenIn,
         address tokenOut,
