@@ -9,15 +9,15 @@ import {IPropAMMRouter} from "../src/interfaces/IPropAMMRouter.sol";
 import {PropAMMRouter} from "../src/PropAMMRouter.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockFeeOnTransferERC20} from "./mocks/MockFeeOnTransferERC20.sol";
-import {MockV3SwapRouter} from "./mocks/MockV3SwapRouter.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
+import {UniV3PoolFixture} from "./helpers/UniV3PoolFixture.sol";
 import "../src/libraries/Errors.sol";
 import {FrontendFees} from "../src/libraries/FrontendFees.sol";
+import {UNISWAP_V3_FALLBACK} from "../src/libraries/Constants.sol";
 
-contract PropAMMRouterFeeTest is Test {
+contract PropAMMRouterFeeTest is UniV3PoolFixture {
     PropAMMRouter router;
     AccessManager manager;
-    MockV3SwapRouter swapRouter;
     MockQuoterV2 quoter;
     MockERC20 tokenIn;
     MockERC20 tokenOut;
@@ -32,25 +32,24 @@ contract PropAMMRouterFeeTest is Test {
         // (e.g. pause) directly.
         manager = new AccessManager(owner);
         PropAMMRouter impl = new PropAMMRouter();
-        bytes memory data =
-            abi.encodeCall(PropAMMRouter.initialize, (address(swapRouter), address(quoter), address(manager)));
+        bytes memory data = abi.encodeCall(PropAMMRouter.initialize, (address(quoter), address(manager)));
         return PropAMMRouter(payable(address(new ERC1967Proxy(address(impl), data))));
     }
 
     function setUp() public {
-        swapRouter = new MockV3SwapRouter();
         quoter = new MockQuoterV2();
         tokenIn = new MockERC20("In", "IN");
         tokenOut = new MockERC20("Out", "OUT");
         router = _deployRouter();
     }
 
-    // Funds the user with tokenIn, pre-funds the mock swap router with tokenOut to
-    // deliver, sets the quote + delivered amount, and approves the router.
+    // Funds the user with tokenIn, seeds the Uniswap V3 fallback pool (default
+    // 0.30% tier for these fresh tokens) with tokenOut to deliver, sets the quote,
+    // and approves the router.
     function _prepare(uint256 amountIn, uint256 delivered) internal {
         tokenIn.mint(user, amountIn);
-        tokenOut.mint(address(swapRouter), delivered);
-        swapRouter.setAmountOut(delivered);
+        address pool = _seedUniV3Pool(address(tokenIn), address(tokenOut), 3000, delivered);
+        tokenOut.mint(pool, delivered);
         quoter.setQuote(delivered);
         vm.prank(user);
         tokenIn.approve(address(router), amountIn);
@@ -74,7 +73,7 @@ contract PropAMMRouterFeeTest is Test {
         );
 
         assertEq(amountOut, expectedNet);
-        assertEq(executedVenue, address(swapRouter));
+        assertEq(executedVenue, UNISWAP_V3_FALLBACK);
         assertEq(tokenOut.balanceOf(user), expectedNet);
         assertEq(tokenOut.balanceOf(feeRecipient), expectedFee);
         assertEq(tokenOut.balanceOf(address(router)), 0);
@@ -87,7 +86,7 @@ contract PropAMMRouterFeeTest is Test {
 
         vm.prank(user);
         uint256 amountOut = router.swapViaVenueWithFeeV1(
-            address(swapRouter), // the fallback venue address is a valid venue
+            UNISWAP_V3_FALLBACK, // the fallback venue address is a valid venue
             address(tokenIn),
             address(tokenOut),
             1_000e18,
@@ -109,7 +108,7 @@ contract PropAMMRouterFeeTest is Test {
         uint256 expectedNet = 1_000e18 - expectedFee;
 
         address[] memory venues = new address[](1);
-        venues[0] = address(swapRouter); // the fallback venue, only priceable candidate
+        venues[0] = UNISWAP_V3_FALLBACK; // the fallback venue, only priceable candidate
 
         vm.prank(user);
         (uint256 amountOut, address executedVenue) = router.swapViaSelectedVenuesWithFeeV1(
@@ -124,7 +123,7 @@ contract PropAMMRouterFeeTest is Test {
         );
 
         assertEq(amountOut, expectedNet);
-        assertEq(executedVenue, address(swapRouter), "executed venue mismatch");
+        assertEq(executedVenue, UNISWAP_V3_FALLBACK, "executed venue mismatch");
         assertEq(tokenOut.balanceOf(user), expectedNet);
         assertEq(tokenOut.balanceOf(feeRecipient), expectedFee);
     }
@@ -260,8 +259,8 @@ contract PropAMMRouterFeeTest is Test {
         MockFeeOnTransferERC20 fotOut = new MockFeeOnTransferERC20("FOT", "FOT", 100); // 1%
         uint256 routerOut = 1_000e18;
         tokenIn.mint(user, 1_000e18);
-        fotOut.mint(address(swapRouter), routerOut);
-        swapRouter.setAmountOut(routerOut);
+        address pool = _seedUniV3Pool(address(tokenIn), address(fotOut), 3000, routerOut);
+        fotOut.mint(pool, routerOut);
         quoter.setQuote(routerOut);
         vm.prank(user);
         tokenIn.approve(address(router), 1_000e18);
@@ -324,7 +323,7 @@ contract PropAMMRouterFeeTest is Test {
 
         vm.expectEmit(true, true, true, true, address(router));
         emit IPropAMMRouter.Swapped(
-            user, address(tokenIn), address(tokenOut), 1_000e18, 990e18, user, address(swapRouter)
+            user, address(tokenIn), address(tokenOut), 1_000e18, 990e18, user, UNISWAP_V3_FALLBACK
         );
 
         vm.prank(user);
@@ -332,7 +331,7 @@ contract PropAMMRouterFeeTest is Test {
             router.swapV1(address(tokenIn), address(tokenOut), 1_000e18, 990e18, user, block.timestamp + 1);
 
         assertEq(amountOut, 990e18);
-        assertEq(executedVenue, address(swapRouter));
+        assertEq(executedVenue, UNISWAP_V3_FALLBACK);
         assertEq(tokenOut.balanceOf(user), 990e18);
         assertEq(tokenOut.balanceOf(address(router)), 0);
     }
@@ -350,7 +349,7 @@ contract PropAMMRouterFeeTest is Test {
 
         vm.expectEmit(true, true, true, true, address(router));
         emit IPropAMMRouter.Swapped(
-            user, address(tokenIn), address(tokenOut), 1_000e18, 990e18, user, address(swapRouter)
+            user, address(tokenIn), address(tokenOut), 1_000e18, 990e18, user, UNISWAP_V3_FALLBACK
         );
 
         vm.prank(user);
@@ -359,7 +358,7 @@ contract PropAMMRouterFeeTest is Test {
         );
 
         assertEq(amountOut, 990e18);
-        assertEq(executedVenue, address(swapRouter)); // routed to the Uniswap fallback, not reverted
+        assertEq(executedVenue, UNISWAP_V3_FALLBACK); // routed to the Uniswap fallback, not reverted
         assertEq(tokenOut.balanceOf(user), 990e18);
         assertEq(tokenOut.balanceOf(address(router)), 0);
     }

@@ -8,10 +8,10 @@ import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManage
 import {PropAMMRouter} from "../src/PropAMMRouter.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockWETH} from "./mocks/MockWETH.sol";
-import {MockV3SwapRouter} from "./mocks/MockV3SwapRouter.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
 import {MockPropAMMExactOut} from "./mocks/MockPropAMMExactOut.sol";
-import {ETH_SENTINEL, WETH} from "../src/libraries/Constants.sol";
+import {UniV3PoolFixture} from "./helpers/UniV3PoolFixture.sol";
+import {ETH_SENTINEL, WETH, UNISWAP_V3_FALLBACK} from "../src/libraries/Constants.sol";
 import "../src/libraries/Errors.sol";
 
 /// @title PropAMMRouterEthTest
@@ -22,10 +22,9 @@ import "../src/libraries/Errors.sol";
 /// direct-pull model and an ERC-20-only suite never caught it.
 /// @dev The router hard-codes the mainnet WETH address, so a `MockWETH` is
 /// `vm.etch`ed there to make `IWETH(WETH).deposit` work off-fork.
-contract PropAMMRouterEthTest is Test {
+contract PropAMMRouterEthTest is UniV3PoolFixture {
     PropAMMRouter internal router;
     AccessManager internal manager;
-    MockV3SwapRouter internal fallbackRouter; // pulls tokenIn, so router ends clean
     MockQuoterV2 internal quoter;
     MockPropAMMExactOut internal venue; // 1:1 priced propAMM
     MockERC20 internal tokenOut;
@@ -41,7 +40,6 @@ contract PropAMMRouterEthTest is Test {
     uint256 internal constant AMOUNT_IN = 1 ether;
 
     function setUp() public {
-        fallbackRouter = new MockV3SwapRouter();
         quoter = new MockQuoterV2();
         tokenOut = new MockERC20("TokenOut", "TOUT");
 
@@ -50,8 +48,7 @@ contract PropAMMRouterEthTest is Test {
 
         manager = new AccessManager(owner);
         PropAMMRouter impl = new PropAMMRouter();
-        bytes memory initData =
-            abi.encodeCall(PropAMMRouter.initialize, (address(fallbackRouter), address(quoter), address(manager)));
+        bytes memory initData = abi.encodeCall(PropAMMRouter.initialize, (address(quoter), address(manager)));
         router = PropAMMRouter(payable(address(new ERC1967Proxy(address(impl), initData))));
 
         // A 1:1 propAMM, funded with tokenOut liquidity to deliver.
@@ -60,9 +57,10 @@ contract PropAMMRouterEthTest is Test {
         router.addVenue(address(venue));
         router.addVenue(deadVenue);
 
-        // Pre-fund + arm the fallback so it can deliver tokenOut when engaged.
-        tokenOut.mint(address(fallbackRouter), 1_000 ether);
-        fallbackRouter.setAmountOut(AMOUNT_IN);
+        // Seed + fund the Uniswap V3 fallback pool (WETH->tokenOut at the default
+        // 0.30% tier) so it can deliver when the fallback engages.
+        address fallbackPool = _seedUniV3Pool(WETH, address(tokenOut), 3000, AMOUNT_IN);
+        tokenOut.mint(fallbackPool, AMOUNT_IN);
         quoter.setQuote(AMOUNT_IN);
 
         vm.deal(address(this), 100 ether);
@@ -87,16 +85,10 @@ contract PropAMMRouterEthTest is Test {
 
     function test_ethIn_fallback_direct() public {
         (uint256 amountOut, address executedVenue) = router.swapViaVenueV1{value: AMOUNT_IN}(
-            address(fallbackRouter),
-            ETH_SENTINEL,
-            address(tokenOut),
-            AMOUNT_IN,
-            AMOUNT_IN,
-            recipient,
-            block.timestamp + 1
+            UNISWAP_V3_FALLBACK, ETH_SENTINEL, address(tokenOut), AMOUNT_IN, AMOUNT_IN, recipient, block.timestamp + 1
         );
 
-        assertEq(executedVenue, address(fallbackRouter), "should execute on the fallback");
+        assertEq(executedVenue, UNISWAP_V3_FALLBACK, "should execute on the fallback");
         assertEq(amountOut, AMOUNT_IN, "fallback delivered amount");
         assertEq(tokenOut.balanceOf(recipient), AMOUNT_IN, "recipient tokenOut");
         // The fallback pulled the wrapped WETH (it transferFroms); router clean.
@@ -113,7 +105,7 @@ contract PropAMMRouterEthTest is Test {
             address(deadVenue), ETH_SENTINEL, address(tokenOut), AMOUNT_IN, AMOUNT_IN, recipient, block.timestamp + 1
         );
 
-        assertEq(executedVenue, address(fallbackRouter), "should fall back to Uniswap");
+        assertEq(executedVenue, UNISWAP_V3_FALLBACK, "should fall back to Uniswap");
         assertEq(amountOut, AMOUNT_IN, "fallback delivered amount");
         assertEq(tokenOut.balanceOf(recipient), AMOUNT_IN, "recipient tokenOut");
         assertEq(IERC20(WETH).balanceOf(address(deadVenue)), 0, "rolled-back transfer left nothing at dead venue");

@@ -7,14 +7,15 @@ import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManage
 import {IAccessManaged} from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import {PropAMMRouter} from "../src/PropAMMRouter.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
-import {MockSwapRouter02} from "./mocks/MockSwapRouter02.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
+import {UniV3PoolFixture} from "./helpers/UniV3PoolFixture.sol";
+import {MockUniV3Pool} from "./mocks/MockUniV3Pool.sol";
+import {UNISWAP_V3_FALLBACK} from "../src/libraries/Constants.sol";
 import "../src/libraries/Errors.sol";
 
-contract PropAMMRouterPairFeeTest is Test {
+contract PropAMMRouterPairFeeTest is UniV3PoolFixture {
     PropAMMRouter internal router;
     AccessManager internal manager;
-    MockSwapRouter02 internal mockRouter;
     MockQuoterV2 internal mockQuoter;
     MockERC20 internal tokenIn;
     MockERC20 internal tokenOut;
@@ -34,7 +35,6 @@ contract PropAMMRouterPairFeeTest is Test {
     event PairFeeUpdated(address indexed tokenA, address indexed tokenB, uint24 oldFee, uint24 newFee);
 
     function setUp() public {
-        mockRouter = new MockSwapRouter02();
         mockQuoter = new MockQuoterV2();
         tokenIn = new MockERC20("TokenIn", "TIN");
         tokenOut = new MockERC20("TokenOut", "TOUT");
@@ -45,8 +45,7 @@ contract PropAMMRouterPairFeeTest is Test {
         manager = new AccessManager(owner);
 
         PropAMMRouter impl = new PropAMMRouter();
-        bytes memory initData =
-            abi.encodeCall(PropAMMRouter.initialize, (address(mockRouter), address(mockQuoter), address(manager)));
+        bytes memory initData = abi.encodeCall(PropAMMRouter.initialize, (address(mockQuoter), address(manager)));
         ERC1967Proxy proxy = new ERC1967Proxy(address(impl), initData);
         router = PropAMMRouter(payable(address(proxy)));
     }
@@ -54,7 +53,6 @@ contract PropAMMRouterPairFeeTest is Test {
     function test_setUp_initialized() public view {
         assertEq(router.authority(), address(manager));
         assertEq(router.fallbackFee(), 3000);
-        assertEq(router.fallbackSwapRouter(), address(mockRouter));
         assertEq(router.fallbackQuoter(), address(mockQuoter));
     }
 
@@ -225,61 +223,83 @@ contract PropAMMRouterPairFeeTest is Test {
     function test_quoteUniswapV3_usesResolvedFee() public {
         mockQuoter.setAmountOut(1000);
         router.setPairFee(address(tokenIn), address(tokenOut), 100);
-        router.quoteVenueV1(router.fallbackSwapRouter(), address(tokenIn), address(tokenOut), 1 ether);
+        router.quoteVenueV1(UNISWAP_V3_FALLBACK, address(tokenIn), address(tokenOut), 1 ether);
         assertEq(mockQuoter.lastFee(), 100);
     }
 
     function test_quoteUniswapV3_unconfigured_usesGlobalFee() public {
         mockQuoter.setAmountOut(1000);
-        router.quoteVenueV1(router.fallbackSwapRouter(), address(tokenIn), address(tokenOut), 1 ether);
+        router.quoteVenueV1(UNISWAP_V3_FALLBACK, address(tokenIn), address(tokenOut), 1 ether);
         assertEq(mockQuoter.lastFee(), 3000);
     }
 
     function test_quoteVenueV1_fallback_usesResolvedFee() public {
         mockQuoter.setAmountOut(1000);
         router.setPairFee(address(tokenIn), address(tokenOut), 100);
-        router.quoteVenueV1(address(mockRouter), address(tokenIn), address(tokenOut), 1 ether);
+        router.quoteVenueV1(UNISWAP_V3_FALLBACK, address(tokenIn), address(tokenOut), 1 ether);
         assertEq(mockQuoter.lastFee(), 100);
+    }
+
+    function test_swapViaFallback_overInputReverts() public {
+        // A pool that demands more `tokenIn` than the exact `amountIn` is rejected by
+        // the callback's `ExcessiveInput` guard, protecting the payer's allowance.
+        address pool = _seedUniV3Pool(address(tokenIn), address(tokenOut), 3000, 1000);
+        tokenOut.mint(pool, 1000);
+        MockUniV3Pool(pool).setExtraInputOwed(1); // owe amountIn + 1
+        tokenIn.mint(address(this), 1000);
+        tokenIn.approve(address(router), 1000);
+
+        vm.expectRevert(ExcessiveInput.selector);
+        router.swapViaVenueV1(
+            UNISWAP_V3_FALLBACK, address(tokenIn), address(tokenOut), 1000, 900, recipient, block.timestamp + 1
+        );
     }
 
     function test_swapViaFallback_usesResolvedFee() public {
         router.setPairFee(address(tokenIn), address(tokenOut), 100);
-        mockRouter.setAmountOut(1000);
+        // Seed the pool ONLY at the resolved tier (100). A swap at any other tier
+        // resolves to a code-less address and reverts, so a successful swap proves
+        // the 100 tier was used — the direct-pool equivalent of the old lastFee check.
+        address pool = _seedUniV3Pool(address(tokenIn), address(tokenOut), 100, 1000);
+        tokenOut.mint(pool, 1000);
         tokenIn.mint(address(this), 1000);
         tokenIn.approve(address(router), 1000);
 
         router.swapViaVenueV1(
-            address(mockRouter), address(tokenIn), address(tokenOut), 1000, 900, recipient, block.timestamp + 1
+            UNISWAP_V3_FALLBACK, address(tokenIn), address(tokenOut), 1000, 900, recipient, block.timestamp + 1
         );
 
-        assertEq(mockRouter.lastFee(), 100);
         assertEq(tokenOut.balanceOf(recipient), 1000);
     }
 
     function test_swapViaFallback_unconfigured_usesGlobalFee() public {
-        mockRouter.setAmountOut(1000);
+        // No pair fee set: seed only at the global default (3000), so a successful
+        // swap proves the global tier was used.
+        address pool = _seedUniV3Pool(address(tokenIn), address(tokenOut), 3000, 1000);
+        tokenOut.mint(pool, 1000);
         tokenIn.mint(address(this), 1000);
         tokenIn.approve(address(router), 1000);
 
         router.swapViaVenueV1(
-            address(mockRouter), address(tokenIn), address(tokenOut), 1000, 900, recipient, block.timestamp + 1
+            UNISWAP_V3_FALLBACK, address(tokenIn), address(tokenOut), 1000, 900, recipient, block.timestamp + 1
         );
 
-        assertEq(mockRouter.lastFee(), 3000);
+        assertEq(tokenOut.balanceOf(recipient), 1000);
     }
 
     function test_swapV1_fallbackWins_usesResolvedFee() public {
         router.setPairFee(address(tokenIn), address(tokenOut), 100);
         mockQuoter.setAmountOut(1000); // fallback quote wins the auction
-        mockRouter.setAmountOut(1000); // fallback execution delivers tokenOut
+        // Seed only at the resolved tier (100); a successful swap proves it was used.
+        address pool = _seedUniV3Pool(address(tokenIn), address(tokenOut), 100, 1000);
+        tokenOut.mint(pool, 1000);
         tokenIn.mint(address(this), 1000);
         tokenIn.approve(address(router), 1000);
 
         (uint256 amountOut, address executedVenue) =
             router.swapV1(address(tokenIn), address(tokenOut), 1000, 900, recipient, block.timestamp + 1);
 
-        assertEq(mockRouter.lastFee(), 100); // executed at the resolved per-pair tier
-        assertEq(executedVenue, address(mockRouter)); // fallbackSwapRouter won
+        assertEq(executedVenue, UNISWAP_V3_FALLBACK); // fallbackSwapRouter won
         assertEq(amountOut, 1000);
         assertEq(tokenOut.balanceOf(recipient), 1000);
     }

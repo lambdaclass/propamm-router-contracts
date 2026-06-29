@@ -7,15 +7,15 @@ import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManage
 import {IAccessManaged} from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import {PropAMMRouter} from "../src/PropAMMRouter.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
-import {MockSwapRouter02} from "./mocks/MockSwapRouter02.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
 import {MockPropAMMExactOut} from "./mocks/MockPropAMMExactOut.sol";
+import {UniV3PoolFixture} from "./helpers/UniV3PoolFixture.sol";
+import {UNISWAP_V3_FALLBACK} from "../src/libraries/Constants.sol";
 import "../src/libraries/Errors.sol";
 
-contract PropAMMRouterVenueWhitelistTest is Test {
+contract PropAMMRouterVenueWhitelistTest is UniV3PoolFixture {
     PropAMMRouter internal router;
     AccessManager internal manager;
-    MockSwapRouter02 internal mockRouter;
     MockQuoterV2 internal mockQuoter;
     MockERC20 internal tokenIn;
     MockERC20 internal tokenOut;
@@ -40,7 +40,6 @@ contract PropAMMRouterVenueWhitelistTest is Test {
     event VenueRemoved(address indexed venue);
 
     function setUp() public {
-        mockRouter = new MockSwapRouter02();
         mockQuoter = new MockQuoterV2();
         tokenIn = new MockERC20("TokenIn", "TIN");
         tokenOut = new MockERC20("TokenOut", "TOUT");
@@ -51,8 +50,7 @@ contract PropAMMRouterVenueWhitelistTest is Test {
         manager = new AccessManager(owner);
 
         PropAMMRouter impl = new PropAMMRouter();
-        bytes memory initData =
-            abi.encodeCall(PropAMMRouter.initialize, (address(mockRouter), address(mockQuoter), address(manager)));
+        bytes memory initData = abi.encodeCall(PropAMMRouter.initialize, (address(mockQuoter), address(manager)));
         ERC1967Proxy proxy = new ERC1967Proxy(address(impl), initData);
         router = PropAMMRouter(payable(address(proxy)));
 
@@ -70,7 +68,7 @@ contract PropAMMRouterVenueWhitelistTest is Test {
     function test_isWhitelistedVenue_fallbackNotWhitelisted() public view {
         // The Uniswap fallback is usable as a venue without being whitelisted, so
         // the propAMM getter reports it as not-whitelisted.
-        assertFalse(router.isWhitelistedVenue(address(mockRouter)));
+        assertFalse(router.isWhitelistedVenue(UNISWAP_V3_FALLBACK));
     }
 
     // --- Enumeration -------------------------------------------------------
@@ -198,7 +196,7 @@ contract PropAMMRouterVenueWhitelistTest is Test {
     function test_quoteVenueV1_fallbackQuotableWithoutWhitelist() public {
         // The fallback prices without being on the whitelist (safety net).
         mockQuoter.setAmountOut(1000);
-        (uint256 out,) = router.quoteVenueV1(address(mockRouter), address(tokenIn), address(tokenOut), 1 ether);
+        (uint256 out,) = router.quoteVenueV1(UNISWAP_V3_FALLBACK, address(tokenIn), address(tokenOut), 1 ether);
         assertEq(out, 1000);
     }
 
@@ -260,7 +258,10 @@ contract PropAMMRouterVenueWhitelistTest is Test {
         // transparently through the Uniswap fallback; the swap succeeding confirms
         // the gate opened rather than the venue itself executing.
         router.addVenue(genericVenue);
-        mockRouter.setAmountOut(1000);
+        // genericVenue has no code, so `_dispatchVenue` reverts and the swap routes
+        // through the Uniswap fallback pool (default 0.30% tier for these tokens).
+        address pool = _seedUniV3Pool(address(tokenIn), address(tokenOut), 3000, 1000);
+        tokenOut.mint(pool, 1000);
         tokenIn.mint(address(this), 1000);
         tokenIn.approve(address(router), 1000);
 

@@ -109,7 +109,6 @@ contract RouterAccessManager is AccessManager {
 
         // UPGRADER_ROLE: upgrades + fallback config (incl. per-pair fees) + rescue.
         _setTargetFunctionRole(router, UUPSUpgradeable.upgradeToAndCall.selector, UPGRADER_ROLE);
-        _setTargetFunctionRole(router, PropAMMRouter.setFallbackSwapRouter.selector, UPGRADER_ROLE);
         _setTargetFunctionRole(router, PropAMMRouter.setFallbackQuoter.selector, UPGRADER_ROLE);
         _setTargetFunctionRole(router, PropAMMRouter.setFallbackFee.selector, UPGRADER_ROLE);
         _setTargetFunctionRole(router, PropAMMRouter.setPairFee.selector, UPGRADER_ROLE);

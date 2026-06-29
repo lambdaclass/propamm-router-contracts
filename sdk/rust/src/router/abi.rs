@@ -34,7 +34,6 @@ pub const QUOTE_VENUE: &str = "quoteVenueV1(address,address,address,uint256)";
 pub const QUOTE_SELECTED_VENUES: &str = "quoteSelectedVenuesV1(address[],address,address,uint256)";
 
 // Views
-pub const FALLBACK_SWAP_ROUTER: &str = "fallbackSwapRouter()";
 pub const FALLBACK_QUOTER: &str = "fallbackQuoter()";
 pub const FALLBACK_FEE: &str = "fallbackFee()";
 pub const GET_PAIR_FEE: &str = "getPairFee(address,address)";
@@ -48,7 +47,6 @@ pub const AUTHORITY: &str = "authority()";
 
 // Administration (access-controlled via the AccessManager authority).
 // No typed bindings — encode with these and send through `ContractClient::send`.
-pub const SET_FALLBACK_SWAP_ROUTER: &str = "setFallbackSwapRouter(address)";
 pub const SET_FALLBACK_QUOTER: &str = "setFallbackQuoter(address)";
 pub const SET_FALLBACK_FEE: &str = "setFallbackFee(uint24)";
 pub const SET_PAIR_FEE: &str = "setPairFee(address,address,uint24)";
@@ -67,7 +65,6 @@ pub const ERC20_ALLOWANCE: &str = "allowance(address,address)";
 pub const SWAPPED_EVENT: &str = "Swapped(address,address,address,uint256,uint256,address,address)";
 pub const FRONTEND_FEE_CHARGED_EVENT: &str = "FrontendFeeCharged(address,address,uint256,address)";
 pub const FALLBACK_FEE_UPDATED_EVENT: &str = "FallbackFeeUpdated(uint24,uint24)";
-pub const FALLBACK_SWAP_ROUTER_UPDATED_EVENT: &str = "FallbackSwapRouterUpdated(address,address)";
 pub const FALLBACK_QUOTER_UPDATED_EVENT: &str = "FallbackQuoterUpdated(address,address)";
 pub const PAIR_FEE_UPDATED_EVENT: &str = "PairFeeUpdated(address,address,uint24,uint24)";
 pub const TOKENS_RESCUED_EVENT: &str = "TokensRescued(address,address,uint256)";
@@ -87,7 +84,6 @@ pub const FUNCTIONS: &[&str] = &[
     QUOTE,
     QUOTE_VENUE,
     QUOTE_SELECTED_VENUES,
-    FALLBACK_SWAP_ROUTER,
     FALLBACK_QUOTER,
     FALLBACK_FEE,
     GET_PAIR_FEE,
@@ -98,7 +94,6 @@ pub const FUNCTIONS: &[&str] = &[
     WHITELISTED_VENUE_AT,
     PAUSED,
     AUTHORITY,
-    SET_FALLBACK_SWAP_ROUTER,
     SET_FALLBACK_QUOTER,
     SET_FALLBACK_FEE,
     SET_PAIR_FEE,
@@ -115,7 +110,6 @@ pub const EVENTS: &[&str] = &[
     SWAPPED_EVENT,
     FRONTEND_FEE_CHARGED_EVENT,
     FALLBACK_FEE_UPDATED_EVENT,
-    FALLBACK_SWAP_ROUTER_UPDATED_EVENT,
     FALLBACK_QUOTER_UPDATED_EVENT,
     PAIR_FEE_UPDATED_EVENT,
     TOKENS_RESCUED_EVENT,
@@ -140,6 +134,8 @@ const ERROR_SIGNATURES: &[&str] = &[
     "ETHTransferFailed()",
     "UnexpectedETHSender()",
     "IdenticalTokens()",
+    "OnlyPool()",
+    "ExcessiveInput()",
     "FeeBpsTooHigh(uint16,uint16)",
     "EnforcedPause()",
 ];
@@ -328,7 +324,6 @@ mod tests {
             (QUOTE, "04f9caa2"),
             (QUOTE_VENUE, "221ee81f"),
             (QUOTE_SELECTED_VENUES, "824bfccd"),
-            (FALLBACK_SWAP_ROUTER, "2f61968b"),
             (GET_WHITELISTED_VENUES, "d7d008fc"),
             (PAUSED, "5c975abb"),
             (ADD_VENUE, "2522ed6b"),
@@ -370,7 +365,8 @@ mod tests {
     const OMITTED_FUNCTIONS: &[&str] = &[
         "_dispatchVenue(address,address,address,uint256,uint256,address,address,uint256,uint256)",
         "_quoteVenueUnchecked(address,address,address,uint256)",
-        "initialize(address,address,address)",
+        "uniswapV3SwapCallback(int256,int256,bytes)",
+        "initialize(address,address)",
         "proxiableUUID()",
         "upgradeToAndCall(address,bytes)",
         "setAuthority(address)",
@@ -401,6 +397,8 @@ mod tests {
         "InvalidInitialization()",
         "NotInitializing()",
         "ReentrancyGuardReentrantCall()",
+        "SafeCastOverflowedIntToUint(int256)",
+        "SafeCastOverflowedUintToInt(uint256)",
         "SafeERC20FailedOperation(address)",
         "UUPSUnauthorizedCallContext()",
         "UUPSUnsupportedProxiableUUID(bytes32)",

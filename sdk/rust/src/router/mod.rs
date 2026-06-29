@@ -364,11 +364,6 @@ impl PropAmmRouter {
     // Views //
     //-------//
 
-    /// The Uniswap fallback "venue" address (dynamic router configuration).
-    pub async fn fallback_swap_router(&self) -> Result<Address> {
-        self.view_address(abi::FALLBACK_SWAP_ROUTER).await
-    }
-
     pub async fn fallback_quoter(&self) -> Result<Address> {
         self.view_address(abi::FALLBACK_QUOTER).await
     }

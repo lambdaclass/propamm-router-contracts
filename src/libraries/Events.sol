@@ -5,10 +5,6 @@ pragma solidity ^0.8.35;
 /// @param oldFee The previous `fallbackFee`.
 /// @param newFee The new `fallbackFee`.
 event FallbackFeeUpdated(uint24 oldFee, uint24 newFee);
-/// @notice Emitted when an authorized account updates the fallback venue address.
-/// @param oldRouter The previous `fallbackSwapRouter`.
-/// @param newRouter The new `fallbackSwapRouter`.
-event FallbackSwapRouterUpdated(address indexed oldRouter, address indexed newRouter);
 /// @notice Emitted when an authorized account updates the fallback quoter address.
 /// @param oldQuoter The previous `fallbackQuoter`.
 /// @param newQuoter The new `fallbackQuoter`.
