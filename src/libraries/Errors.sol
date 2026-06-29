@@ -53,3 +53,7 @@ error OnlyPool();
 /// @notice Thrown when a swap's `amountIn` exceeds `int256` max and so cannot be
 /// passed to the core pool's `swap` as a signed exact-input amount.
 error AmountTooLarge();
+/// @notice Thrown when the Uniswap V3 swap callback is owed more input than the
+/// exact `amountIn` the swap specified — bounds the payer's allowance so a future
+/// exact-output change (or pool edge case) can never over-pull.
+error ExcessiveInput();

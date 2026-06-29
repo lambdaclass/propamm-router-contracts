@@ -1335,6 +1335,11 @@
   },
   {
     "type": "error",
+    "name": "ExcessiveInput",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "ExpectedPause",
     "inputs": []
   },

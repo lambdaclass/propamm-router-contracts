@@ -53,8 +53,8 @@ library UniV3Adapter {
     /// to collect `tokenIn` from `payer`, so the caller MUST implement that callback.
     ///
     /// WARNING: the `data` blob is a private ABI contract with the caller's
-    /// `uniswapV3SwapCallback`. It encodes `(tokenIn, tokenOut, fee, payer)`, and the
-    /// callback MUST `abi.decode` the identical tuple. The two halves live in
+    /// `uniswapV3SwapCallback`. It encodes `(tokenIn, tokenOut, fee, payer, amountIn)`,
+    /// and the callback MUST `abi.decode` the identical tuple. The two halves live in
     /// different files (here and `PropAMMRouter.uniswapV3SwapCallback`) — change this
     /// encode and you MUST change that decode in lockstep.
     /// @param tokenIn The token being sold.
@@ -80,7 +80,7 @@ library UniV3Adapter {
                 zeroForOne,
                 int256(amountIn),
                 zeroForOne ? MIN_SQRT_RATIO_PLUS_ONE : MAX_SQRT_RATIO_MINUS_ONE,
-                abi.encode(tokenIn, tokenOut, fee, payer)
+                abi.encode(tokenIn, tokenOut, fee, payer, amountIn)
             );
     }
 

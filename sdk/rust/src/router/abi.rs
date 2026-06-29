@@ -136,6 +136,7 @@ const ERROR_SIGNATURES: &[&str] = &[
     "IdenticalTokens()",
     "OnlyPool()",
     "AmountTooLarge()",
+    "ExcessiveInput()",
     "FeeBpsTooHigh(uint16,uint16)",
     "EnforcedPause()",
 ];

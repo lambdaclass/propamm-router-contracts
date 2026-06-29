@@ -404,21 +404,25 @@ contract PropAMMRouter is
     /// @dev Invoked by the pool mid-`swap`. NOT `nonReentrant` — it runs inside the
     /// already-guarded swap, so the pool-address check is the guard. The pool address is
     /// recomputed from the callback `data` and required to equal `msg.sender`, which
-    /// only a genuine pool satisfies.
+    /// only a genuine pool satisfies. The owed input is bounded to `amountIn`
+    /// (`ExcessiveInput`), so the payer's allowance can never be over-pulled —
+    /// belt-and-suspenders against a future exact-output change or pool edge case.
     ///
     /// WARNING: `data` is a private ABI contract with its encoder,
-    /// `UniV3Adapter.swapExactIn` (a different file). The `(tokenIn, tokenOut,
-    /// fee, payer)` tuple decoded here MUST stay in lockstep with the tuple encoded
-    /// there — change one and you MUST change the other.
+    /// `UniV3Adapter.swapExactIn` (a different file). The `(tokenIn, tokenOut, fee,
+    /// payer, amountIn)` tuple decoded here MUST stay in lockstep with the tuple
+    /// encoded there — change one and you MUST change the other.
     /// @param amount0Delta token0 owed to the pool (positive) or received (negative).
     /// @param amount1Delta token1 owed to the pool (positive) or received (negative).
-    /// @param data ABI-encoded `(tokenIn, tokenOut, fee, payer)`; see the warning above.
+    /// @param data ABI-encoded `(tokenIn, tokenOut, fee, payer, amountIn)`; see the warning above.
     function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata data) external {
-        (address tokenIn, address tokenOut, uint24 fee, address payer) =
-            abi.decode(data, (address, address, uint24, address));
+        (address tokenIn, address tokenOut, uint24 fee, address payer, uint256 amountIn) =
+            abi.decode(data, (address, address, uint24, address, uint256));
         require(msg.sender == UniV3Adapter.computePool(tokenIn, tokenOut, fee), OnlyPool());
 
         uint256 amountToPay = amount0Delta > 0 ? uint256(amount0Delta) : uint256(amount1Delta);
+        // Exact-input: the pool can never be owed more than what we specified.
+        require(amountToPay <= amountIn, ExcessiveInput());
         if (payer == address(this)) {
             IERC20(tokenIn).safeTransfer(msg.sender, amountToPay);
         } else {

@@ -9,6 +9,7 @@ import {PropAMMRouter} from "../src/PropAMMRouter.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
 import {UniV3PoolFixture} from "./helpers/UniV3PoolFixture.sol";
+import {MockUniV3Pool} from "./mocks/MockUniV3Pool.sol";
 import {UNISWAP_V3_FALLBACK} from "../src/libraries/Constants.sol";
 import "../src/libraries/Errors.sol";
 
@@ -237,6 +238,21 @@ contract PropAMMRouterPairFeeTest is UniV3PoolFixture {
         router.setPairFee(address(tokenIn), address(tokenOut), 100);
         router.quoteVenueV1(UNISWAP_V3_FALLBACK, address(tokenIn), address(tokenOut), 1 ether);
         assertEq(mockQuoter.lastFee(), 100);
+    }
+
+    function test_swapViaFallback_overInputReverts() public {
+        // A pool that demands more `tokenIn` than the exact `amountIn` is rejected by
+        // the callback's `ExcessiveInput` guard, protecting the payer's allowance.
+        address pool = _seedUniV3Pool(address(tokenIn), address(tokenOut), 3000, 1000);
+        tokenOut.mint(pool, 1000);
+        MockUniV3Pool(pool).setExtraInputOwed(1); // owe amountIn + 1
+        tokenIn.mint(address(this), 1000);
+        tokenIn.approve(address(router), 1000);
+
+        vm.expectRevert(ExcessiveInput.selector);
+        router.swapViaVenueV1(
+            UNISWAP_V3_FALLBACK, address(tokenIn), address(tokenOut), 1000, 900, recipient, block.timestamp + 1
+        );
     }
 
     function test_swapViaFallback_usesResolvedFee() public {
