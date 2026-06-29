@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.35;
 
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {IQuoterV2} from "@uniswap/v3-periphery/contracts/interfaces/IQuoterV2.sol";
 import {IUniswapV3Pool} from "../interfaces/IUniswapV3Pool.sol";
-import {AmountTooLarge} from "./Errors.sol";
 
 /// @title UniV3Adapter
 /// @notice Uniswap V3 integration helpers: derives core-pool addresses
@@ -14,6 +14,8 @@ import {AmountTooLarge} from "./Errors.sol";
 /// @dev Quotes are non-view because QuoterV2 uses revert-based simulation;
 /// call via `eth_call` (staticcall) from off-chain.
 library UniV3Adapter {
+    using SafeCast for uint256;
+
     /// @notice Uniswap V3 mainnet factory and pool init-code hash, used by
     /// `computePool` to derive a core-pool address for direct (periphery-free) swaps.
     address internal constant UNISWAP_V3_FACTORY = 0x1F98431c8aD98523631AE4a59f267346ea31F984;
@@ -72,13 +74,12 @@ library UniV3Adapter {
         address recipient,
         address payer
     ) internal {
-        require(amountIn <= uint256(type(int256).max), AmountTooLarge());
         bool zeroForOne = tokenIn < tokenOut;
         IUniswapV3Pool(computePool(tokenIn, tokenOut, fee))
             .swap(
                 recipient,
                 zeroForOne,
-                int256(amountIn),
+                amountIn.toInt256(),
                 zeroForOne ? MIN_SQRT_RATIO_PLUS_ONE : MAX_SQRT_RATIO_MINUS_ONE,
                 abi.encode(tokenIn, tokenOut, fee, payer, amountIn)
             );

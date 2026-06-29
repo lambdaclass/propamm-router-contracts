@@ -73,7 +73,6 @@ export const propAmmRouterAbi = parseAbi([
   "error UnexpectedETHSender()",
   "error IdenticalTokens()",
   "error OnlyPool()",
-  "error AmountTooLarge()",
   "error ExcessiveInput()",
   "error FeeBpsTooHigh(uint16 requested, uint16 max)",
   // From OpenZeppelin Pausable — what swaps revert with while paused.

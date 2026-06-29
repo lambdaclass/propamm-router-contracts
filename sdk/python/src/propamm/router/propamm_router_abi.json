@@ -1299,11 +1299,6 @@
   },
   {
     "type": "error",
-    "name": "AmountTooLarge",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "ArrayLengthMismatch",
     "inputs": []
   },
@@ -1446,6 +1441,28 @@
     "type": "error",
     "name": "ReentrancyGuardReentrantCall",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SafeCastOverflowedIntToUint",
+    "inputs": [
+      {
+        "name": "value",
+        "type": "int256",
+        "internalType": "int256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "SafeCastOverflowedUintToInt",
+    "inputs": [
+      {
+        "name": "value",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   },
   {
     "type": "error",
