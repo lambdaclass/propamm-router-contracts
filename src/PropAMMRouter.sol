@@ -55,13 +55,13 @@ contract PropAMMRouter is
     /// (`_isVenue`, `quoteVenueV1`, `_dispatchVenue`): a venue de-listed here is
     /// skipped by every selection path and rejected on every explicit path. As an
     /// enumerable set it is also the source of candidates iterated by
-    /// `_pickBestVenue`, so a venue added via `addVenue` is automatically
+    /// `_pickBestPropAMM`, so a venue added via `addVenue` is automatically
     /// considered by `swapV1` / `quoteV1` without a contract upgrade. The Uniswap
     /// V3 fallback (`UNISWAP_V3_FALLBACK`) is the always-available safety net and is
     /// intentionally NOT a member — it is accepted independently of this set.
     /// Seeded with the known propAMMs in `initialize` and managed (access-controlled)
     /// via `addVenue` / `removeVenue`, so its size (and thus the
-    /// `_pickBestVenue` loop bound) is trusted to stay small.
+    /// `_pickBestPropAMM` loop bound) is trusted to stay small.
     /// @dev Declared last to keep the upgradeable storage layout append-only.
     EnumerableSet.AddressSet private _whitelistedVenues;
 
@@ -117,13 +117,11 @@ contract PropAMMRouter is
     //------//
 
     /// @inheritdoc IPropAMMRouter
-    /// @dev Picks the best-quoting venue via `_pickBestVenue`, then executes
-    /// through `_coreSwap`; a `UNISWAP_V3_FALLBACK` selection (the Uniswap
-    /// fallback won, or no venue could quote) routes straight to the fallback venue.
-    /// Reverts `InsufficientOutput`
-    /// before pulling funds when the best quote is under `amountOutMin`. Quotes
-    /// are advisory, so `_coreSwap` re-checks `amountOutMin` against the
-    /// delivered balance delta.
+    /// @dev Picks the best-quoting whitelisted propAMM via `_pickBestPropAMM`, then
+    /// executes through `_coreSwap`. Routes straight to the Uniswap fallback when
+    /// no propAMM can be priced or the best propAMM quote is below `amountOutMin`.
+    /// Quotes are advisory: `_coreSwap` enforces `amountOutMin` against the delivered
+    /// balance delta and engages the Uniswap fallback there if the chosen propAMM under-delivers.
     function swapV1(
         address tokenIn,
         address tokenOut,
@@ -132,8 +130,10 @@ contract PropAMMRouter is
         address recipient,
         uint256 deadline
     ) external payable whenNotPaused nonReentrant returns (uint256 amountOut, address executedVenue) {
-        (uint256 bestQuote, address venue) = _pickBestVenue(tokenIn, tokenOut, amountIn);
-        require(bestQuote >= amountOutMin, InsufficientOutput(amountOutMin, bestQuote));
+        (uint256 bestQuote, address venue) = _pickBestPropAMM(tokenIn, tokenOut, amountIn);
+        if (venue == address(0) || bestQuote < amountOutMin) {
+            venue = UNISWAP_V3_FALLBACK;
+        }
 
         (amountOut, executedVenue) = _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
@@ -156,9 +156,10 @@ contract PropAMMRouter is
         FrontendFees._validateFee(fee);
 
         uint256 grossMin = FrontendFees._grossUp(amountOutMin, fee.bps);
-        (uint256 bestQuote, address venue) = _pickBestVenue(tokenIn, tokenOut, amountIn);
-
-        require(bestQuote >= grossMin, InsufficientOutput(grossMin, bestQuote));
+        (uint256 bestQuote, address venue) = _pickBestPropAMM(tokenIn, tokenOut, amountIn);
+        if (venue == address(0) || bestQuote < grossMin) {
+            venue = UNISWAP_V3_FALLBACK;
+        }
 
         uint256 delivered;
         (delivered, executedVenue) = _coreSwap(venue, tokenIn, tokenOut, amountIn, grossMin, address(this), deadline);
@@ -574,10 +575,39 @@ contract PropAMMRouter is
         internal
         returns (uint256 bestQuote, address venue)
     {
-        // A venue overtakes it only by quoting strictly more; if none do (or nothing can be priced at all),
-        // `venue` stays `UNISWAP_V3_FALLBACK` and `_coreSwap` routes to fallback.
-        venue = UNISWAP_V3_FALLBACK;
+        (bestQuote, venue) = _pickBestPropAMM(tokenIn, tokenOut, amount);
 
+        address fallbackRouter = UNISWAP_V3_FALLBACK;
+        if (venue == address(0)) {
+            venue = fallbackRouter;
+        }
+        try this._quoteVenueUnchecked(fallbackRouter, tokenIn, tokenOut, amount) returns (uint256 amountOut) {
+            if (amountOut > bestQuote) {
+                bestQuote = amountOut;
+                venue = fallbackRouter;
+            }
+        } catch {}
+    }
+
+    /// @notice Finds the whitelisted propAMM offering the best `tokenOut` for
+    /// `amount` of `tokenIn`.
+    /// @dev Iterates the live venue whitelist (`_whitelistedVenues`), so venues
+    /// added or removed via `addVenue` / `removeVenue` are reflected without a
+    /// contract upgrade. Each venue is queried in its own `try/catch` so a reverting
+    /// venue — including one listed ahead of its interface — is simply skipped.
+    /// Does NOT consider the Uniswap fallback: returns `(0, address(0))` when no
+    /// whitelisted propAMM can be priced, so the swap entrypoints route straight to
+    /// the fallback without paying for an on-chain Uniswap quote. `quoteV1` layers
+    /// the fallback on via `_pickBestVenue`.
+    /// @param tokenIn The address of the token being sold.
+    /// @param tokenOut The address of the token being bought.
+    /// @param amount The exact amount of `tokenIn` to quote against.
+    /// @return bestQuote The best `tokenOut` amount across the propAMMs, or 0.
+    /// @return venue The propAMM that produced `bestQuote`, or `address(0)` if none.
+    function _pickBestPropAMM(address tokenIn, address tokenOut, uint256 amount)
+        internal
+        returns (uint256 bestQuote, address venue)
+    {
         uint256 venueCount = whitelistedVenueCount();
         for (uint256 i = 0; i < venueCount; i++) {
             address candidate = whitelistedVenueAt(i);
@@ -588,17 +618,6 @@ contract PropAMMRouter is
                 }
             } catch {}
         }
-
-        // Uniswap V3 is the always-present fallback candidate: when it wins,
-        // `venue` is `UNISWAP_V3_FALLBACK`, which `_coreSwap` (via `swapV1`)
-        // treats as the Uniswap fallback. Callers may also name that address
-        // directly through `swapViaVenueV1` / `quoteVenueV1`.
-        try this._quoteVenueUnchecked(UNISWAP_V3_FALLBACK, tokenIn, tokenOut, amount) returns (uint256 amountOut) {
-            if (amountOut > bestQuote) {
-                bestQuote = amountOut;
-                venue = UNISWAP_V3_FALLBACK;
-            }
-        } catch {}
     }
 
     /// @notice Finds the venue offering the best `tokenOut` for `amount` of
