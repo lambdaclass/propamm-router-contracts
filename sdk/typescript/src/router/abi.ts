@@ -23,7 +23,6 @@ export const propAmmRouterAbi = parseAbi([
   "function quoteSelectedVenuesV1(address[] venues, address tokenIn, address tokenOut, uint256 amountIn) returns (uint256 bestAmountOut, address bestVenue)",
 
   // Views
-  "function fallbackSwapRouter() view returns (address)",
   "function fallbackQuoter() view returns (address)",
   "function fallbackFee() view returns (uint24)",
   "function getPairFee(address tokenA, address tokenB) view returns (uint24)",
@@ -37,7 +36,6 @@ export const propAmmRouterAbi = parseAbi([
 
   // Administration (access-controlled via the AccessManager authority).
   // No typed bindings — call through `ContractClient.write` with this ABI.
-  "function setFallbackSwapRouter(address newRouter)",
   "function setFallbackQuoter(address newQuoter)",
   "function setFallbackFee(uint24 fee)",
   "function setPairFee(address tokenA, address tokenB, uint24 fee)",
@@ -52,7 +50,6 @@ export const propAmmRouterAbi = parseAbi([
   "event Swapped(address indexed sender, address indexed tokenIn, address indexed tokenOut, uint256 amountIn, uint256 amountOut, address recipient, address marketMaker)",
   "event FrontendFeeCharged(address indexed feeRecipient, address indexed tokenOut, uint256 feeAmount, address indexed payer)",
   "event FallbackFeeUpdated(uint24 oldFee, uint24 newFee)",
-  "event FallbackSwapRouterUpdated(address indexed oldRouter, address indexed newRouter)",
   "event FallbackQuoterUpdated(address indexed oldQuoter, address indexed newQuoter)",
   "event PairFeeUpdated(address indexed tokenA, address indexed tokenB, uint24 oldFee, uint24 newFee)",
   "event TokensRescued(address indexed token, address indexed to, uint256 amount)",

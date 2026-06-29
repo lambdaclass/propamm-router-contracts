@@ -7,15 +7,14 @@ import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManage
 import {IAccessManaged} from "@openzeppelin/contracts/access/manager/IAccessManaged.sol";
 import {PropAMMRouter} from "../src/PropAMMRouter.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
-import {MockSwapRouter02} from "./mocks/MockSwapRouter02.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
 import {UniV3PoolFixture} from "./helpers/UniV3PoolFixture.sol";
+import {UNISWAP_V3_FALLBACK} from "../src/libraries/Constants.sol";
 import "../src/libraries/Errors.sol";
 
 contract PropAMMRouterPairFeeTest is UniV3PoolFixture {
     PropAMMRouter internal router;
     AccessManager internal manager;
-    MockSwapRouter02 internal mockRouter;
     MockQuoterV2 internal mockQuoter;
     MockERC20 internal tokenIn;
     MockERC20 internal tokenOut;
@@ -35,7 +34,6 @@ contract PropAMMRouterPairFeeTest is UniV3PoolFixture {
     event PairFeeUpdated(address indexed tokenA, address indexed tokenB, uint24 oldFee, uint24 newFee);
 
     function setUp() public {
-        mockRouter = new MockSwapRouter02();
         mockQuoter = new MockQuoterV2();
         tokenIn = new MockERC20("TokenIn", "TIN");
         tokenOut = new MockERC20("TokenOut", "TOUT");
@@ -46,8 +44,7 @@ contract PropAMMRouterPairFeeTest is UniV3PoolFixture {
         manager = new AccessManager(owner);
 
         PropAMMRouter impl = new PropAMMRouter();
-        bytes memory initData =
-            abi.encodeCall(PropAMMRouter.initialize, (address(mockRouter), address(mockQuoter), address(manager)));
+        bytes memory initData = abi.encodeCall(PropAMMRouter.initialize, (address(mockQuoter), address(manager)));
         ERC1967Proxy proxy = new ERC1967Proxy(address(impl), initData);
         router = PropAMMRouter(payable(address(proxy)));
     }
@@ -55,7 +52,6 @@ contract PropAMMRouterPairFeeTest is UniV3PoolFixture {
     function test_setUp_initialized() public view {
         assertEq(router.authority(), address(manager));
         assertEq(router.fallbackFee(), 3000);
-        assertEq(router.fallbackSwapRouter(), address(mockRouter));
         assertEq(router.fallbackQuoter(), address(mockQuoter));
     }
 
@@ -226,20 +222,20 @@ contract PropAMMRouterPairFeeTest is UniV3PoolFixture {
     function test_quoteUniswapV3_usesResolvedFee() public {
         mockQuoter.setAmountOut(1000);
         router.setPairFee(address(tokenIn), address(tokenOut), 100);
-        router.quoteVenueV1(router.fallbackSwapRouter(), address(tokenIn), address(tokenOut), 1 ether);
+        router.quoteVenueV1(UNISWAP_V3_FALLBACK, address(tokenIn), address(tokenOut), 1 ether);
         assertEq(mockQuoter.lastFee(), 100);
     }
 
     function test_quoteUniswapV3_unconfigured_usesGlobalFee() public {
         mockQuoter.setAmountOut(1000);
-        router.quoteVenueV1(router.fallbackSwapRouter(), address(tokenIn), address(tokenOut), 1 ether);
+        router.quoteVenueV1(UNISWAP_V3_FALLBACK, address(tokenIn), address(tokenOut), 1 ether);
         assertEq(mockQuoter.lastFee(), 3000);
     }
 
     function test_quoteVenueV1_fallback_usesResolvedFee() public {
         mockQuoter.setAmountOut(1000);
         router.setPairFee(address(tokenIn), address(tokenOut), 100);
-        router.quoteVenueV1(address(mockRouter), address(tokenIn), address(tokenOut), 1 ether);
+        router.quoteVenueV1(UNISWAP_V3_FALLBACK, address(tokenIn), address(tokenOut), 1 ether);
         assertEq(mockQuoter.lastFee(), 100);
     }
 
@@ -254,7 +250,7 @@ contract PropAMMRouterPairFeeTest is UniV3PoolFixture {
         tokenIn.approve(address(router), 1000);
 
         router.swapViaVenueV1(
-            address(mockRouter), address(tokenIn), address(tokenOut), 1000, 900, recipient, block.timestamp + 1
+            UNISWAP_V3_FALLBACK, address(tokenIn), address(tokenOut), 1000, 900, recipient, block.timestamp + 1
         );
 
         assertEq(tokenOut.balanceOf(recipient), 1000);
@@ -269,7 +265,7 @@ contract PropAMMRouterPairFeeTest is UniV3PoolFixture {
         tokenIn.approve(address(router), 1000);
 
         router.swapViaVenueV1(
-            address(mockRouter), address(tokenIn), address(tokenOut), 1000, 900, recipient, block.timestamp + 1
+            UNISWAP_V3_FALLBACK, address(tokenIn), address(tokenOut), 1000, 900, recipient, block.timestamp + 1
         );
 
         assertEq(tokenOut.balanceOf(recipient), 1000);
@@ -287,7 +283,7 @@ contract PropAMMRouterPairFeeTest is UniV3PoolFixture {
         (uint256 amountOut, address executedVenue) =
             router.swapV1(address(tokenIn), address(tokenOut), 1000, 900, recipient, block.timestamp + 1);
 
-        assertEq(executedVenue, address(mockRouter)); // fallbackSwapRouter won
+        assertEq(executedVenue, UNISWAP_V3_FALLBACK); // fallbackSwapRouter won
         assertEq(amountOut, 1000);
         assertEq(tokenOut.balanceOf(recipient), 1000);
     }

@@ -15,7 +15,7 @@
 import { ContractClient } from "propamm/client";
 import { PropAmmRouter } from "propamm/router";
 import { ETH_SENTINEL, USDC } from "propamm/common/tokens";
-import { PAMMS } from "propamm/common/pamms";
+import { PAMMS, UNISWAP_V3_FALLBACK } from "propamm/common/pamms";
 import { formatUnits, parseUnits } from "propamm/common/helpers";
 import { anvil } from "propamm/common/chains";
 import type { Address } from "propamm";
@@ -39,12 +39,12 @@ const INTERVAL_MS = 5000;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Map venue addresses back to readable names. PAMMS covers the pAMM venues;
-// the Uniswap V3 fallback isn't in it, so fetch its address once and label it.
+// the Uniswap V3 fallback isn't in it — it's the fixed UNISWAP_V3_FALLBACK sentinel.
 const venueNames: Record<string, string> = {};
 for (const [name, address] of Object.entries(PAMMS)) {
   venueNames[address.toLowerCase()] = name;
 }
-venueNames[(await router.fallbackSwapRouter()).toLowerCase()] = "uniswap";
+venueNames[UNISWAP_V3_FALLBACK.toLowerCase()] = "uniswap";
 // Additional deployments not covered by PAMMS.
 venueNames["0xb1076fE3AB5e28005C7c323Bac5AC06a680d452e".toLowerCase()] = "fermi";
 venueNames["0x042b83b4043019D8f2a83C77240a50793FF7420d".toLowerCase()] = "fermi";

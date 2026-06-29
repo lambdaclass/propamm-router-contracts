@@ -23,8 +23,7 @@ import "./libraries/Events.sol";
 /// @title PropAMMRouter
 /// @notice Routes single-hop swaps to a propAMM and falls back through a fallback
 /// venue if the chosen venue reverts.
-/// @dev Designed to live behind a UUPS proxy. The fallback path is wired at
-/// initialization via `fallbackSwapRouter` and `fallbackQuoter`
+/// @dev Designed to live behind a UUPS proxy.
 contract PropAMMRouter is
     IPropAMMRouter,
     ReentrancyGuardTransient,
@@ -36,9 +35,12 @@ contract PropAMMRouter is
     using SafeERC20 for IERC20;
     using EnumerableSet for EnumerableSet.AddressSet;
 
-    /// @notice Fallback venue address.
-    /// Settable (access-controlled) via `setFallbackSwapRouter`.
-    address public fallbackSwapRouter;
+    /// @notice Deprecated. Vestigial storage retained only to preserve the
+    /// upgradeable layout (slot 0) — no longer read, written, or exposed. The
+    /// Uniswap V3 fallback venue is the `UNISWAP_V3_FALLBACK` constant, executed
+    /// directly against the core pool (`UniV3Adapter`).
+    /// @custom:oz-renamed-from fallbackSwapRouter
+    address private __deprecated_fallbackSwapRouter;
     /// @notice Fallback venue address used to price the fallback route.
     /// Settable (access-controlled) via `setFallbackQuoter`.
     address public fallbackQuoter;
@@ -55,7 +57,7 @@ contract PropAMMRouter is
     /// enumerable set it is also the source of candidates iterated by
     /// `_pickBestVenue`, so a venue added via `addVenue` is automatically
     /// considered by `swapV1` / `quoteV1` without a contract upgrade. The Uniswap
-    /// V3 fallback (`fallbackSwapRouter`) is the always-available safety net and is
+    /// V3 fallback (`UNISWAP_V3_FALLBACK`) is the always-available safety net and is
     /// intentionally NOT a member — it is accepted independently of this set.
     /// Seeded with the known propAMMs in `initialize` and managed (access-controlled)
     /// via `addVenue` / `removeVenue`, so its size (and thus the
@@ -72,12 +74,8 @@ contract PropAMMRouter is
         _disableInitializers();
     }
 
-    /// @notice Initializes the router, pinning the fallback venue address
-    /// and the `AccessManager` authority that governs administrative actions.
-    /// @param fallbackSwapRouter_ Address of fallback router used
-    /// to execute the fallback swap. Reverts `ZeroAddress` if zero — it also
-    /// doubles as the fallback venue sentinel, so a zero value would corrupt
-    /// venue identity (`_isVenue`, `_pickBestVenue`, `_coreSwap`).
+    /// @notice Initializes the router, pinning the fallback quoter and the
+    /// `AccessManager` authority that governs administrative actions.
     /// @param fallbackQuoter_ Address of the fallback quoter used to quote
     /// the fallback swap off-chain. Reverts `ZeroAddress` if zero.
     /// @param authority_ The `AccessManager` instance that governs every
@@ -89,12 +87,10 @@ contract PropAMMRouter is
     /// here — so the router stays policy-agnostic. Reverts `ZeroAddress` if zero;
     /// `__AccessManaged_init` does not validate it and a zero authority would
     /// leave the contract permanently unmanageable.
-    function initialize(address fallbackSwapRouter_, address fallbackQuoter_, address authority_) public initializer {
-        require(fallbackSwapRouter_ != address(0), ZeroAddress());
+    function initialize(address fallbackQuoter_, address authority_) public initializer {
         require(fallbackQuoter_ != address(0), ZeroAddress());
         require(authority_ != address(0), ZeroAddress());
 
-        fallbackSwapRouter = fallbackSwapRouter_;
         fallbackQuoter = fallbackQuoter_;
         fallbackFee = 3000;
 
@@ -122,7 +118,7 @@ contract PropAMMRouter is
 
     /// @inheritdoc IPropAMMRouter
     /// @dev Picks the best-quoting venue via `_pickBestVenue`, then executes
-    /// through `_coreSwap`; a `fallbackSwapRouter` selection (the Uniswap
+    /// through `_coreSwap`; a `UNISWAP_V3_FALLBACK` selection (the Uniswap
     /// fallback won, or no venue could quote) routes straight to the fallback venue.
     /// Reverts `InsufficientOutput`
     /// before pulling funds when the best quote is under `amountOutMin`. Quotes
@@ -173,7 +169,7 @@ contract PropAMMRouter is
 
     /// @inheritdoc IPropAMMRouter
     /// @dev Swaps via the `venue`. It must be a callable venue or the
-    /// fallback venue named by the `fallbackSwapRouter` address.
+    /// fallback venue named by the `UNISWAP_V3_FALLBACK` address.
     function swapViaVenueV1(
         address venue,
         address tokenIn,
@@ -233,7 +229,7 @@ contract PropAMMRouter is
         (uint256 bestQuote, address venue) = _pickBestVenueFrom(venues, tokenIn, tokenOut, amountIn);
 
         if (venue == address(0) || bestQuote < amountOutMin) {
-            venue = fallbackSwapRouter;
+            venue = UNISWAP_V3_FALLBACK;
         }
 
         (amountOut, executedVenue) = _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
@@ -260,7 +256,7 @@ contract PropAMMRouter is
         (uint256 bestQuote, address venue) = _pickBestVenueFrom(venues, tokenIn, tokenOut, amountIn);
 
         if (venue == address(0) || bestQuote < amountOutMin) {
-            venue = fallbackSwapRouter;
+            venue = UNISWAP_V3_FALLBACK;
         }
 
         uint256 delivered;
@@ -277,7 +273,7 @@ contract PropAMMRouter is
     /// re-entering the guard through one another. The `Swapped` event is emitted
     /// by the calling entrypoint (not here) so the fee entrypoints can log the
     /// net amount and real recipient.
-    /// @param venue The propAMM to attempt first, or `fallbackSwapRouter`.
+    /// @param venue The propAMM to attempt first, or `UNISWAP_V3_FALLBACK`.
     /// @param tokenIn The address of the token being sold.
     /// @param tokenOut The address of the token being bought.
     /// @param amountIn The exact amount of `tokenIn` to sell.
@@ -286,7 +282,7 @@ contract PropAMMRouter is
     /// @param deadline Unix timestamp after which the swap is no longer valid.
     /// @return amountOut The amount of `tokenOut` delivered to `recipient`.
     /// @return executedVenue The propAMM that filled the swap, or
-    /// `fallbackSwapRouter` when the fallback ran.
+    /// `UNISWAP_V3_FALLBACK` when the fallback ran.
     function _coreSwap(
         address venue,
         address tokenIn,
@@ -321,7 +317,7 @@ contract PropAMMRouter is
 
         uint256 prevTokenOutBalance = IERC20(tokenOut_).balanceOf(recipient_);
 
-        if (venue != fallbackSwapRouter) {
+        if (venue != UNISWAP_V3_FALLBACK) {
             try this._dispatchVenue(
                 venue, tokenIn_, tokenOut_, amountIn, amountOutMin, payer, recipient_, deadline, prevTokenOutBalance
             ) returns (
@@ -349,7 +345,7 @@ contract PropAMMRouter is
             _sendWrappedETH(recipient, amountOut);
         }
 
-        return (amountOut, fallbackSwapRouter);
+        return (amountOut, UNISWAP_V3_FALLBACK);
     }
 
     /// @notice Executes a swap on a venue, sourcing `tokenIn` from `payer`.
@@ -450,7 +446,7 @@ contract PropAMMRouter is
     /// from the public swap entrypoints after `_coreSwap` returns. `msg.sender`
     /// is read here and equals the entrypoint's caller, since internal calls
     /// preserve the message context.
-    /// @param marketMaker The venue that filled, or `fallbackSwapRouter`. Placed
+    /// @param marketMaker The venue that filled, or `UNISWAP_V3_FALLBACK`. Placed
     /// first (not in `Swapped`'s field order) so the deepest `_coreSwap` local
     /// (`venue`) is read at the shallowest stack reach — another stack-too-deep
     /// guard. The helper maps params to the event's field order internally.
@@ -532,7 +528,7 @@ contract PropAMMRouter is
             tokenOut = WETH;
         }
 
-        if (venue == fallbackSwapRouter) {
+        if (venue == UNISWAP_V3_FALLBACK) {
             amountOut =
                 UniV3Adapter.quoteExactIn(tokenIn, tokenOut, resolvedFee(tokenIn, tokenOut), amount, fallbackQuoter);
         } else {
@@ -562,10 +558,10 @@ contract PropAMMRouter is
     /// contract upgrade.
     /// Each venue is queried in its own `try/catch` so a reverting venue —
     /// including one listed ahead of its interface — is simply skipped. Returns
-    /// `(0, fallbackSwapRouter)` when nothing can be priced — callers that need a
+    /// `(0, UNISWAP_V3_FALLBACK)` when nothing can be priced — callers that need a
     /// hard failure (e.g. `quoteV1`) check the zero quote; `swapV1` instead lets
-    /// `_coreSwap` route the `fallbackSwapRouter` to the fallback. The returned
-    /// `venue` is either a whitelisted propAMM or `fallbackSwapRouter`.
+    /// `_coreSwap` route the `UNISWAP_V3_FALLBACK` to the fallback. The returned
+    /// `venue` is either a whitelisted propAMM or `UNISWAP_V3_FALLBACK`.
     /// @param tokenIn The address of the token being sold.
     /// @param tokenOut The address of the token being bought.
     /// @param amount The exact amount of `tokenIn` to quote against.
@@ -576,8 +572,8 @@ contract PropAMMRouter is
         returns (uint256 bestQuote, address venue)
     {
         // A venue overtakes it only by quoting strictly more; if none do (or nothing can be priced at all),
-        // `venue` stays `fallbackSwapRouter` and `_coreSwap` routes to fallback.
-        venue = fallbackSwapRouter;
+        // `venue` stays `UNISWAP_V3_FALLBACK` and `_coreSwap` routes to fallback.
+        venue = UNISWAP_V3_FALLBACK;
 
         uint256 venueCount = whitelistedVenueCount();
         for (uint256 i = 0; i < venueCount; i++) {
@@ -591,13 +587,13 @@ contract PropAMMRouter is
         }
 
         // Uniswap V3 is the always-present fallback candidate: when it wins,
-        // `venue` is `fallbackSwapRouter`, which `_coreSwap` (via `swapV1`)
+        // `venue` is `UNISWAP_V3_FALLBACK`, which `_coreSwap` (via `swapV1`)
         // treats as the Uniswap fallback. Callers may also name that address
         // directly through `swapViaVenueV1` / `quoteVenueV1`.
-        try this._quoteVenueUnchecked(fallbackSwapRouter, tokenIn, tokenOut, amount) returns (uint256 amountOut) {
+        try this._quoteVenueUnchecked(UNISWAP_V3_FALLBACK, tokenIn, tokenOut, amount) returns (uint256 amountOut) {
             if (amountOut > bestQuote) {
                 bestQuote = amountOut;
-                venue = fallbackSwapRouter;
+                venue = UNISWAP_V3_FALLBACK;
             }
         } catch {}
     }
@@ -612,7 +608,7 @@ contract PropAMMRouter is
     /// when none of the supplied venues can be priced. The Uniswap fallback
     /// still applies at execution time via `_coreSwap` (the transparent safety
     /// net); it is just not a selection candidate here unless the caller lists
-    /// the `fallbackSwapRouter` address explicitly.
+    /// the `UNISWAP_V3_FALLBACK` address explicitly.
     /// @param venues The venues to consider — a subset the caller chose.
     /// @param tokenIn The address of the token being sold.
     /// @param tokenOut The address of the token being bought.
@@ -638,20 +634,6 @@ contract PropAMMRouter is
     //---------------------//
     // Fallback Management //
     //---------------------//
-
-    /// @notice Repoints the address used by the fallback route.
-    /// @dev Access-controlled via the AccessManager authority. Lets a new SwapRouter deployment be adopted without a
-    /// contract upgrade. Reverts `ZeroAddress` if zero — this address also
-    /// identifies the fallback venue (`_isVenue`, `_pickBestVenue`, `_coreSwap`),
-    /// so a zero value would corrupt venue identity. Note that `executedVenue`
-    /// values observed off-chain are only meaningful relative to the router's
-    /// configuration at the time of the swap.
-    /// @param newRouter Address of thew new router.
-    function setFallbackSwapRouter(address newRouter) external restricted {
-        require(newRouter != address(0), ZeroAddress());
-        emit FallbackSwapRouterUpdated(fallbackSwapRouter, newRouter);
-        fallbackSwapRouter = newRouter;
-    }
 
     /// @notice Repoints the fallback quoter used to price the fallback route.
     /// @dev Access-controlled via the AccessManager authority. Reverts `ZeroAddress` if zero.
@@ -784,12 +766,12 @@ contract PropAMMRouter is
     /// `quoteVenueV1` / `swapViaVenueV1`: a whitelisted propAMM, or the Uniswap
     /// fallback (which is always accepted, independent of the whitelist).
     function _isVenue(address venue) private view returns (bool) {
-        return isWhitelistedVenue(venue) || venue == fallbackSwapRouter;
+        return isWhitelistedVenue(venue) || venue == UNISWAP_V3_FALLBACK;
     }
 
     /// @notice Returns whether `venue` is a whitelisted propAMM.
     /// @dev Reflects only the propAMM whitelist. The Uniswap fallback
-    /// (`fallbackSwapRouter`) is usable as a venue without being whitelisted, so
+    /// (`UNISWAP_V3_FALLBACK`) is usable as a venue without being whitelisted, so
     /// this returns false for it — use it to inspect the propAMM set specifically.
     /// @param venue The address to check.
     function isWhitelistedVenue(address venue) public view returns (bool) {

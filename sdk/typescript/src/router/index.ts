@@ -282,11 +282,6 @@ export class PropAmmRouter {
   // Views //
   //-------//
 
-  /** The Uniswap fallback "venue" address (dynamic router configuration). */
-  async fallbackSwapRouter(): Promise<Address> {
-    return this.readRouter<Address>("fallbackSwapRouter");
-  }
-
   async fallbackQuoter(): Promise<Address> {
     return this.readRouter<Address>("fallbackQuoter");
   }

@@ -280,10 +280,6 @@ class PropAmmRouter:
 
     # ------ Views ------
 
-    async def fallback_swap_router(self) -> ChecksumAddress:
-        """The Uniswap fallback "venue" address (dynamic router configuration)."""
-        return await self._contract.functions.fallbackSwapRouter().call()
-
     async def fallback_quoter(self) -> ChecksumAddress:
         return await self._contract.functions.fallbackQuoter().call()
 

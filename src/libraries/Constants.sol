@@ -11,3 +11,7 @@ address constant USDT = 0xdAC17F958D2ee523a2206206994597C13D831ec7;
 address constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
 // Sentinel passed as `tokenIn` or `tokenOut` to signal native ETH.
 address constant ETH_SENTINEL = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+
+// Sentinel identifying the Uniswap V3 fallback venue.
+// 0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF
+address constant UNISWAP_V3_FALLBACK = address(type(uint160).max);
