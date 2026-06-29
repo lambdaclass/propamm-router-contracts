@@ -46,3 +46,10 @@ error UnexpectedETHSender();
 /// @notice Thrown when a swap's input and output resolve to the same token
 /// (including `ETH_SENTINEL` against `WETH`), which no venue can fill.
 error IdenticalTokens();
+/// @notice Thrown when `uniswapV3SwapCallback` is invoked by an address that is
+/// not the canonical Uniswap V3 pool for the callback's `(tokenIn, tokenOut, fee)`.
+/// Guards the callback, which would otherwise be a public `transferFrom` primitive.
+error OnlyPool();
+/// @notice Thrown when a swap's `amountIn` exceeds `int256` max and so cannot be
+/// passed to the core pool's `swap` as a signed exact-input amount.
+error AmountTooLarge();

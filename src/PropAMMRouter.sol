@@ -16,7 +16,7 @@ import {IPropAMM} from "./interfaces/IPropAMM.sol";
 import {IWETH} from "./interfaces/IWETH.sol";
 import {UniV3Router} from "./libraries/UniV3Router.sol";
 import {FrontendFees} from "./libraries/FrontendFees.sol";
-import {ETH_SENTINEL, USDC, USDT, WETH} from "./libraries/Constants.sol";
+import "./libraries/Constants.sol";
 import "./libraries/Errors.sol";
 import "./libraries/Events.sol";
 
@@ -337,20 +337,12 @@ contract PropAMMRouter is
             }
         }
 
-        // Uniswap is pull-based, so the router needs to pull the tokens from the sender.
-        // If the input token is ETH, it was already wrapped and the router already
-        // has the WETH.
-        if (tokenIn != ETH_SENTINEL) {
-            IERC20(tokenIn_).safeTransferFrom(msg.sender, address(this), amountIn);
-        }
-        UniV3Router.swapExactIn(
-            tokenIn_,
-            tokenOut_,
-            resolvedFee(tokenIn_, tokenOut_),
-            amountIn,
-            amountOutMin,
-            recipient_,
-            fallbackSwapRouter
+        // Uniswap V3 fallback: swap straight against the core pool. The
+        // `uniswapV3SwapCallback` pays the pool from `payer` — the caller for an
+        // ERC-20 input, or this router for native ETH (already wrapped to WETH) —
+        // so no funds are pulled into the router up front and no approval is set.
+        UniV3Router.swapExactInDirect(
+            tokenIn_, tokenOut_, resolvedFee(tokenIn_, tokenOut_), amountIn, recipient_, payer
         );
         amountOut = IERC20(tokenOut_).balanceOf(recipient_) - prevTokenOutBalance;
         require(amountOut >= amountOutMin, InsufficientOutput(amountOutMin, amountOut));
@@ -412,6 +404,33 @@ contract PropAMMRouter is
         require(amountOut >= amountOutMin, InsufficientOutput(amountOutMin, amountOut));
 
         return amountOut;
+    }
+
+    /// @notice Uniswap V3 swap callback: pays the pool the `tokenIn` it sold against.
+    /// @dev Invoked by the pool mid-`swap`. NOT `nonReentrant` — it runs inside the
+    /// already-guarded swap, so the pool-address check is the guard: without it this
+    /// would be a public `transferFrom(payer, caller)` primitive. The pool address is
+    /// recomputed from the callback `data` and required to equal `msg.sender`, which
+    /// only a genuine pool (a CREATE2 address off the canonical factory) satisfies.
+    ///
+    /// WARNING: `data` is a private ABI contract with its encoder,
+    /// `UniV3Router.swapExactInDirect` (a different file). The `(tokenIn, tokenOut,
+    /// fee, payer)` tuple decoded here MUST stay in lockstep with the tuple encoded
+    /// there — change one and you MUST change the other, or payment/auth break.
+    /// @param amount0Delta token0 owed to the pool (positive) or received (negative).
+    /// @param amount1Delta token1 owed to the pool (positive) or received (negative).
+    /// @param data ABI-encoded `(tokenIn, tokenOut, fee, payer)`; see the warning above.
+    function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata data) external {
+        (address tokenIn, address tokenOut, uint24 fee, address payer) =
+            abi.decode(data, (address, address, uint24, address));
+        require(msg.sender == UniV3Router.computePool(tokenIn, tokenOut, fee), OnlyPool());
+
+        uint256 amountToPay = amount0Delta > 0 ? uint256(amount0Delta) : uint256(amount1Delta);
+        if (payer == address(this)) {
+            IERC20(tokenIn).safeTransfer(msg.sender, amountToPay);
+        } else {
+            IERC20(tokenIn).safeTransferFrom(payer, msg.sender, amountToPay);
+        }
     }
 
     /// @notice Unwrap `amount` WETH into ETH and send it to `to`.

@@ -140,6 +140,8 @@ const ERROR_SIGNATURES: &[&str] = &[
     "ETHTransferFailed()",
     "UnexpectedETHSender()",
     "IdenticalTokens()",
+    "OnlyPool()",
+    "AmountTooLarge()",
     "FeeBpsTooHigh(uint16,uint16)",
     "EnforcedPause()",
 ];
@@ -370,6 +372,7 @@ mod tests {
     const OMITTED_FUNCTIONS: &[&str] = &[
         "_dispatchVenue(address,address,address,uint256,uint256,address,address,uint256,uint256)",
         "_quoteVenueUnchecked(address,address,address,uint256)",
+        "uniswapV3SwapCallback(int256,int256,bytes)",
         "initialize(address,address,address)",
         "proxiableUUID()",
         "upgradeToAndCall(address,bytes)",

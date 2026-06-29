@@ -11,6 +11,7 @@ import {MockWETH} from "./mocks/MockWETH.sol";
 import {MockV3SwapRouter} from "./mocks/MockV3SwapRouter.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
 import {MockPropAMMExactOut} from "./mocks/MockPropAMMExactOut.sol";
+import {UniV3PoolFixture} from "./helpers/UniV3PoolFixture.sol";
 import {ETH_SENTINEL, WETH} from "../src/libraries/Constants.sol";
 import "../src/libraries/Errors.sol";
 
@@ -22,7 +23,7 @@ import "../src/libraries/Errors.sol";
 /// direct-pull model and an ERC-20-only suite never caught it.
 /// @dev The router hard-codes the mainnet WETH address, so a `MockWETH` is
 /// `vm.etch`ed there to make `IWETH(WETH).deposit` work off-fork.
-contract PropAMMRouterEthTest is Test {
+contract PropAMMRouterEthTest is UniV3PoolFixture {
     PropAMMRouter internal router;
     AccessManager internal manager;
     MockV3SwapRouter internal fallbackRouter; // pulls tokenIn, so router ends clean
@@ -60,9 +61,10 @@ contract PropAMMRouterEthTest is Test {
         router.addVenue(address(venue));
         router.addVenue(deadVenue);
 
-        // Pre-fund + arm the fallback so it can deliver tokenOut when engaged.
-        tokenOut.mint(address(fallbackRouter), 1_000 ether);
-        fallbackRouter.setAmountOut(AMOUNT_IN);
+        // Seed + fund the Uniswap V3 fallback pool (WETH->tokenOut at the default
+        // 0.30% tier) so it can deliver when the fallback engages.
+        address fallbackPool = _seedUniV3Pool(WETH, address(tokenOut), 3000, AMOUNT_IN);
+        tokenOut.mint(fallbackPool, AMOUNT_IN);
         quoter.setQuote(AMOUNT_IN);
 
         vm.deal(address(this), 100 ether);

@@ -11,10 +11,11 @@ import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockFeeOnTransferERC20} from "./mocks/MockFeeOnTransferERC20.sol";
 import {MockV3SwapRouter} from "./mocks/MockV3SwapRouter.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
+import {UniV3PoolFixture} from "./helpers/UniV3PoolFixture.sol";
 import "../src/libraries/Errors.sol";
 import {FrontendFees} from "../src/libraries/FrontendFees.sol";
 
-contract PropAMMRouterFeeTest is Test {
+contract PropAMMRouterFeeTest is UniV3PoolFixture {
     PropAMMRouter router;
     AccessManager manager;
     MockV3SwapRouter swapRouter;
@@ -45,12 +46,13 @@ contract PropAMMRouterFeeTest is Test {
         router = _deployRouter();
     }
 
-    // Funds the user with tokenIn, pre-funds the mock swap router with tokenOut to
-    // deliver, sets the quote + delivered amount, and approves the router.
+    // Funds the user with tokenIn, seeds the Uniswap V3 fallback pool (default
+    // 0.30% tier for these fresh tokens) with tokenOut to deliver, sets the quote,
+    // and approves the router.
     function _prepare(uint256 amountIn, uint256 delivered) internal {
         tokenIn.mint(user, amountIn);
-        tokenOut.mint(address(swapRouter), delivered);
-        swapRouter.setAmountOut(delivered);
+        address pool = _seedUniV3Pool(address(tokenIn), address(tokenOut), 3000, delivered);
+        tokenOut.mint(pool, delivered);
         quoter.setQuote(delivered);
         vm.prank(user);
         tokenIn.approve(address(router), amountIn);
@@ -260,8 +262,8 @@ contract PropAMMRouterFeeTest is Test {
         MockFeeOnTransferERC20 fotOut = new MockFeeOnTransferERC20("FOT", "FOT", 100); // 1%
         uint256 routerOut = 1_000e18;
         tokenIn.mint(user, 1_000e18);
-        fotOut.mint(address(swapRouter), routerOut);
-        swapRouter.setAmountOut(routerOut);
+        address pool = _seedUniV3Pool(address(tokenIn), address(fotOut), 3000, routerOut);
+        fotOut.mint(pool, routerOut);
         quoter.setQuote(routerOut);
         vm.prank(user);
         tokenIn.approve(address(router), 1_000e18);

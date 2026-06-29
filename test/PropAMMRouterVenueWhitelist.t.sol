@@ -10,9 +10,10 @@ import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockSwapRouter02} from "./mocks/MockSwapRouter02.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
 import {MockPropAMMExactOut} from "./mocks/MockPropAMMExactOut.sol";
+import {UniV3PoolFixture} from "./helpers/UniV3PoolFixture.sol";
 import "../src/libraries/Errors.sol";
 
-contract PropAMMRouterVenueWhitelistTest is Test {
+contract PropAMMRouterVenueWhitelistTest is UniV3PoolFixture {
     PropAMMRouter internal router;
     AccessManager internal manager;
     MockSwapRouter02 internal mockRouter;
@@ -260,7 +261,10 @@ contract PropAMMRouterVenueWhitelistTest is Test {
         // transparently through the Uniswap fallback; the swap succeeding confirms
         // the gate opened rather than the venue itself executing.
         router.addVenue(genericVenue);
-        mockRouter.setAmountOut(1000);
+        // genericVenue has no code, so `_dispatchVenue` reverts and the swap routes
+        // through the Uniswap fallback pool (default 0.30% tier for these tokens).
+        address pool = _seedUniV3Pool(address(tokenIn), address(tokenOut), 3000, 1000);
+        tokenOut.mint(pool, 1000);
         tokenIn.mint(address(this), 1000);
         tokenIn.approve(address(router), 1000);
 
