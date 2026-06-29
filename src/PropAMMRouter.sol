@@ -577,14 +577,10 @@ contract PropAMMRouter is
     {
         (bestQuote, venue) = _pickBestPropAMM(tokenIn, tokenOut, amount);
 
-        address fallbackRouter = UNISWAP_V3_FALLBACK;
-        if (venue == address(0)) {
-            venue = fallbackRouter;
-        }
-        try this._quoteVenueUnchecked(fallbackRouter, tokenIn, tokenOut, amount) returns (uint256 amountOut) {
+        try this._quoteVenueUnchecked(UNISWAP_V3_FALLBACK, tokenIn, tokenOut, amount) returns (uint256 amountOut) {
             if (amountOut > bestQuote) {
                 bestQuote = amountOut;
-                venue = fallbackRouter;
+                venue = UNISWAP_V3_FALLBACK;
             }
         } catch {}
     }
