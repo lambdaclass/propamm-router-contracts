@@ -341,9 +341,7 @@ contract PropAMMRouter is
         // `uniswapV3SwapCallback` pays the pool from `payer` — the caller for an
         // ERC-20 input, or this router for native ETH (already wrapped to WETH) —
         // so no funds are pulled into the router up front and no approval is set.
-        UniV3Adapter.swapExactInDirect(
-            tokenIn_, tokenOut_, resolvedFee(tokenIn_, tokenOut_), amountIn, recipient_, payer
-        );
+        UniV3Adapter.swapExactIn(tokenIn_, tokenOut_, resolvedFee(tokenIn_, tokenOut_), amountIn, recipient_, payer);
         amountOut = IERC20(tokenOut_).balanceOf(recipient_) - prevTokenOutBalance;
         require(amountOut >= amountOutMin, InsufficientOutput(amountOutMin, amountOut));
 
@@ -414,7 +412,7 @@ contract PropAMMRouter is
     /// only a genuine pool (a CREATE2 address off the canonical factory) satisfies.
     ///
     /// WARNING: `data` is a private ABI contract with its encoder,
-    /// `UniV3Adapter.swapExactInDirect` (a different file). The `(tokenIn, tokenOut,
+    /// `UniV3Adapter.swapExactIn` (a different file). The `(tokenIn, tokenOut,
     /// fee, payer)` tuple decoded here MUST stay in lockstep with the tuple encoded
     /// there — change one and you MUST change the other, or payment/auth break.
     /// @param amount0Delta token0 owed to the pool (positive) or received (negative).
