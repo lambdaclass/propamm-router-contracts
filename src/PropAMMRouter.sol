@@ -402,15 +402,14 @@ contract PropAMMRouter is
 
     /// @notice Uniswap V3 swap callback: pays the pool the `tokenIn` it sold against.
     /// @dev Invoked by the pool mid-`swap`. NOT `nonReentrant` — it runs inside the
-    /// already-guarded swap, so the pool-address check is the guard: without it this
-    /// would be a public `transferFrom(payer, caller)` primitive. The pool address is
+    /// already-guarded swap, so the pool-address check is the guard. The pool address is
     /// recomputed from the callback `data` and required to equal `msg.sender`, which
-    /// only a genuine pool (a CREATE2 address off the canonical factory) satisfies.
+    /// only a genuine pool satisfies.
     ///
     /// WARNING: `data` is a private ABI contract with its encoder,
     /// `UniV3Adapter.swapExactIn` (a different file). The `(tokenIn, tokenOut,
     /// fee, payer)` tuple decoded here MUST stay in lockstep with the tuple encoded
-    /// there — change one and you MUST change the other, or payment/auth break.
+    /// there — change one and you MUST change the other.
     /// @param amount0Delta token0 owed to the pool (positive) or received (negative).
     /// @param amount1Delta token1 owed to the pool (positive) or received (negative).
     /// @param data ABI-encoded `(tokenIn, tokenOut, fee, payer)`; see the warning above.

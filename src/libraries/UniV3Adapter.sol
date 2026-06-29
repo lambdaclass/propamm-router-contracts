@@ -49,16 +49,14 @@ library UniV3Adapter {
 
     /// @notice Swaps an exact `amountIn` of `tokenIn` for `tokenOut` directly
     /// against the Uniswap V3 core pool, sending the output to `recipient`.
-    /// @dev No periphery router and no approval: the derived pool calls back the
-    /// CALLER's `uniswapV3SwapCallback` to collect `tokenIn` from `payer`, so the
-    /// caller MUST implement that callback. Output is not returned — the caller
-    /// measures it as a balance delta.
+    /// @dev The derived pool calls back the caller's `uniswapV3SwapCallback`
+    /// to collect `tokenIn` from `payer`, so the caller MUST implement that callback.
     ///
     /// WARNING: the `data` blob is a private ABI contract with the caller's
     /// `uniswapV3SwapCallback`. It encodes `(tokenIn, tokenOut, fee, payer)`, and the
     /// callback MUST `abi.decode` the identical tuple. The two halves live in
     /// different files (here and `PropAMMRouter.uniswapV3SwapCallback`) — change this
-    /// encode and you MUST change that decode in lockstep, or payment/auth break.
+    /// encode and you MUST change that decode in lockstep.
     /// @param tokenIn The token being sold.
     /// @param tokenOut The token being bought.
     /// @param fee The pool fee tier identifying which pool to swap against.
