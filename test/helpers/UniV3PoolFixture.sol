@@ -3,7 +3,7 @@ pragma solidity ^0.8.35;
 
 import {Test} from "forge-std/Test.sol";
 import {MockUniV3Pool} from "../mocks/MockUniV3Pool.sol";
-import {UniV3Router} from "../../src/libraries/UniV3Router.sol";
+import {UniV3Adapter} from "../../src/libraries/UniV3Adapter.sol";
 
 /// @notice Test fixture for the router's direct core-pool fallback. The router
 /// derives the pool address from `(token0, token1, fee)` and swaps against it, so
@@ -20,7 +20,7 @@ abstract contract UniV3PoolFixture is Test {
         internal
         returns (address pool)
     {
-        pool = UniV3Router.computePool(tokenIn, tokenOut, fee);
+        pool = UniV3Adapter.computePool(tokenIn, tokenOut, fee);
         if (pool.code.length == 0) {
             vm.etch(pool, type(MockUniV3Pool).runtimeCode);
         }

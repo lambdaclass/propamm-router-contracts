@@ -8,13 +8,15 @@ import {IQuoterV2} from "@uniswap/v3-periphery/contracts/interfaces/IQuoterV2.so
 import {IUniswapV3Pool} from "../interfaces/IUniswapV3Pool.sol";
 import {AmountTooLarge} from "./Errors.sol";
 
-/// @title UniV3Router
-/// @notice Thin wrapper around Uniswap V3's SwapRouter02 + QuoterV2.
-/// Single-hop only. The caller picks the fee tier (pool selection
-/// is the caller's job — this library does no routing).
+/// @title UniV3Adapter
+/// @notice Uniswap V3 integration helpers: derives core-pool addresses
+/// (`computePool`), swaps an exact input directly against the core pool with no
+/// periphery router or approval (`swapExactInDirect`), and prices swaps via
+/// QuoterV2 (`quoteExactIn` / `quoteExactOut`). Single-hop; the caller picks the
+/// fee tier.
 /// @dev Quotes are non-view because QuoterV2 uses revert-based simulation;
 /// call via `eth_call` (staticcall) from off-chain.
-library UniV3Router {
+library UniV3Adapter {
     using SafeERC20 for IERC20;
 
     /// @notice Uniswap V3 mainnet factory and pool init-code hash, used by

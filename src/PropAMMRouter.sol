@@ -14,7 +14,7 @@ import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/Pau
 import {IPropAMMRouter} from "./interfaces/IPropAMMRouter.sol";
 import {IPropAMM} from "./interfaces/IPropAMM.sol";
 import {IWETH} from "./interfaces/IWETH.sol";
-import {UniV3Router} from "./libraries/UniV3Router.sol";
+import {UniV3Adapter} from "./libraries/UniV3Adapter.sol";
 import {FrontendFees} from "./libraries/FrontendFees.sol";
 import "./libraries/Constants.sol";
 import "./libraries/Errors.sol";
@@ -341,7 +341,7 @@ contract PropAMMRouter is
         // `uniswapV3SwapCallback` pays the pool from `payer` — the caller for an
         // ERC-20 input, or this router for native ETH (already wrapped to WETH) —
         // so no funds are pulled into the router up front and no approval is set.
-        UniV3Router.swapExactInDirect(
+        UniV3Adapter.swapExactInDirect(
             tokenIn_, tokenOut_, resolvedFee(tokenIn_, tokenOut_), amountIn, recipient_, payer
         );
         amountOut = IERC20(tokenOut_).balanceOf(recipient_) - prevTokenOutBalance;
@@ -414,7 +414,7 @@ contract PropAMMRouter is
     /// only a genuine pool (a CREATE2 address off the canonical factory) satisfies.
     ///
     /// WARNING: `data` is a private ABI contract with its encoder,
-    /// `UniV3Router.swapExactInDirect` (a different file). The `(tokenIn, tokenOut,
+    /// `UniV3Adapter.swapExactInDirect` (a different file). The `(tokenIn, tokenOut,
     /// fee, payer)` tuple decoded here MUST stay in lockstep with the tuple encoded
     /// there — change one and you MUST change the other, or payment/auth break.
     /// @param amount0Delta token0 owed to the pool (positive) or received (negative).
@@ -423,7 +423,7 @@ contract PropAMMRouter is
     function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata data) external {
         (address tokenIn, address tokenOut, uint24 fee, address payer) =
             abi.decode(data, (address, address, uint24, address));
-        require(msg.sender == UniV3Router.computePool(tokenIn, tokenOut, fee), OnlyPool());
+        require(msg.sender == UniV3Adapter.computePool(tokenIn, tokenOut, fee), OnlyPool());
 
         uint256 amountToPay = amount0Delta > 0 ? uint256(amount0Delta) : uint256(amount1Delta);
         if (payer == address(this)) {
@@ -536,7 +536,7 @@ contract PropAMMRouter is
 
         if (venue == fallbackSwapRouter) {
             amountOut =
-                UniV3Router.quoteExactIn(tokenIn, tokenOut, resolvedFee(tokenIn, tokenOut), amount, fallbackQuoter);
+                UniV3Adapter.quoteExactIn(tokenIn, tokenOut, resolvedFee(tokenIn, tokenOut), amount, fallbackQuoter);
         } else {
             amountOut = IPropAMM(venue).quote(tokenIn, tokenOut, amount);
         }
