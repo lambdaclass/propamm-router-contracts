@@ -58,16 +58,31 @@ export interface ReadParams {
 export interface WriteParams extends ReadParams {
   /** ETH value to send along with the call, in wei. */
   value?: bigint;
+  /**
+   * State override for the simulation that derives the gas limit. For `write`
+   * it is applied to the `eth_estimateGas` (not the broadcast tx, which can't
+   * override state), so the limit can be pinned to a worst-case execution path
+   * instead of letting viem auto-estimate the live path at send time — see
+   * `PropAmmRouter.swap`. For `call` it is applied to the `eth_call`.
+   */
+  stateOverride?: StateOverride;
 }
 
 export interface CallParams extends WriteParams {
-  /** State overrides applied to the `eth_call` (third RPC parameter). */
-  stateOverride?: StateOverride;
   /** Pin the simulated `block.number` (block override, fourth RPC parameter). */
   blockNumber?: bigint;
   /** Pin the simulated `block.timestamp`, in seconds (block override). */
   blockTimestamp?: bigint;
 }
+
+/** bps denominator (100%). */
+const BPS_DENOMINATOR = 10_000n;
+/**
+ * Safety margin added on top of an override-derived gas estimate (+15%), to
+ * cover state drift between estimate and inclusion and any gas a real venue
+ * burns before reverting that the override path skips.
+ */
+const GAS_MARGIN_BPS = 1_500n;
 
 export class ContractClient {
   readonly publicClient: PublicClient;
@@ -187,6 +202,13 @@ export class ContractClient {
   /**
    * Send a state-changing contract call. Simulates first so reverts surface
    * as errors before any gas is spent. Returns the transaction hash.
+   *
+   * When `params.stateOverride` is supplied, the gas limit is pinned from an
+   * `eth_estimateGas` run against that override (plus a safety margin) rather
+   * than letting viem auto-estimate the live path at send time — this bounds
+   * the cost of a route that diverges between estimate and execution. If that
+   * estimate reverts (the worst-case path can't complete, e.g. it can't meet
+   * `amountOutMin`), it defers to viem's live estimate.
    */
   async write(params: WriteParams): Promise<Hash> {
     if (!this.walletClient || !this.account) {
@@ -202,7 +224,88 @@ export class ContractClient {
       value: params.value,
     });
 
-    return this.walletClient.writeContract(request);
+    const gas = params.stateOverride && (await this.estimateGasWithMargin(params));
+
+    return this.walletClient.writeContract(gas ? { ...request, gas } : request);
+  }
+
+  /**
+   * Gas estimate (with `params.stateOverride` applied) plus a safety margin, or
+   * `undefined` when the estimate reverts so the caller can defer to a live
+   * auto-estimate.
+   */
+  private async estimateGasWithMargin(params: WriteParams): Promise<bigint | undefined> {
+    try {
+      const estimate = await this.estimateGas(params);
+      return (estimate * (BPS_DENOMINATOR + GAS_MARGIN_BPS)) / BPS_DENOMINATOR;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Estimate the gas a transaction would use, optionally against state and
+   * block overrides. Mirrors {@link callWithOverrides}: encode the calldata and
+   * go through the raw `estimateGas` action so overrides are honored.
+   */
+  async estimateGas(params: CallParams): Promise<bigint> {
+    const calldata = encodeFunctionData({
+      abi: params.abi,
+      functionName: params.functionName,
+      args: params.args ?? [],
+    });
+
+    return this.publicClient.estimateGas({
+      account: this.account,
+      to: params.address,
+      data: calldata,
+      value: params.value,
+      stateOverride: params.stateOverride,
+      ...(params.blockNumber !== undefined && { blockNumber: params.blockNumber }),
+    });
+  }
+
+  /**
+   * Estimate gas via `eth_simulateV1`, which (unlike `eth_estimateGas`) accepts
+   * block overrides — including `block.timestamp` — and returns `gasUsed`
+   * directly in one round-trip, no binary search. Use this to price a route
+   * gated on block context (e.g. a pAMM that validates `block.timestamp`
+   * against pushed state). Requires a node that implements `eth_simulateV1`.
+   * Throws (decoded) if the simulated call reverts.
+   */
+  async estimateGasViaSimulateV1(params: CallParams): Promise<bigint> {
+    const calldata = encodeFunctionData({
+      abi: params.abi,
+      functionName: params.functionName,
+      args: params.args ?? [],
+    });
+
+    const blockOverrides =
+      params.blockNumber !== undefined || params.blockTimestamp !== undefined
+        ? {
+            ...(params.blockNumber !== undefined && { number: params.blockNumber }),
+            ...(params.blockTimestamp !== undefined && { time: params.blockTimestamp }),
+          }
+        : undefined;
+
+    const [block] = await this.publicClient.simulateBlocks({
+      validation: false,
+      blocks: [
+        {
+          ...(blockOverrides && { blockOverrides }),
+          ...(params.stateOverride && { stateOverrides: params.stateOverride }),
+          calls: [
+            { account: this.account, to: params.address, data: calldata, value: params.value },
+          ],
+        },
+      ],
+    });
+
+    const [call] = block.calls;
+    if (call.status !== "success") {
+      throw call.error ?? new Error(`eth_simulateV1: ${params.functionName} reverted`);
+    }
+    return call.gasUsed;
   }
 
   /** Wait until a transaction is mined and return its receipt. */

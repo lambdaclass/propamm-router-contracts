@@ -20,6 +20,7 @@ import {
   BEACON_GENESIS_TS,
   OverridesWsSource,
   SECS_PER_SLOT,
+  toDisablingStateOverride,
   toStateOverride,
   type OverridesSnapshot,
   type OverridesSource,
@@ -183,29 +184,52 @@ export class PropAmmRouter {
    * selector, which skims the fee from the output.
    */
   async swap(params: SwapParams, opts: SwapOptions = {}): Promise<Hash> {
-    const { mode, venueArgs } = venueDispatch(opts.venues);
-    const fee = opts.frontendFee;
-    if (fee) validateFee(fee);
+    const { functionName, args, value } = this.buildSwapCall(params, opts);
 
-    const selectors = SWAP_SELECTORS[mode];
     return this.client.write({
       address: this.address,
       abi: propAmmRouterAbi,
-      // The `WithFee` selectors take the same tuple plus the fee struct last.
-      functionName: fee ? selectors.withFee : selectors.plain,
-      args: [
-        ...venueArgs,
-        params.tokenIn,
-        params.tokenOut,
-        params.amountIn,
-        params.amountOutMin,
-        params.recipient,
-        params.deadline,
-        ...(fee ? [fee] : []),
-      ],
-      // Native-ETH input is signalled by the sentinel and paid via msg.value.
-      value: isAddressEqual(params.tokenIn, ETH_SENTINEL) ? params.amountIn : undefined,
+      functionName,
+      args,
+      value,
+      // Pin the gas limit to the worst-case (fallback) path: the override below
+      // disables the PropAMMs so `write` estimates the route the tx falls
+      // through to when a PropAMM is unavailable at execution.
+      stateOverride: await this.fallbackForcingOverride(opts.venues),
     });
+  }
+
+  /**
+   * Estimate the gas a swap would use, applying `stateOverride` to the sim:
+   * pass `fallbackForcingOverride(...)` to price the worst-case fallback path,
+   * the SDK's real pAMM overrides (via `toStateOverride`) to price the PropAMM
+   * route, or omit it for the live route. Pass `blockNumber`/`blockTimestamp`
+   * to pin the block context the override was generated for — venues validate
+   * `block.timestamp` against the pushed pAMM state. Because `eth_estimateGas`
+   * can't override the timestamp, supplying `blockTimestamp` switches to the
+   * `eth_simulateV1`-based estimator that can. Sends no transaction and adds
+   * no safety margin — the raw estimate, for inspection.
+   */
+  async estimateGasWithStateOverride(
+    params: SwapParams,
+    opts: SwapOptions = {},
+    stateOverride?: StateOverride,
+    blockNumber?: bigint,
+    blockTimestamp?: bigint,
+  ): Promise<bigint> {
+    const { functionName, args, value } = this.buildSwapCall(params, opts);
+    const base = {
+      address: this.address,
+      abi: propAmmRouterAbi,
+      functionName,
+      args,
+      value,
+      stateOverride,
+      blockNumber,
+    };
+    return blockTimestamp === undefined
+      ? this.client.estimateGas(base)
+      : this.client.estimateGasViaSimulateV1({ ...base, blockTimestamp });
   }
 
   /** Same as `swap`, but waits for the receipt and decodes the result. */
@@ -321,6 +345,58 @@ export class PropAmmRouter {
   //-----------//
   // Internals //
   //-----------//
+
+  /**
+   * Resolve a swap into its concrete call: the selector (plain vs `WithFee`,
+   * per venue-restriction mode), the encoded argument tuple, and the ETH
+   * `value` (set only for native-ETH input). Shared by `swap` and
+   * `estimateGasWithStateOverride`.
+   */
+  private buildSwapCall(
+    params: SwapParams,
+    opts: SwapOptions,
+  ): { functionName: string; args: readonly unknown[]; value: bigint | undefined } {
+    const { mode, venueArgs } = venueDispatch(opts.venues);
+    const fee = opts.frontendFee;
+    if (fee) validateFee(fee);
+
+    const selectors = SWAP_SELECTORS[mode];
+    return {
+      // The `WithFee` selectors take the same tuple plus the fee struct last.
+      functionName: fee ? selectors.withFee : selectors.plain,
+      args: [
+        ...venueArgs,
+        params.tokenIn,
+        params.tokenOut,
+        params.amountIn,
+        params.amountOutMin,
+        params.recipient,
+        params.deadline,
+        ...(fee ? [fee] : []),
+      ],
+      // Native-ETH input is signalled by the sentinel and paid via msg.value.
+      value: isAddressEqual(params.tokenIn, ETH_SENTINEL) ? params.amountIn : undefined,
+    };
+  }
+
+  /**
+   * State override that disables the venues the router could select for this
+   * swap (all of them, or the caller-restricted set), so quote selection finds
+   * nothing and `_coreSwap` routes to the Uniswap V3 fallback — the worst-case
+   * (most expensive) path. The route diverges between estimate and execution
+   * because a PropAMM that quotes (and is selected) at estimate time can be
+   * unavailable at execution, so a live estimate traces the cheap PropAMM path
+   * and under-estimates; `write` applies this override when pinning the gas
+   * limit. Disables venues by zeroing the off-chain price slots from the SDK's
+   * pAMM override snapshot — state only, no contract code is overridden — so a
+   * venue can no longer produce a winning quote. The Uniswap fallback (not a
+   * snapshot pAMM) is untouched.
+   */
+  async fallbackForcingOverride(venues?: readonly Address[]): Promise<StateOverride> {
+    const snapshot = await this.overrides.getOverrides();
+    if (!snapshot) return [];
+    return toDisablingStateOverride(snapshot, { pamms: venues });
+  }
 
   private async readRouter<T>(functionName: string, args: readonly unknown[] = []): Promise<T> {
     return this.client.read<T>({

@@ -29,4 +29,4 @@ export type {
   TitanQuote,
 } from "./prices/index.js";
 
-export type { Account, Address, Chain, Hash } from "viem";
+export type { Account, Address, Chain, Hash, StateOverride } from "viem";

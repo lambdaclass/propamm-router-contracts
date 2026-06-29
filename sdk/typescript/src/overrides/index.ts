@@ -170,6 +170,29 @@ export function toStateOverride(
   }));
 }
 
+/**
+ * Like {@link toStateOverride}, but zeroes every pushed pAMM slot instead of
+ * applying its real value — the state-only counterpart that *disables* the
+ * venues rather than pricing them. A pAMM reading zeroed price state can't
+ * produce a winning quote (it reverts or quotes 0), so the router skips it and
+ * routes to the Uniswap V3 fallback — without overriding any contract's code.
+ * Generalizes the `bebopDefault` zeroing (see {@link BEBOP_DEFAULT_SLOT}) to
+ * every venue in the snapshot. Used to pin a swap's gas limit to the worst-case
+ * fallback path (see `PropAmmRouter.fallbackForcingOverride`).
+ */
+export function toDisablingStateOverride(
+  snapshot: OverridesSnapshot,
+  options: ToStateOverrideOptions = {},
+): StateOverride {
+  return toStateOverride(snapshot, options).map((entry) => ({
+    address: entry.address,
+    stateDiff: ("stateDiff" in entry && entry.stateDiff ? entry.stateDiff : []).map((diff) => ({
+      slot: diff.slot,
+      value: ZERO_WORD,
+    })),
+  }));
+}
+
 export interface OverridesRpcSourceOptions {
   /** Titan JSON-RPC endpoint. */
   url?: string;
