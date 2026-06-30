@@ -168,9 +168,9 @@ export class ContractClient {
     const blockOverrides =
       params.blockNumber !== undefined || params.blockTimestamp !== undefined
         ? {
-          ...(params.blockNumber !== undefined && { number: params.blockNumber }),
-          ...(params.blockTimestamp !== undefined && { time: params.blockTimestamp }),
-        }
+            ...(params.blockNumber !== undefined && { number: params.blockNumber }),
+            ...(params.blockTimestamp !== undefined && { time: params.blockTimestamp }),
+          }
         : undefined;
 
     let returnData;
@@ -224,6 +224,29 @@ export class ContractClient {
     return this.walletClient.writeContract({
       ...request,
       gas: GAS_LIMIT_BY_FUNCTION[params.functionName] ?? request.gas,
+    });
+  }
+
+  /**
+   * Estimate the gas a state-changing call would consume (`eth_estimateGas`),
+   * without sending it. Reverts surface as errors. Note this is the gas the call
+   * is expected to *use* — independent of the (higher) gas limit `write`
+   * attaches via {@link GAS_LIMIT_BY_FUNCTION}.
+   */
+  async estimateGas(params: WriteParams): Promise<bigint> {
+    if (!this.account) {
+      throw new Error(
+        "ContractClient was created without an account; gas estimation is unavailable",
+      );
+    }
+
+    return this.publicClient.estimateContractGas({
+      account: this.account,
+      address: params.address,
+      abi: params.abi,
+      functionName: params.functionName,
+      args: params.args ?? [],
+      value: params.value,
     });
   }
 

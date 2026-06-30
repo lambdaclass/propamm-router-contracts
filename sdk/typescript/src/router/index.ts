@@ -24,7 +24,7 @@ import {
   type OverridesSnapshot,
   type OverridesSource,
 } from "../overrides/index.js";
-import type { ContractClient } from "../client.js";
+import type { ContractClient, WriteParams } from "../client.js";
 
 /** Common parameters shared by every swap entrypoint. */
 export interface SwapParams {
@@ -183,12 +183,37 @@ export class PropAmmRouter {
    * selector, which skims the fee from the output.
    */
   async swap(params: SwapParams, opts: SwapOptions = {}): Promise<Hash> {
+    return this.client.write(this.buildSwapCall(params, opts));
+  }
+
+  /** Same as `swap`, but waits for the receipt and decodes the result. */
+  async swapAndWait(params: SwapParams, opts: SwapOptions = {}): Promise<SwapResult> {
+    return this.waitForSwap(await this.swap(params, opts));
+  }
+
+  /**
+   * Estimate the gas a `swap` with these exact params would consume
+   * (`eth_estimateGas` against current chain state). Use it to show the user the
+   * expected network fee (gas × gas price) before they send. Reverts (e.g. the
+   * swap would fail) surface as errors.
+   *
+   * This is the gas the swap is expected to *use* — what the user actually pays
+   * for. It differs from the (higher) gas limit `swap` attaches to the
+   * transaction to cover branches estimation can under-shoot.
+   */
+  async estimateSwapGas(params: SwapParams, opts: SwapOptions = {}): Promise<bigint> {
+    return this.client.estimateGas(this.buildSwapCall(params, opts));
+  }
+
+  /** Build the `write`/`estimateGas` params for a swap — selector, args, and
+   *  native-ETH value — shared by `swap` and `estimateSwapGas`. */
+  private buildSwapCall(params: SwapParams, opts: SwapOptions): WriteParams {
     const { mode, venueArgs } = venueDispatch(opts.venues);
     const fee = opts.frontendFee;
     if (fee) validateFee(fee);
 
     const selectors = SWAP_SELECTORS[mode];
-    return this.client.write({
+    return {
       address: this.address,
       abi: propAmmRouterAbi,
       // The `WithFee` selectors take the same tuple plus the fee struct last.
@@ -205,12 +230,7 @@ export class PropAmmRouter {
       ],
       // Native-ETH input is signalled by the sentinel and paid via msg.value.
       value: isAddressEqual(params.tokenIn, ETH_SENTINEL) ? params.amountIn : undefined,
-    });
-  }
-
-  /** Same as `swap`, but waits for the receipt and decodes the result. */
-  async swapAndWait(params: SwapParams, opts: SwapOptions = {}): Promise<SwapResult> {
-    return this.waitForSwap(await this.swap(params, opts));
+    };
   }
 
   /**
