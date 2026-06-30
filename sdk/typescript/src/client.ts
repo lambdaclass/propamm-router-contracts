@@ -58,6 +58,11 @@ export interface ReadParams {
 export interface WriteParams extends ReadParams {
   /** ETH value to send along with the call, in wei. */
   value?: bigint;
+  /**
+   * Explicit gas limit. Overrides both the per-function default
+   * ({@link GAS_LIMIT_BY_FUNCTION}) and viem's estimation.
+   */
+  gas?: bigint;
 }
 
 /**
@@ -206,6 +211,9 @@ export class ContractClient {
   /**
    * Send a state-changing contract call. Simulates first so reverts surface
    * as errors before any gas is spent. Returns the transaction hash.
+   *
+   * Gas limit precedence: an explicit `params.gas`, else the per-function
+   * default ({@link GAS_LIMIT_BY_FUNCTION}), else viem's estimation.
    */
   async write(params: WriteParams): Promise<Hash> {
     if (!this.walletClient || !this.account) {
@@ -223,7 +231,7 @@ export class ContractClient {
 
     return this.walletClient.writeContract({
       ...request,
-      gas: GAS_LIMIT_BY_FUNCTION[params.functionName] ?? request.gas,
+      gas: params.gas ?? GAS_LIMIT_BY_FUNCTION[params.functionName] ?? request.gas,
     });
   }
 

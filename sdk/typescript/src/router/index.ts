@@ -95,6 +95,12 @@ export interface SwapOptions {
    * before sending).
    */
   frontendFee?: FrontendFee;
+  /**
+   * Explicit gas limit for the transaction, in gas units. Overrides the
+   * hardcoded per-function default (`GAS_LIMIT_BY_FUNCTION`). Ignored by
+   * `estimateSwapGas`, which always estimates against chain state.
+   */
+  gas?: bigint;
 }
 
 /** Decoded outcome of a mined swap (from the `Swapped` event). */
@@ -230,6 +236,8 @@ export class PropAmmRouter {
       ],
       // Native-ETH input is signalled by the sentinel and paid via msg.value.
       value: isAddressEqual(params.tokenIn, ETH_SENTINEL) ? params.amountIn : undefined,
+      // Explicit override; falls back to the per-function default in `write`.
+      gas: opts.gas,
     };
   }
 
