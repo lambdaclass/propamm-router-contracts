@@ -168,9 +168,9 @@ export class ContractClient {
     const blockOverrides =
       params.blockNumber !== undefined || params.blockTimestamp !== undefined
         ? {
-          ...(params.blockNumber !== undefined && { number: params.blockNumber }),
-          ...(params.blockTimestamp !== undefined && { time: params.blockTimestamp }),
-        }
+            ...(params.blockNumber !== undefined && { number: params.blockNumber }),
+            ...(params.blockTimestamp !== undefined && { time: params.blockTimestamp }),
+          }
         : undefined;
 
     let returnData;
