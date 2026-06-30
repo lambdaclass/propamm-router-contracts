@@ -18,6 +18,7 @@ use rex_sdk::client::eth::call_with_overrides;
 use secp256k1::SecretKey;
 
 use crate::error::{Error, Result};
+use crate::router::abi;
 
 /// The receipt type returned by the transport (re-exported from ethrex).
 pub use ethrex_rpc::types::receipt::RpcReceipt as TransactionReceipt;
@@ -35,6 +36,37 @@ pub struct CallOverrides {
     /// Block overrides applied to the call (fourth RPC parameter), e.g. a
     /// pinned `number`/`time`.
     pub block: Option<BlockOverrideSet>,
+}
+
+/// Hardcoded gas limit (gas units) for a given on-chain function signature.
+///
+/// [`ContractClient::send`] attaches this value directly to the transaction,
+/// skipping gas estimation entirely — estimation under-shoots when execution
+/// takes a heavier branch than it simulated (e.g. a cheap venue fill estimated,
+/// but the ~2x-costlier Uniswap fallback executed). Signatures with no entry
+/// return `None` and are estimated by the node as usual.
+///
+/// The tiers reflect how much quoting each entrypoint does (none → all venues).
+/// Values are set above the worst observed gas plus headroom, calibrated against
+/// real mainnet swaps and the `test_gas_*` fork tests. `swap`/`*WithFee` quote
+/// more venues than the measured paths, so they are kept conservatively higher.
+fn gas_limit_for(signature: &str) -> Option<u64> {
+    let limit = if signature == abi::SWAP {
+        700_000
+    } else if signature == abi::SWAP_WITH_FEE {
+        750_000
+    } else if signature == abi::SWAP_VIA_SELECTED_VENUES {
+        700_000
+    } else if signature == abi::SWAP_VIA_SELECTED_VENUES_WITH_FEE {
+        750_000
+    } else if signature == abi::SWAP_VIA_VENUE {
+        600_000
+    } else if signature == abi::SWAP_VIA_VENUE_WITH_FEE {
+        650_000
+    } else {
+        return None;
+    };
+    Some(limit)
 }
 
 /// JSON-RPC contract client. Construct read-only with [`ContractClient::connect`]
@@ -117,9 +149,21 @@ impl ContractClient {
             .map_err(|e| Error::Abi(format!("eth_call returned invalid hex: {e}")))
     }
 
-    /// Sign and send a contract call as an EIP-1559 transaction (gas and
-    /// nonce are filled by the node). Returns the transaction hash.
-    pub async fn send(&self, to: Address, calldata: Vec<u8>, value: Option<U256>) -> Result<H256> {
+    /// Sign and send a contract call as an EIP-1559 transaction (nonce filled
+    /// by the node). Returns the transaction hash.
+    ///
+    /// Gas limit precedence: an explicit `gas`, else the per-function default
+    /// keyed on `signature` ([`gas_limit_for`]), else the node's estimation.
+    /// Passing a limit skips estimation, which can under-shoot the executed
+    /// branch.
+    pub async fn send(
+        &self,
+        to: Address,
+        signature: &str,
+        calldata: Vec<u8>,
+        value: Option<U256>,
+        gas: Option<u64>,
+    ) -> Result<H256> {
         let signer = self.signer.as_ref().ok_or_else(|| {
             Error::InvalidInput(
                 "ContractClient was created without a signer; sends are unavailable".into(),
@@ -129,6 +173,7 @@ impl ContractClient {
         let overrides = Overrides {
             from: Some(signer.address()),
             value,
+            gas_limit: gas.or_else(|| gas_limit_for(signature)),
             ..Default::default()
         };
         let tx = build_generic_tx(

@@ -137,6 +137,9 @@ pub struct SwapOptions {
     /// [1, [`MAX_FEE_BPS`]] and the recipient non-zero (validated before
     /// sending).
     pub frontend_fee: Option<FrontendFee>,
+    /// Explicit gas limit (gas units) for the transaction. Overrides the
+    /// hardcoded per-function default.
+    pub gas: Option<u64>,
 }
 
 /// Typed `PropAMMRouter` bindings. Quotes apply pAMM state overrides from the
@@ -248,7 +251,13 @@ impl PropAmmRouter {
         // Native-ETH input is signalled by the sentinel and paid via msg.value.
         let value = (params.token_in == ETH_SENTINEL).then_some(params.amount_in);
         self.client
-            .send(self.address, encode(signature, &args)?, value)
+            .send(
+                self.address,
+                signature,
+                encode(signature, &args)?,
+                value,
+                opts.gas,
+            )
             .await
     }
 
@@ -344,7 +353,9 @@ impl PropAmmRouter {
             abi::ERC20_APPROVE,
             &[Value::Address(self.address), Value::Uint(amount)],
         )?;
-        self.client.send(token, calldata, None).await
+        self.client
+            .send(token, abi::ERC20_APPROVE, calldata, None, None)
+            .await
     }
 
     /// Current router allowance of `token` granted by `owner`.
