@@ -123,15 +123,15 @@ class ContractClient:
         self,
         function: AsyncContractFunction,
         value: int | None = None,
-        gas: int | None = None,
+        gas_limit: int | None = None,
     ) -> str:
         """Build, sign, and send ``function`` as a transaction. Returns the tx hash.
 
         web3 fills nonce, gas, fees, and chain id via ``build_transaction``.
 
-        Gas limit precedence: an explicit ``gas``, else the per-function default
-        (:data:`GAS_LIMIT_BY_FUNCTION`), else web3's estimation. Setting a limit
-        skips estimation, which can under-shoot the executed branch.
+        Gas limit precedence: an explicit ``gas_limit``, else the per-function
+        default (:data:`GAS_LIMIT_BY_FUNCTION`), else web3's estimation. Setting a
+        limit skips estimation, which can under-shoot the executed branch.
         """
         if self.account is None:
             raise ClientError("ContractClient was created without a signer; sends are unavailable")
@@ -145,9 +145,11 @@ class ContractClient:
                 "nonce": nonce,
             }
             # Setting `gas` makes web3 skip its eth_estimateGas call.
-            gas_limit = gas if gas is not None else GAS_LIMIT_BY_FUNCTION.get(function.fn_name)
-            if gas_limit is not None:
-                tx_params["gas"] = gas_limit
+            limit = (
+                gas_limit if gas_limit is not None else GAS_LIMIT_BY_FUNCTION.get(function.fn_name)
+            )
+            if limit is not None:
+                tx_params["gas"] = limit
             tx = await function.build_transaction(tx_params)
             signed = self.account.sign_transaction(tx)
             raw = getattr(signed, "raw_transaction", None) or signed.rawTransaction
