@@ -139,7 +139,7 @@ pub struct SwapOptions {
     pub frontend_fee: Option<FrontendFee>,
     /// Explicit gas limit (gas units) for the transaction. Overrides the
     /// hardcoded per-function default.
-    pub gas: Option<u64>,
+    pub gas_limit: Option<u64>,
 }
 
 /// Typed `PropAMMRouter` bindings. Quotes apply pAMM state overrides from the
@@ -256,7 +256,7 @@ impl PropAmmRouter {
                 signature,
                 encode(signature, &args)?,
                 value,
-                opts.gas,
+                opts.gas_limit,
             )
             .await
     }

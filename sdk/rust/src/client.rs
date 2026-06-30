@@ -145,17 +145,17 @@ impl ContractClient {
     /// Sign and send a contract call as an EIP-1559 transaction (nonce filled
     /// by the node). Returns the transaction hash.
     ///
-    /// Gas limit precedence: an explicit `gas`, else the per-function default
-    /// keyed on `signature` ([`gas_limit_for`]), else the node's estimation.
-    /// Passing a limit skips estimation, which can under-shoot the executed
-    /// branch.
+    /// Gas limit precedence: an explicit `gas_limit`, else the per-function
+    /// default keyed on `signature` ([`gas_limit_for`]), else the node's
+    /// estimation. Passing a limit skips estimation, which can under-shoot the
+    /// executed branch.
     pub async fn send(
         &self,
         to: Address,
         signature: &str,
         calldata: Vec<u8>,
         value: Option<U256>,
-        gas: Option<u64>,
+        gas_limit: Option<u64>,
     ) -> Result<H256> {
         let signer = self.signer.as_ref().ok_or_else(|| {
             Error::InvalidInput(
@@ -166,7 +166,7 @@ impl ContractClient {
         let overrides = Overrides {
             from: Some(signer.address()),
             value,
-            gas_limit: gas.or_else(|| gas_limit_for(signature)),
+            gas_limit: gas_limit.or_else(|| gas_limit_for(signature)),
             ..Default::default()
         };
         let tx = build_generic_tx(
