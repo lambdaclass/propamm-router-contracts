@@ -56,8 +56,8 @@ fn gas_limit_for(signature: &str) -> Option<u64> {
         abi::SWAP_WITH_FEE => 750_000,
         abi::SWAP_VIA_SELECTED_VENUES => 700_000,
         abi::SWAP_VIA_SELECTED_VENUES_WITH_FEE => 750_000,
-        abi::SWAP_VIA_VENUE => 600_000,
-        abi::SWAP_VIA_VENUE_WITH_FEE => 650_000,
+        abi::SWAP_VIA_VENUE => 500_000,
+        abi::SWAP_VIA_VENUE_WITH_FEE => 550_000,
         _ => return None,
     })
 }
