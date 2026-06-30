@@ -51,22 +51,15 @@ pub struct CallOverrides {
 /// real mainnet swaps and the `test_gas_*` fork tests. `swap`/`*WithFee` quote
 /// more venues than the measured paths, so they are kept conservatively higher.
 fn gas_limit_for(signature: &str) -> Option<u64> {
-    let limit = if signature == abi::SWAP {
-        700_000
-    } else if signature == abi::SWAP_WITH_FEE {
-        750_000
-    } else if signature == abi::SWAP_VIA_SELECTED_VENUES {
-        700_000
-    } else if signature == abi::SWAP_VIA_SELECTED_VENUES_WITH_FEE {
-        750_000
-    } else if signature == abi::SWAP_VIA_VENUE {
-        600_000
-    } else if signature == abi::SWAP_VIA_VENUE_WITH_FEE {
-        650_000
-    } else {
-        return None;
-    };
-    Some(limit)
+    Some(match signature {
+        abi::SWAP => 700_000,
+        abi::SWAP_WITH_FEE => 750_000,
+        abi::SWAP_VIA_SELECTED_VENUES => 700_000,
+        abi::SWAP_VIA_SELECTED_VENUES_WITH_FEE => 750_000,
+        abi::SWAP_VIA_VENUE => 600_000,
+        abi::SWAP_VIA_VENUE_WITH_FEE => 650_000,
+        _ => return None,
+    })
 }
 
 /// JSON-RPC contract client. Construct read-only with [`ContractClient::connect`]
