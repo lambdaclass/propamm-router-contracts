@@ -75,8 +75,8 @@ const GAS_LIMIT_BY_FUNCTION: Record<string, bigint> = {
   swapWithFeeV1: 750_000n,
   swapViaSelectedVenuesV1: 700_000n,
   swapViaSelectedVenuesWithFeeV1: 750_000n,
-  swapViaVenueV1: 600_000n,
-  swapViaVenueWithFeeV1: 650_000n,
+  swapViaVenueV1: 500_000n,
+  swapViaVenueWithFeeV1: 550_000n,
 };
 
 export interface CallParams extends WriteParams {
@@ -168,9 +168,9 @@ export class ContractClient {
     const blockOverrides =
       params.blockNumber !== undefined || params.blockTimestamp !== undefined
         ? {
-            ...(params.blockNumber !== undefined && { number: params.blockNumber }),
-            ...(params.blockTimestamp !== undefined && { time: params.blockTimestamp }),
-          }
+          ...(params.blockNumber !== undefined && { number: params.blockNumber }),
+          ...(params.blockTimestamp !== undefined && { time: params.blockTimestamp }),
+        }
         : undefined;
 
     let returnData;
