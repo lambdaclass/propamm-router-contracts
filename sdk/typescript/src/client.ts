@@ -62,7 +62,7 @@ export interface WriteParams extends ReadParams {
    * Explicit gas limit. Overrides both the per-function default
    * ({@link GAS_LIMIT_BY_FUNCTION}) and viem's estimation.
    */
-  gas?: bigint;
+  gasLimit?: bigint;
 }
 
 /**
@@ -231,7 +231,7 @@ export class ContractClient {
 
     return this.walletClient.writeContract({
       ...request,
-      gas: params.gas ?? GAS_LIMIT_BY_FUNCTION[params.functionName] ?? request.gas,
+      gas: params.gasLimit ?? GAS_LIMIT_BY_FUNCTION[params.functionName] ?? request.gas,
     });
   }
 
