@@ -60,6 +60,25 @@ export interface WriteParams extends ReadParams {
   value?: bigint;
 }
 
+/**
+ * Hardcoded gas limit per on-chain function. `write` attaches this value
+ * directly to the transaction, skipping gas estimation entirely — estimation
+ * under-shoots when execution takes a heavier branch than it simulated (e.g. a
+ * cheap venue fill estimated, but the ~2x-costlier Uniswap fallback executed).
+ *
+ * Keyed by on-chain function name; the tiers reflect how much quoting each
+ * entrypoint does (none → all venues). Functions absent here are sent without an
+ * explicit gas limit, so viem estimates them as usual.
+ */
+const GAS_LIMIT_BY_FUNCTION: Record<string, bigint> = {
+  swapV1: 700_000n,
+  swapWithFeeV1: 750_000n,
+  swapViaSelectedVenuesV1: 700_000n,
+  swapViaSelectedVenuesWithFeeV1: 750_000n,
+  swapViaVenueV1: 600_000n,
+  swapViaVenueWithFeeV1: 650_000n,
+};
+
 export interface CallParams extends WriteParams {
   /** State overrides applied to the `eth_call` (third RPC parameter). */
   stateOverride?: StateOverride;
@@ -149,9 +168,9 @@ export class ContractClient {
     const blockOverrides =
       params.blockNumber !== undefined || params.blockTimestamp !== undefined
         ? {
-            ...(params.blockNumber !== undefined && { number: params.blockNumber }),
-            ...(params.blockTimestamp !== undefined && { time: params.blockTimestamp }),
-          }
+          ...(params.blockNumber !== undefined && { number: params.blockNumber }),
+          ...(params.blockTimestamp !== undefined && { time: params.blockTimestamp }),
+        }
         : undefined;
 
     let returnData;
@@ -202,7 +221,10 @@ export class ContractClient {
       value: params.value,
     });
 
-    return this.walletClient.writeContract(request);
+    return this.walletClient.writeContract({
+      ...request,
+      gas: GAS_LIMIT_BY_FUNCTION[params.functionName] ?? request.gas,
+    });
   }
 
   /** Wait until a transaction is mined and return its receipt. */
