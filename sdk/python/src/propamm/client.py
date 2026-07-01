@@ -26,6 +26,24 @@ from .error import ClientError, RevertError
 #: How long ``wait_for_transaction`` polls before giving up, in seconds.
 RECEIPT_TIMEOUT_SECONDS = 120
 
+#: Hardcoded gas limit per on-chain function. :meth:`ContractClient.send`
+#: attaches this value directly, skipping gas estimation — estimation
+#: under-shoots when execution takes a heavier branch than it simulated (e.g. a
+#: cheap venue fill estimated, but the ~2x-costlier Uniswap fallback executed).
+#:
+#: Keyed by on-chain function name; the tiers reflect how much quoting each
+#: entrypoint does (none -> all venues). Functions absent here are sent without an
+#: explicit limit, so web3 estimates them as usual. Values are set above the
+#: worst observed gas plus headroom.
+GAS_LIMIT_BY_FUNCTION: dict[str, int] = {
+    "swapV1": 700_000,
+    "swapWithFeeV1": 750_000,
+    "swapViaSelectedVenuesV1": 700_000,
+    "swapViaSelectedVenuesWithFeeV1": 750_000,
+    "swapViaVenueV1": 500_000,
+    "swapViaVenueWithFeeV1": 550_000,
+}
+
 
 class ContractClient:
     """JSON-RPC contract client.
@@ -101,10 +119,19 @@ class ContractClient:
             raise ClientError("eth_call returned no result")
         return bytes(self.w3.to_bytes(hexstr=result))
 
-    async def send(self, function: AsyncContractFunction, value: int | None = None) -> str:
+    async def send(
+        self,
+        function: AsyncContractFunction,
+        value: int | None = None,
+        gas_limit: int | None = None,
+    ) -> str:
         """Build, sign, and send ``function`` as a transaction. Returns the tx hash.
 
         web3 fills nonce, gas, fees, and chain id via ``build_transaction``.
+
+        Gas limit precedence: an explicit ``gas_limit``, else the per-function
+        default (:data:`GAS_LIMIT_BY_FUNCTION`), else web3's estimation. Setting a
+        limit skips estimation, which can under-shoot the executed branch.
         """
         if self.account is None:
             raise ClientError("ContractClient was created without a signer; sends are unavailable")
@@ -112,9 +139,18 @@ class ContractClient:
             # web3 fills gas, fees, and chain id in `build_transaction`, but not the
             # nonce — supply it ourselves (pending, so back-to-back sends don't collide).
             nonce = await self.w3.eth.get_transaction_count(self.account.address, "pending")
-            tx = await function.build_transaction(
-                {"from": self.account.address, "value": value or 0, "nonce": nonce}
+            tx_params: dict[str, Any] = {
+                "from": self.account.address,
+                "value": value or 0,
+                "nonce": nonce,
+            }
+            # Setting `gas` makes web3 skip its eth_estimateGas call.
+            limit = (
+                gas_limit if gas_limit is not None else GAS_LIMIT_BY_FUNCTION.get(function.fn_name)
             )
+            if limit is not None:
+                tx_params["gas"] = limit
+            tx = await function.build_transaction(tx_params)
             signed = self.account.sign_transaction(tx)
             raw = getattr(signed, "raw_transaction", None) or signed.rawTransaction
             return self.w3.to_hex(await self.w3.eth.send_raw_transaction(raw))
