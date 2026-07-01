@@ -24,7 +24,7 @@ import {
   type OverridesSnapshot,
   type OverridesSource,
 } from "../overrides/index.js";
-import type { ContractClient } from "../client.js";
+import { GAS_LIMIT_BY_FUNCTION, type ContractClient } from "../client.js";
 
 /** Common parameters shared by every swap entrypoint. */
 export interface SwapParams {
@@ -95,6 +95,12 @@ export interface SwapOptions {
    * before sending).
    */
   frontendFee?: FrontendFee;
+  /**
+   * Explicit gas limit for the transaction, in gas units. Overrides the
+   * hardcoded per-function default (`GAS_LIMIT_BY_FUNCTION`); reflected by
+   * `gasLimitFor`.
+   */
+  gasLimit?: bigint;
 }
 
 /** Decoded outcome of a mined swap (from the `Swapped` event). */
@@ -205,12 +211,28 @@ export class PropAmmRouter {
       ],
       // Native-ETH input is signalled by the sentinel and paid via msg.value.
       value: isAddressEqual(params.tokenIn, ETH_SENTINEL) ? params.amountIn : undefined,
+      // Explicit override; falls back to the per-function default in `write`.
+      gasLimit: opts.gasLimit,
     });
   }
 
   /** Same as `swap`, but waits for the receipt and decodes the result. */
   async swapAndWait(params: SwapParams, opts: SwapOptions = {}): Promise<SwapResult> {
     return this.waitForSwap(await this.swap(params, opts));
+  }
+
+  /**
+   * The gas limit `swap`/`swapAndWait` will attach for these options — the
+   * explicit `opts.gasLimit` if set, otherwise the hardcoded per-function
+   * default from {@link GAS_LIMIT_BY_FUNCTION}. Use it to preview the maximum
+   * network fee (gasLimit × gas price) without sending, or to size a balance
+   * check. Pure: no RPC call.
+   */
+  gasLimitFor(opts: SwapOptions = {}): bigint {
+    if (opts.gasLimit !== undefined) return opts.gasLimit;
+    const { mode } = venueDispatch(opts.venues);
+    const selectors = SWAP_SELECTORS[mode];
+    return GAS_LIMIT_BY_FUNCTION[opts.frontendFee ? selectors.withFee : selectors.plain];
   }
 
   /**
