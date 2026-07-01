@@ -2,6 +2,14 @@
 
 All notable changes to the Rust SDK (`propamm`) are documented here.
 
+## [1.1.2] - 2026-07-01
+
+### Added
+
+- Swaps now attach a hardcoded per-function gas limit and skip node gas
+  estimation, which can under-shoot when execution takes a heavier branch than
+  it simulated. Override per call with the new `SwapOptions.gas_limit`.
+
 ## [1.1.1] - 2026-06-25
 
 ### Fixed
