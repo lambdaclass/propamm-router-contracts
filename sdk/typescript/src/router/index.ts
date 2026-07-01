@@ -24,7 +24,7 @@ import {
   type OverridesSnapshot,
   type OverridesSource,
 } from "../overrides/index.js";
-import type { ContractClient, WriteParams } from "../client.js";
+import { GAS_LIMIT_BY_FUNCTION, type ContractClient } from "../client.js";
 
 /** Common parameters shared by every swap entrypoint. */
 export interface SwapParams {
@@ -97,8 +97,8 @@ export interface SwapOptions {
   frontendFee?: FrontendFee;
   /**
    * Explicit gas limit for the transaction, in gas units. Overrides the
-   * hardcoded per-function default (`GAS_LIMIT_BY_FUNCTION`). Ignored by
-   * `estimateSwapGas`, which always estimates against chain state.
+   * hardcoded per-function default (`GAS_LIMIT_BY_FUNCTION`); reflected by
+   * `gasLimitFor`.
    */
   gasLimit?: bigint;
 }
@@ -189,37 +189,12 @@ export class PropAmmRouter {
    * selector, which skims the fee from the output.
    */
   async swap(params: SwapParams, opts: SwapOptions = {}): Promise<Hash> {
-    return this.client.write(this.buildSwapCall(params, opts));
-  }
-
-  /** Same as `swap`, but waits for the receipt and decodes the result. */
-  async swapAndWait(params: SwapParams, opts: SwapOptions = {}): Promise<SwapResult> {
-    return this.waitForSwap(await this.swap(params, opts));
-  }
-
-  /**
-   * Estimate the gas a `swap` with these exact params would consume
-   * (`eth_estimateGas` against current chain state). Use it to show the user the
-   * expected network fee (gas × gas price) before they send. Reverts (e.g. the
-   * swap would fail) surface as errors.
-   *
-   * This is the gas the swap is expected to *use* — what the user actually pays
-   * for. It differs from the (higher) gas limit `swap` attaches to the
-   * transaction to cover branches estimation can under-shoot.
-   */
-  async estimateSwapGas(params: SwapParams, opts: SwapOptions = {}): Promise<bigint> {
-    return this.client.estimateGas(this.buildSwapCall(params, opts));
-  }
-
-  /** Build the `write`/`estimateGas` params for a swap — selector, args, and
-   *  native-ETH value — shared by `swap` and `estimateSwapGas`. */
-  private buildSwapCall(params: SwapParams, opts: SwapOptions): WriteParams {
     const { mode, venueArgs } = venueDispatch(opts.venues);
     const fee = opts.frontendFee;
     if (fee) validateFee(fee);
 
     const selectors = SWAP_SELECTORS[mode];
-    return {
+    return this.client.write({
       address: this.address,
       abi: propAmmRouterAbi,
       // The `WithFee` selectors take the same tuple plus the fee struct last.
@@ -238,7 +213,26 @@ export class PropAmmRouter {
       value: isAddressEqual(params.tokenIn, ETH_SENTINEL) ? params.amountIn : undefined,
       // Explicit override; falls back to the per-function default in `write`.
       gasLimit: opts.gasLimit,
-    };
+    });
+  }
+
+  /** Same as `swap`, but waits for the receipt and decodes the result. */
+  async swapAndWait(params: SwapParams, opts: SwapOptions = {}): Promise<SwapResult> {
+    return this.waitForSwap(await this.swap(params, opts));
+  }
+
+  /**
+   * The gas limit `swap`/`swapAndWait` will attach for these options — the
+   * explicit `opts.gasLimit` if set, otherwise the hardcoded per-function
+   * default from {@link GAS_LIMIT_BY_FUNCTION}. Use it to preview the maximum
+   * network fee (gasLimit × gas price) without sending, or to size a balance
+   * check. Pure: no RPC call.
+   */
+  gasLimitFor(opts: SwapOptions = {}): bigint {
+    if (opts.gasLimit !== undefined) return opts.gasLimit;
+    const { mode } = venueDispatch(opts.venues);
+    const selectors = SWAP_SELECTORS[mode];
+    return GAS_LIMIT_BY_FUNCTION[opts.frontendFee ? selectors.withFee : selectors.plain];
   }
 
   /**
