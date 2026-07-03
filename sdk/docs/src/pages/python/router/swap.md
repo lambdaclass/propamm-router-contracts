@@ -118,3 +118,22 @@ tx_hash = await router.swap(
     SwapOptions(frontend_fee=FrontendFee(bps=25, recipient="0x...")),  # 0.25%
 )
 ```
+
+`gas_limit` sets an explicit transaction gas limit, overriding the per-function
+default described below.
+
+```python
+tx_hash = await router.swap(params, SwapOptions(gas_limit=800_000))
+```
+
+## Gas limits
+
+Swaps attach a **hardcoded per-function gas limit** and skip node gas
+estimation. Estimation runs against the current state, but the swap can take a
+heavier branch when it executes, so an estimate can under-shoot and the
+transaction runs out of gas. The hardcoded limits sit above the worst observed
+branch (plus headroom), and are tiered by how much quoting each entrypoint does
+on-chain (a single named venue is cheapest; the all-venues requote is highest).
+
+Pass [`SwapOptions.gas_limit`](/python/types#swapoptions) to override the
+default for a call.

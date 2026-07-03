@@ -80,6 +80,7 @@ Per-swap options, accepted by [`swap`](/typescript/router/swap) and
 interface SwapOptions {
   venues?: readonly Address[];
   frontendFee?: FrontendFee;
+  gasLimit?: bigint;
 }
 ```
 
@@ -89,6 +90,9 @@ interface SwapOptions {
   best-quoting venue overall.
 - `frontendFee` — skim a [frontend fee](#frontendfee) from the output;
   routes the call through the contract's `WithFee` selector.
+- `gasLimit` — explicit transaction gas limit, in gas units. Overrides the
+  hardcoded per-function default (see [swap](/typescript/router/swap#gas-limits));
+  read the effective value with [`gasLimitFor`](/typescript/router/swap#gaslimitfor).
 
 ## FrontendFee
 

@@ -91,6 +91,7 @@ Per-swap options, accepted by [`swap_with`](/rust/router/swap) and
 pub struct SwapOptions {
     pub venues: Option<Vec<Address>>,
     pub frontend_fee: Option<FrontendFee>,
+    pub gas_limit: Option<u64>,
 }
 ```
 
@@ -100,6 +101,8 @@ pub struct SwapOptions {
   best-quoting venue overall.
 - `frontend_fee` — skim a [frontend fee](#frontendfee) from the output;
   routes the call through the contract's `WithFee` selector.
+- `gas_limit` — explicit transaction gas limit, in gas units. Overrides the
+  hardcoded per-function default (see [swap](/rust/router/swap#gas-limits)).
 
 ## FrontendFee
 

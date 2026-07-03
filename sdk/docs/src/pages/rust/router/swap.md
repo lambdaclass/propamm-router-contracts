@@ -89,6 +89,28 @@ let opts = SwapOptions {
 let hash = router.swap_with(&params, &opts).await?;
 ```
 
+`gas_limit` sets an explicit transaction gas limit, overriding the per-function
+default described below.
+
+```rust
+use propamm::router::SwapOptions;
+
+let opts = SwapOptions { gas_limit: Some(800_000), ..Default::default() };
+let hash = router.swap_with(&params, &opts).await?;
+```
+
+## Gas limits
+
+Swaps attach a **hardcoded per-function gas limit** and skip node gas
+estimation. Estimation runs against the current state, but the swap can take a
+heavier branch when it executes, so an estimate can under-shoot and the
+transaction runs out of gas. The hardcoded limits sit above the worst observed
+branch (plus headroom), and are tiered by how much quoting each entrypoint does
+on-chain (a single named venue is cheapest; the all-venues requote is highest).
+
+Pass [`SwapOptions.gas_limit`](/rust/types#swapoptions) to override the default
+for a call.
+
 ## swap_and_wait
 
 Same parameters; additionally waits for the receipt and decodes the outcome.

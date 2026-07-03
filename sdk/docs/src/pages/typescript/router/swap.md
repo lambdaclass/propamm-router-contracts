@@ -112,3 +112,46 @@ const hash = await router.swap(params, {
   frontendFee: { bps: 25, recipient: "0x..." }, // 0.25% to the fee recipient
 });
 ```
+
+`gasLimit` sets an explicit transaction gas limit, overriding the per-function
+default described below.
+
+```ts
+const hash = await router.swap(params, { gasLimit: 800_000n });
+```
+
+## Gas limits
+
+Swaps attach a **hardcoded per-function gas limit** and skip node gas
+estimation. Estimation runs against the current state, but the swap can take a
+heavier branch when it executes, so an estimate can under-shoot and the
+transaction runs out of gas. The hardcoded limits sit above the worst observed
+branch (plus headroom), and are tiered by how much quoting each entrypoint does
+on-chain (a single named venue is cheapest; the all-venues requote is highest).
+
+Pass [`SwapOptions.gasLimit`](/typescript/types#swapoptions) to override the
+default for a call.
+
+## gasLimitFor
+
+Returns the gas limit [`swap`](#swap) / `swapAndWait` will attach for a given
+`SwapOptions` — the explicit `gasLimit` if set, otherwise the hardcoded
+per-function default. Pure (no RPC), so it's suited to previewing the maximum
+network fee (`gasLimit × gas price`) or sizing a balance check before sending.
+
+```ts
+gasLimitFor(opts?: SwapOptions): bigint
+```
+
+```ts
+import { PAMMS } from "propamm/common/pamms";
+
+router.gasLimitFor(); // all-venues swap
+router.gasLimitFor({ venues: [PAMMS.kipseli] }); // single-venue (cheapest)
+router.gasLimitFor({ venues: [PAMMS.fermi, PAMMS.bebop] }); // selected-venues
+router.gasLimitFor({ gasLimit: 800_000n }); // explicit override → 800000n
+
+// fee preview
+const gasPrice = await client.publicClient.getGasPrice();
+const maxFeeWei = router.gasLimitFor({ venues }) * gasPrice;
+```
