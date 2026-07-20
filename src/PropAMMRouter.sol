@@ -259,7 +259,7 @@ contract PropAMMRouter is
         uint256 grossMin = FrontendFees._grossUp(amountOutMin, fee.bps);
         (uint256 bestQuote, address venue) = _pickBestVenueFrom(venues, tokenIn, tokenOut, amountIn);
 
-        if (venue == address(0) || bestQuote < amountOutMin) {
+        if (venue == address(0) || bestQuote < grossMin) {
             venue = fallbackSwapRouter;
         }
 
