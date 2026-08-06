@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # execute_swaps.sh — fire N $1 swaps through the PropAMM router, rotating the
-# venue (BEBOP -> FERMI -> KIPSELI -> BEBOP -> ...) across calls.
+# venue (BEBOP -> FERMI -> KIPSELI -> TEMPEST -> TAURUSFI -> BEBOP -> ...)
+# across calls.
 #
 # Each swap sells 1 USDC ($1) for WETH. The swap function depends on MODE:
 #   MODE=withfee (default) -> `swapViaVenueWithFeeV1`: routes to the named venue
@@ -217,11 +218,13 @@ USDC=0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
 WETH=0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2
 
 # Venues, indexed in lockstep: VENUE_NAMES[i] lives at VENUE_ADDRS[i].
-VENUE_NAMES=(BEBOP FERMI KIPSELI)
+VENUE_NAMES=(BEBOP FERMI KIPSELI TEMPEST TAURUSFI)
 VENUE_ADDRS=(
   0xdb13ad0fcd134e9c48f2fdaea8f6751a0f5349ca
   0x5979458912F80B96d30D4220af8E2e4925A33320
   0x71e790dd841c8A9061487cb3E78C288E75cE0B3d
+  0x00000003f1ec2379e79F58E12EC6C4F51Ee92149
+  0x97CC760E40897D6A52c28fAa97593dB88e551223
 )
 NUM_VENUES=${#VENUE_ADDRS[@]}
 
