@@ -2,6 +2,24 @@
 
 All notable changes to the TypeScript SDK (`propamm`) are documented here.
 
+## [Unreleased]
+
+### Added
+
+- `TEMPEST`, `TAURUSFI` and `METRIC` venue constants in `common/pamms`, plus
+  their `tempest` / `taurusfi` / `metric` entries in `PAMMS` (and therefore in
+  the `PammName` union).
+
+### Changed
+
+- **`BEBOP` now points at `0xB09AaA5614916d7AEb59C295C52c92ca82aDdD76`**, the
+  current Bebop deployment. Code that hardcoded the previous address
+  (`0xdB13ad0fcD134E9c48f2fDaEa8f6751a0F5349ca`) must be updated.
+- `toStateOverride`'s `bebopDefault` now zeroes the registry slot of _every_
+  known Bebop venue absent from the snapshot, not just the current one. The
+  superseded `0xdB13ad…` deployment joins `0x160141A…` in that set, so a stale
+  on-chain price from either can no longer win a quote it could never fill.
+
 ## [1.2.2] - 2026-07-01
 
 ### Added

@@ -2,6 +2,24 @@
 
 All notable changes to the Python SDK (`propamm`) are documented here.
 
+## [Unreleased]
+
+### Added
+
+- `TEMPEST`, `TAURUSFI` and `METRIC` venue constants in `common.pamms`, plus
+  their `tempest` / `taurusfi` / `metric` entries in `PAMMS`.
+
+### Changed
+
+- **`BEBOP` now points at `0xB09AaA5614916d7AEb59C295C52c92ca82aDdD76`**, the
+  current Bebop deployment. Code that hardcoded the previous address
+  (`0xdB13ad0fcD134E9c48f2fDaEa8f6751a0F5349ca`) must be updated.
+- `to_state_override`'s `bebop_default` now also neutralizes the superseded
+  `0xdB13ad…` deployment, which joins `0x160141A…` in the legacy set, so a
+  stale on-chain price from either can no longer win a quote it could never
+  fill. `_LEGACY_BEBOP_LOWER` is now a tuple of addresses rather than a single
+  string.
+
 ## [1.1.3] - 2026-07-01
 
 ### Added

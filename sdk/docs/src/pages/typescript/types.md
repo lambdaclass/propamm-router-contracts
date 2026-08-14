@@ -126,8 +126,9 @@ interface QuoteOptions {
 
 - `overrides` — replace the router's attached overrides source for this call:
   another source, a fixed snapshot, or `null` to quote raw on-chain state.
-- `bebopDefault` — set `false` to keep Bebop's raw on-chain slot instead of
-  zeroing it when the snapshot has no Bebop entry (default `true`).
+- `bebopDefault` — set `false` to keep the raw on-chain slot of every known
+  Bebop venue instead of zeroing the ones absent from the snapshot (default
+  `true`).
 - `venues` — restrict the quote to these venues: a single entry quotes that
   venue directly, several pick the best among them. Must be non-empty when
   present.

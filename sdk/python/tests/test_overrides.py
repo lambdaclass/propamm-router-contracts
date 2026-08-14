@@ -109,10 +109,11 @@ def test_to_state_override_keeps_real_bebop_diffs_without_injecting_default():
     state = to_state_override(snapshot)
     assert state[contract]["stateDiff"][_word(7)] == _word(99)
     assert BEBOP not in state
-    # ...but the legacy Bebop venue, which never has a fresh override, is still
-    # neutralized.
-    legacy = to_checksum_address(_LEGACY_BEBOP_LOWER)
-    assert state[legacy]["stateDiff"][_word(int(BEBOP_DEFAULT_SLOT, 16))] == _word(0)
+    # ...but every legacy Bebop venue, which never has a fresh override, is
+    # still neutralized.
+    for legacy_lower in _LEGACY_BEBOP_LOWER:
+        legacy = to_checksum_address(legacy_lower)
+        assert state[legacy]["stateDiff"][_word(int(BEBOP_DEFAULT_SLOT, 16))] == _word(0)
 
 
 def test_parse_word_accepts_padded_and_unpadded_hex():

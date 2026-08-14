@@ -2,8 +2,11 @@ import type { Address } from "viem";
 
 // PropAMM venues seeded into the router whitelist at initialization.
 export const FERMI: Address = "0x5979458912F80B96d30D4220af8E2e4925A33320";
-export const BEBOP: Address = "0xdB13ad0fcD134E9c48f2fDaEa8f6751a0F5349ca";
+export const BEBOP: Address = "0xB09AaA5614916d7AEb59C295C52c92ca82aDdD76";
 export const KIPSELI: Address = "0x71e790dd841c8A9061487cb3E78C288E75cE0B3d";
+export const TEMPEST: Address = "0x00000003f1ec2379e79F58E12EC6C4F51Ee92149";
+export const TAURUSFI: Address = "0x97CC760E40897D6A52c28fAa97593dB88e551223";
+export const METRIC: Address = "0xE715Dc29d2c273D0FC5A03e5Cca9CcB0Abb1dCDB";
 
 /**
  * Curated propAMM name → venue address mapping, for the `venues` option of
@@ -16,6 +19,9 @@ export const PAMMS = {
   fermi: FERMI,
   bebop: BEBOP,
   kipseli: KIPSELI,
+  tempest: TEMPEST,
+  taurusfi: TAURUSFI,
+  metric: METRIC,
 } as const satisfies Record<string, Address>;
 
 export type PammName = keyof typeof PAMMS;

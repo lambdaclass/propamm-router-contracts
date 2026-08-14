@@ -49,11 +49,14 @@ BEACON_GENESIS_TS = 1_606_824_023
 SECS_PER_SLOT = 12
 
 _BEBOP_LOWER = BEBOP.lower()
-# Deprecated Bebop deployment still whitelisted on the router; it receives no
-# fresh overrides, so its stale on-chain price is always neutralized (see
-# `to_state_override`) until the router removes it from the whitelist.
-_LEGACY_BEBOP_LOWER = "0x160141a205f5ddcf096ba3f48b7ed21eb52c62ea"
-_BEBOP_ADDRESSES = (_BEBOP_LOWER, _LEGACY_BEBOP_LOWER)
+# Deprecated Bebop deployments that may still be whitelisted on the router; they
+# receive no fresh overrides, so their stale on-chain prices are always
+# neutralized (see `to_state_override`) until the router de-lists them.
+_LEGACY_BEBOP_LOWER = (
+    "0x160141a205f5ddcf096ba3f48b7ed21eb52c62ea",
+    "0xdb13ad0fcd134e9c48f2fdaea8f6751a0f5349ca",
+)
+_BEBOP_ADDRESSES = (_BEBOP_LOWER, *_LEGACY_BEBOP_LOWER)
 _META_KEYS = {"slot", "blockNumber", "block_number", "timestamp"}
 
 # Storage slot diffs for one contract: slot -> value (both ints).

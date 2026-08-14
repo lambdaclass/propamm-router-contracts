@@ -1,6 +1,6 @@
 # PropAMMRouter
 
-Single-hop router that quotes and executes swaps against a proprietary AMM (FermiSwap, Kipseli, or Bebop) or directly against Uniswap V3, and falls back to Uniswap V3 when the chosen proprietary venue cannot fill the swap.
+Single-hop router that quotes and executes swaps against a proprietary AMM (FermiSwap, Kipseli, Bebop, Tempest, TaurusFi, or Metric) or directly against Uniswap V3, and falls back to Uniswap V3 when the chosen proprietary venue cannot fill the swap.
 
 ## Deployed Contracts
 
@@ -10,10 +10,13 @@ The PropAMMs the router interacts with are deployed at:
 - Bebop: `0xB09AaA5614916d7AEb59C295C52c92ca82aDdD76`
 - Fermi: `0x5979458912f80b96d30d4220af8e2e4925a33320`
 - Kipseli: `0x71e790dd841c8a9061487cb3e78c288e75ce0b3d`
+- Tempest: `0x00000003f1ec2379e79F58E12EC6C4F51Ee92149`
+- TaurusFi: `0x97CC760E40897D6A52c28fAa97593dB88e551223`
+- Metric: `0xE715Dc29d2c273D0FC5A03e5Cca9CcB0Abb1dCDB`
 
 ## Overview
 
-Venues are identified **by address**: the three proprietary AMM routers (FermiSwap, Kipseli, Bebop) plus the Uniswap V3 fallback, denoted by the SwapRouter02 address wired in at deployment. The router exposes the following external functions (see `src/interfaces/IPropAMMRouter.sol` for the full NatSpec and the [rationale](https://github.com/lambdaclass/propamm-router-contracts/blob/main/docs/rationale.md) document with some design decisions):
+Venues are identified **by address**: the proprietary AMM routers (FermiSwap, Kipseli, Bebop, Tempest, TaurusFi, Metric) plus the Uniswap V3 fallback, denoted by the SwapRouter02 address wired in at deployment. The router exposes the following external functions (see `src/interfaces/IPropAMMRouter.sol` for the full NatSpec and the [rationale](https://github.com/lambdaclass/propamm-router-contracts/blob/main/docs/rationale.md) document with some design decisions):
 
 - `swapV1(tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline)`: pulls `amountIn` of `tokenIn` from `msg.sender`, routes through the best-quoting venue, and falls back to Uniswap V3 if that venue reverts or under-delivers. Returns `(amountOut, executedVenue)`, where `executedVenue` is the proprietary venue that filled or the SwapRouter02 address when the fallback ran. Reverts `InsufficientOutput` before pulling funds if the best quote is below `amountOutMin`, and re-checks `amountOutMin` against the measured balance delta of `recipient` after execution (the same error covers both the pre-pull and post-execution shortfall). Reverts when the contract is paused (see [Pausing the contract](#pausing-the-contract)); quote functions remain callable.
 - `swapViaVenueV1(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline)`: attempts the caller-specified `venue` first. A proprietary venue still falls back to Uniswap V3 if it fails to fill; naming the Uniswap V3 SwapRouter02 address routes directly to Uniswap V3 (it *is* the fallback, so there is nothing further to fall back to). Reverts `UnknownVenue` if `venue` is neither a whitelisted proprietary AMM nor the SwapRouter02 address.
@@ -24,7 +27,9 @@ Venues are identified **by address**: the three proprietary AMM routers (FermiSw
 
 The Uniswap V3 fallback prices and swaps at a per-pair fee tier, resolved on every quote and swap: the per-pair override for that pair if one exists, otherwise the global `fallbackFee` (`3000`, i.e. the 0.30% tier, by default). Callers never pass a fee. An `UPGRADER_ROLE` holder sets overrides with `setPairFee(tokenA, tokenB, fee)` or `setPairFees(tokenA[], tokenB[], fee[])` (order-independent; `fee == 0` clears an override), and retunes the global default with `setFallbackFee` — all without a contract upgrade. This lets stablecoin pairs use their tight tier (e.g. USDC/USDT at `100`) while volatile pairs keep `3000`/`10000`. Query the effective tier with `resolvedFee(tokenIn, tokenOut)` and the raw override with `getPairFee(tokenA, tokenB)`.
 
-A from-scratch deploy is pre-seeded by `initialize` with the global `fallbackFee` (`3000`), the deep mainnet tiers — USDT/USDC at `100`, USDT/WETH and USDC/WETH at `500` — and the default propAMM venue whitelist (FermiSwap, Kipseli, Bebop), so no post-deploy config step is needed. This runs only in `initialize` (initializer-gated), so it does not re-apply when an existing proxy upgrades; those deployments restore the same config via `scripts/setupRouterVariables.s.sol`, which sets `fallbackFee`, the per-pair tiers, and re-adds the default venues. An `UPGRADER_ROLE` holder can clear or retune any seeded tier afterward with `setPairFee`.
+A from-scratch deploy is pre-seeded by `initialize` with the global `fallbackFee` (`3000`) and the deep mainnet tiers — USDT/USDC at `100`, USDT/WETH and USDC/WETH at `500` — so the Uniswap fallback needs no post-deploy fee configuration. This runs only in `initialize` (initializer-gated), so it does not re-apply when an existing proxy upgrades. An `UPGRADER_ROLE` holder can clear or retune any seeded tier afterward with `setPairFee`.
+
+The **venue whitelist is not seeded**: `initialize` leaves `_whitelistedVenues` empty, so a freshly deployed router can only take the Uniswap V3 fallback until a `LISTING_ROLE` holder lists each propAMM with `addVenue` (see [Deployment](#deployment)). The venues to list are the addresses in [Deployed Contracts](#deployed-contracts) above. Because `_pickBestVenue` iterates the live set, a venue added this way is picked up by `swapV1` / `quoteV1` immediately, with no contract upgrade.
 
 ### Kipseli quote caveat
 
@@ -65,7 +70,7 @@ are unchanged and return **gross** output; a frontend nets out by subtracting it
 
 ### Deployment
 
-**Important**: the PropAMMRouter depends on Ethereum mainnet state, since it interacts with the Fermi, Kipseli, and Bebop router addresses (and the UniswapV3 router fallback). Therefore, for local development we suggest using a fork of mainnet. You can start an anvil instance forking mainnet with:
+**Important**: the PropAMMRouter depends on Ethereum mainnet state, since it interacts with the propAMM router addresses listed in [Deployed Contracts](#deployed-contracts) (and the UniswapV3 router fallback). Therefore, for local development we suggest using a fork of mainnet. You can start an anvil instance forking mainnet with:
 
 ```bash
 anvil --fork-url https://ethereum-rpc.publicnode.com
@@ -117,13 +122,13 @@ The response is keyed by proprietary AMM router address, with one entry per venu
   "result": {
     "blockNumber": "0x...",
     "0x5979458912f80b96d30d4220af8e2e4925a33320": { "stateOverride": { ... } },
-    "0xdb13ad0fcd134e9c48f2fdaea8f6751a0f5349ca": { "stateOverride": { ... } },
+    "0xb09aaa5614916d7aeb59c295c52c92ca82addd76": { "stateOverride": { ... } },
     "0x71e790dd841c8a9061487cb3e78c288e75ce0b3d": { "stateOverride": { ... } }
   }
 }
 ```
 
-The three keys are the FermiSwap, Bebop, and Kipseli routers, respectively. When calling `quoteVenueV1(venue, ...)`, pick the entry matching the venue address you want to quote. Kipseli additionally requires the router to hold `tokenIn`, since `simulateKipseliSwap` transfers it to Kipseli; we fund it with a `stateDiff` over the token contract's `_balances` slot for the router. FermiSwap and Bebop ignore the balance override, so the same snippet works for all three proprietary venues (only the venue address needs to change). For the Uniswap V3 fallback (naming the SwapRouter02 address) the Titan overrides aren't needed at all — QuoterV2 only reads on-chain pool state — so you can skip the `titan_getPammStateOverrides` call entirely and pass an empty state override (or omit the third `eth_call` parameter).
+The keys are propAMM router addresses — above, FermiSwap, Bebop, and Kipseli respectively. A snapshot only carries the venues Titan has fresh state for, so the set of keys varies between calls. When calling `quoteVenueV1(venue, ...)`, pick the entry matching the venue address you want to quote. Kipseli additionally requires the router to hold `tokenIn`, since `simulateKipseliSwap` transfers it to Kipseli; we fund it with a `stateDiff` over the token contract's `_balances` slot for the router. The other venues ignore the balance override, so the same snippet works for every proprietary venue (only the venue address needs to change). For the Uniswap V3 fallback (naming the SwapRouter02 address) the Titan overrides aren't needed at all — QuoterV2 only reads on-chain pool state — so you can skip the `titan_getPammStateOverrides` call entirely and pass an empty state override (or omit the third `eth_call` parameter).
 
 **Example: quote 1 WETH for USDC against the deployed router on the anvil fork.**
 
@@ -135,7 +140,7 @@ USDC=0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48
 
 # === Pick the venue to quote (only edit this line) ===
 # Venues are addresses: the Uniswap V3 fallback is the SwapRouter02 address;
-# the three proprietary AMM routers are listed in the table below.
+# the proprietary AMM routers are listed in the table below.
 VENUE_ADDR=0x71e790dd841c8a9061487cb3e78c288e75ce0b3d    # Kipseli
 
 # WETH stores balances in storage slot 3 (mapping(address => uint)).
@@ -170,7 +175,10 @@ This prints `amountOut`, e.g. `2115659878` (≈ 2115.66 USDC for 1 WETH, with US
 | Uniswap V3 fallback (SwapRouter02) | `0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45` — skip the Titan call |
 | FermiSwap | `0x5979458912f80b96d30d4220af8e2e4925a33320` |
 | Kipseli | `0x71e790dd841c8a9061487cb3e78c288e75ce0b3d` |
-| Bebop | `0xdb13ad0fcd134e9c48f2fdaea8f6751a0f5349ca` |
+| Bebop | `0xB09AaA5614916d7AEb59C295C52c92ca82aDdD76` |
+| Tempest | `0x00000003f1ec2379e79F58E12EC6C4F51Ee92149` |
+| TaurusFi | `0x97CC760E40897D6A52c28fAa97593dB88e551223` |
+| Metric | `0xE715Dc29d2c273D0FC5A03e5Cca9CcB0Abb1dCDB` |
 
 ### Pausing the contract
 
@@ -185,7 +193,7 @@ The state initializes to unpaused on `initialize`.
 
 Upgrades are gated through the `RouterAccessManager`: `_authorizeUpgrade` is `restricted`, and the `upgradeToAndCall` selector is assigned to `UPGRADER_ROLE`, which carries an execution delay (default 7 days). Upgrades therefore can no longer be applied in a single transaction — they are **scheduled** on the manager and **executed** after the delay, by the account holding `UPGRADER_ROLE`.
 
-> **Config precondition:** The whole fresh-deploy configuration is seeded only in `initialize` — i.e. on a fresh deploy — and is never re-applied on upgrade. This bites a proxy that predates that config in two ways. (1) Unconfigured pairs resolve their Uniswap fallback tier to the global `fallbackFee`; an enum-era deployment carries `fallbackFee = 0` after the upgrade, so the fallback resolves to tier `0` (invalid on Uniswap V3) for every unconfigured pair and reverts. (2) An enum-era deployment also has an **empty venue whitelist**, so `swapV1` can only ever take the Uniswap fallback and never routes the propAMMs. **After upgrading such a proxy, run `scripts/setupRouterVariables.s.sol` as the owner** to restore the config: it sets `fallbackFee = 3000`, seeds the deep per-pair tiers, and re-adds the default venues (FermiSwap, Kipseli, Bebop), matching a fresh `initialize`. Until that runs, the Uniswap fallback is unusable, so consider `pause()`-ing the router across the upgrade + config window if swaps could arrive in between (see "Running the upgrade" below).
+> **Config precondition:** The whole fresh-deploy configuration is seeded only in `initialize` — i.e. on a fresh deploy — and is never re-applied on upgrade. This bites a proxy that predates that config in two ways. (1) Unconfigured pairs resolve their Uniswap fallback tier to the global `fallbackFee`; an enum-era deployment carries `fallbackFee = 0` after the upgrade, so the fallback resolves to tier `0` (invalid on Uniswap V3) for every unconfigured pair and reverts. (2) An enum-era deployment also has an **empty venue whitelist**, so `swapV1` can only ever take the Uniswap fallback and never routes the propAMMs. **After upgrading such a proxy, restore the config manually** to match a fresh `initialize`: call `setFallbackFee(3000)` and `setPairFees` for the deep tiers (USDT/USDC at `100`, USDT/WETH and USDC/WETH at `500`) as an `UPGRADER_ROLE` holder, then `addVenue` for each propAMM in [Deployed Contracts](#deployed-contracts) as a `LISTING_ROLE` holder. Until the fee backfill runs, the Uniswap fallback is unusable, so consider `pause()`-ing the router across the upgrade + config window if swaps could arrive in between (see "Running the upgrade" below).
 
 ### Writing a new implementation
 

@@ -98,9 +98,10 @@ let opts = QuoteOptions { overrides: QuoteOverrides::Skip, ..Default::default() 
 let stale = router.quote_with(WETH, USDC, amount_in, &opts).await?;
 ```
 
-When a snapshot has no Bebop entry, a default slot override zeroes Bebop's
-price so a stale on-chain quote can't win venue selection (disable with
-`skip_bebop_default`). The Uniswap V3 fallback quoter only reads live pool
+For every known Bebop venue absent from a snapshot — the current deployment and
+the superseded ones, which receive no fresh overrides — a default slot override
+zeroes its price so a stale on-chain quote can't win venue selection (disable
+with `skip_bebop_default`). The Uniswap V3 fallback quoter only reads live pool
 state, so pAMM overrides never affect it (pin it via
 `venues: Some(vec![router.fallback_swap_router().await?])` if needed).
 Custom state diffs go through `ContractClient::call` with `CallOverrides`
