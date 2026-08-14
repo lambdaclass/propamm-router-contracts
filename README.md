@@ -7,7 +7,7 @@ Single-hop router that quotes and executes swaps against a proprietary AMM (Ferm
 The Prop AMM router contract is deployed on mainnet at `0x4ddf368080cd7946db5b459ad591c350158175e1`.
 
 The PropAMMs the router interacts with are deployed at:
-- Bebop: `0xdb13ad0fcd134e9c48f2fdaea8f6751a0f5349ca`
+- Bebop: `0xB09AaA5614916d7AEb59C295C52c92ca82aDdD76`
 - Fermi: `0x5979458912f80b96d30d4220af8e2e4925a33320`
 - Kipseli: `0x71e790dd841c8a9061487cb3e78c288e75ce0b3d`
 
