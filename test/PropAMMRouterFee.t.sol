@@ -282,11 +282,43 @@ contract PropAMMRouterFeeTest is Test {
             IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
         );
 
-        assertEq(amountOut, net);
-        // Each outbound leg burns another 1%.
+        // Each outbound leg burns another 1%; the returned amount is the user's
+        // measured receipt, not the nominal net.
+        assertEq(amountOut, _afterFot(net));
         assertEq(fotOut.balanceOf(feeRecipient), _afterFot(fee));
         assertEq(fotOut.balanceOf(user), _afterFot(net));
         assertEq(fotOut.balanceOf(address(router)), 0);
+    }
+
+    // The gross-delta check at the router passes, but the outbound burn pushes the
+    // recipient's measured receipt below the net min -> InsufficientOutput.
+    function test_swapWithFee_fotOutBelowMinReverts() public {
+        MockFeeOnTransferERC20 fotOut = new MockFeeOnTransferERC20("FOT", "FOT", 100); // 1%
+        uint256 routerOut = 1_000e18;
+        tokenIn.mint(user, 1_000e18);
+        fotOut.mint(address(swapRouter), routerOut);
+        swapRouter.setAmountOut(routerOut);
+        quoter.setQuote(routerOut);
+        vm.prank(user);
+        tokenIn.approve(address(router), 1_000e18);
+
+        uint256 delivered = _afterFot(routerOut); // credited to the router
+        uint256 fee = delivered * 50 / 10_000;
+        uint256 net = delivered - fee; // nominal net sent to the user
+        uint256 received = _afterFot(net); // what the user is actually credited
+        uint256 netMin = received + 1;
+
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(InsufficientOutput.selector, netMin, received));
+        router.swapWithFeeV1(
+            address(tokenIn),
+            address(fotOut),
+            1_000e18,
+            netMin,
+            user,
+            block.timestamp + 1,
+            IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
+        );
     }
 
     // For any feeBps in [0, MAX_FEE_BPS] and any delivered >= grossMin, the user nets

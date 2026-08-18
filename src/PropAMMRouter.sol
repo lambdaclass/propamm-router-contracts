@@ -168,7 +168,7 @@ contract PropAMMRouter is
         uint256 delivered;
         (delivered, executedVenue) = _coreSwap(venue, tokenIn, tokenOut, amountIn, grossMin, address(this), deadline);
 
-        amountOut = FrontendFees._skimAndDisburse(tokenOut, delivered, fee, recipient);
+        amountOut = FrontendFees._skimAndDisburse(tokenOut, delivered, fee, recipient, amountOutMin);
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
 
@@ -212,7 +212,7 @@ contract PropAMMRouter is
         (uint256 delivered, address executedVenue) =
             _coreSwap(venue, tokenIn, tokenOut, amountIn, grossMin, address(this), deadline);
 
-        amountOut = FrontendFees._skimAndDisburse(tokenOut, delivered, fee, recipient);
+        amountOut = FrontendFees._skimAndDisburse(tokenOut, delivered, fee, recipient, amountOutMin);
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
 
@@ -267,7 +267,7 @@ contract PropAMMRouter is
         uint256 delivered;
         (delivered, executedVenue) = _coreSwap(venue, tokenIn, tokenOut, amountIn, grossMin, address(this), deadline);
 
-        amountOut = FrontendFees._skimAndDisburse(tokenOut, delivered, fee, recipient);
+        amountOut = FrontendFees._skimAndDisburse(tokenOut, delivered, fee, recipient, amountOutMin);
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
 
