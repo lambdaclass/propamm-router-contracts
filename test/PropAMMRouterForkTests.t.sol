@@ -128,12 +128,18 @@ contract PropAMMRouterForkTests is Test {
     /// The update timestamp is set to the current fork block time so it lands
     /// inside the registry's freshness window regardless of the fork block.
     function _updateFermiPrice() internal {
-        // Target, lane, and price slot all taken from the mainnet updater tx
-        // 0x774c15474849b646ae2feab49379c7b178c1a32b4944e04aef842bb6823c6146
-        // Fermi's pricing lane scoped to this target; unlike Kipseli's lane 0,
-        // the lane index is a full 32-byte key.
-
-        address priceTarget = 0x26e5A56f807d4C937B0b815266B135F09B4Bf312;
+        // Lane and price slot taken from the mainnet updater tx
+        // 0x774c15474849b646ae2feab49379c7b178c1a32b4944e04aef842bb6823c6146.
+        // Unlike Kipseli's lane 0, the lane index is a full 32-byte key.
+        //
+        // `priceTarget` is Fermi's live pricing contract — the account that
+        // calls `getState` while quoting, which is what scopes the lane. It is
+        // NOT the target from the tx above: Fermi rotates this contract when it
+        // redeploys, and publishing to a rotated-out target leaves the lane the
+        // venue actually reads empty, so `getState` reverts with `0x666a2814`
+        // and the whole quote fails. When that happens, refresh this address
+        // from the `getState` caller in `forge test -vvvv`.
+        address priceTarget = 0xD0fD9FC7f36e8406A174B6763d3dF00AAB24e1C9;
         uint256 laneIndex = 0x2eec03b8999af9793df60f1395a1b41c29e22b324ea3200ca21bc692979b9d46;
         // Single packed price slot; replayed verbatim, the timestamp is
         // restamped to fork time in `_updateRegistryState`.
