@@ -16,13 +16,6 @@ All notable changes to the TypeScript SDK (`propamm`) are documented here.
   current Bebop deployment. Code that hardcoded the previous Bebop address must
   be updated.
 
-### Removed
-
-- The legacy-Bebop set behind `toStateOverride`. The superseded Bebop
-  deployments are no longer whitelisted on the router, so they can be neither
-  quoted nor dispatched and need no price neutralization; `bebopDefault` now
-  zeroes only the current `BEBOP` slot when a snapshot omits it.
-
 ## [1.2.2] - 2026-07-01
 
 ### Added
