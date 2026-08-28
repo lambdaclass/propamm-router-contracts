@@ -135,8 +135,8 @@ pub struct QuoteOptions {
 ```
 
 - `overrides` — which override source this call uses (see below).
-- `skip_bebop_default` — set `true` to keep the raw on-chain slot of every
-  known Bebop venue instead of zeroing the ones absent from the snapshot.
+- `skip_bebop_default` — set `true` to keep Bebop's raw on-chain slot instead
+  of zeroing it when the snapshot has no Bebop entry.
 - `venues` — restrict the quote to these venues: a single entry quotes that
   venue directly, several pick the best among them. Must be non-empty when
   present.

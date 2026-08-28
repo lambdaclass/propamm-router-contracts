@@ -46,10 +46,9 @@ raw = await client.call_with_overrides(function, state_override=state_override)
 
 - `snapshot: OverridesSnapshot`
 - `pamms: list[str] | None` — restrict to these pAMM entries (default all).
-- `bebop_default: bool` — inject the Bebop default slot for every known Bebop
-  venue with no entry in the snapshot (default `True`), so a stale on-chain
-  Bebop price can't win venue selection. This covers the current Bebop
-  deployment and the superseded ones that receive no fresh overrides.
+- `bebop_default: bool` — inject the Bebop default slot when no Bebop entry is
+  present (default `True`), so a stale on-chain Bebop price can't win venue
+  selection.
 
 **Returns** `dict` — the `eth_call` state-override map.
 

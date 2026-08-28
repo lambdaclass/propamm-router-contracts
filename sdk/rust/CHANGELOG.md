@@ -13,13 +13,15 @@ All notable changes to the Rust SDK (`propamm`) are documented here.
 ### Changed
 
 - **`BEBOP` now points at `0xB09AaA5614916d7AEb59C295C52c92ca82aDdD76`**, the
-  current Bebop deployment. Code that hardcoded the previous address
-  (`0xdB13ad0fcD134E9c48f2fDaEa8f6751a0F5349ca`) must be updated.
-- `to_state_override` (unless `skip_bebop_default`) now zeroes the registry slot
-  of *every* known Bebop venue absent from the snapshot, not just the current
-  one. The superseded `0xdB13ad…` deployment joins `0x160141A…` in that set, so
-  a stale on-chain price from either can no longer win a quote it could never
-  fill.
+  current Bebop deployment. Code that hardcoded the previous Bebop address must
+  be updated.
+
+### Removed
+
+- The legacy-Bebop set behind `to_state_override`. The superseded Bebop
+  deployments are no longer whitelisted on the router, so they can be neither
+  quoted nor dispatched and need no price neutralization; only the current
+  `BEBOP` slot is zeroed when a snapshot omits it.
 
 ## [1.1.2] - 2026-07-01
 

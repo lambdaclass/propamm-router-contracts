@@ -84,7 +84,7 @@ ROUTER_FNS = {
 # Quote/transfer selectors (4-byte).
 SEL_QUOTE_VENUE = "0x221ee81f"   # quoteVenueV1(address,address,address,uint256)
 SEL_QUOTE = "0xb6466384"         # quote(address,address,uint256) (IPropAMM/Bebop)
-SEL_QUOTE_AMOUNTS = "0x300aa47f"  # quoteAmounts(address,address,int256) (Fermi builtin)
+SEL_QUOTE_AMOUNTS = "0x300aa47f"  # quoteAmounts(address,address,int256) — legacy quote shape
 SEL_TRANSFER = "0xa9059cbb"      # transfer(address,uint256)
 SEL_TRANSFER_FROM = "0x23b872dd"  # transferFrom(address,address,uint256)
 
@@ -92,11 +92,9 @@ INTRINSIC_GAS = 21000  # base tx cost a direct caller would also pay
 
 FROM_ADDR = "0x000000000000000000000000000000000000f00d"  # synthetic caller for sims
 
-# Known venue / fallback addresses (lowercased). The router treats the two
-# "builtin" consts specially (bespoke quoters); every other whitelisted venue
-# speaks the common IPropAMM.quote interface.
-FERMI_BUILTIN = "0xb1076fe3ab5e28005c7c323bac5ac06a680d452e"
-BEBOP_BUILTIN = "0x160141a205f5ddcf096ba3f48b7ed21eb52c62ea"
+# Known venue / fallback addresses (lowercased). Bebop is dispatched through a
+# bespoke entrypoint (IBebopRouter); every other whitelisted venue speaks the
+# common IPropAMM.quote interface.
 UNISWAP_FALLBACK = "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45"  # UniV3 SwapRouter02
 
 # The router accepts a sentinel for native ETH and converts it to WETH internally
@@ -105,23 +103,14 @@ UNISWAP_FALLBACK = "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45"  # UniV3 SwapRou
 ETH_SENTINEL = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 WETH_ADDR = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
 
-# The canonical PropAMMs are the whitelisted generic-IPropAMM venues below: they
-# use the STANDARD swap (0x9908fc8b) / quote (0xb6466384) selectors. The two
-# "legacy builtin" addresses (FERMI_BUILTIN, BEBOP_BUILTIN) are still whitelisted
-# and the router dispatches them through bespoke entrypoints (quoteAmounts /
-# fermiSwapWithAllowances, IBebopRouter), so they are labeled distinctly and not
-# mistaken for the canonical Fermi/Bebop.
+# The whitelisted PropAMMs. Every one speaks the STANDARD quote (0xb6466384)
+# selector; Bebop additionally has a bespoke swap entrypoint (IBebopRouter).
 VENUE_NAMES = {
     "0x5979458912f80b96d30d4220af8e2e4925a33320": "Fermi",
-    FERMI_BUILTIN: "Fermi (legacy builtin)",
     "0x71e790dd841c8a9061487cb3e78c288e75ce0b3d": "Kipseli",
-    "0xccdda3258aa079ce45e6aa6f35829a6612eb7c45": "Kipseli (alt)",
     "0xb09aaa5614916d7aeb59c295c52c92ca82addd76": "Bebop",
-    "0xdb13ad0fcd134e9c48f2fdaea8f6751a0f5349ca": "Bebop (superseded)",
-    BEBOP_BUILTIN: "Bebop (legacy builtin)",
     "0x00000003f1ec2379e79f58e12ec6c4f51ee92149": "Tempest",
     "0x217d58931a8549ca539426aa8152e33dafc3d95a": "TaurusFi",
-    "0x97cc760e40897d6a52c28faa97593db88e551223": "TaurusFi (superseded)",
     "0xe715dc29d2c273d0fc5a03e5cca9ccb0abb1dcdb": "Metric",
     UNISWAP_FALLBACK: "Uniswap V3 (fallback)",
 }
@@ -430,12 +419,9 @@ def native_quote(venue: str, ti: str, to: str, amount: int):
     Returns (calldata, out_word_index) or (None, None) if the venue has no clean
     standalone direct quote (the Uniswap fallback -- handled separately)."""
     v = venue.lower()
-    if v == FERMI_BUILTIN:
-        # quoteAmounts(address,address,int256) -> (amountIn, amountOut); want word 1.
-        return SEL_QUOTE_AMOUNTS + enc_addr(ti) + enc_addr(to) + enc_uint(amount), 1
     if v == UNISWAP_FALLBACK:
         return None, None
-    # Bebop builtin + every generic whitelisted IPropAMM venue.
+    # Every whitelisted venue exposes quote(address,address,uint256).
     return SEL_QUOTE + enc_addr(ti) + enc_addr(to) + enc_uint(amount), 0
 
 

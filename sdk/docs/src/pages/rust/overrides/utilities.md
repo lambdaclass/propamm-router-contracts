@@ -44,10 +44,8 @@ let data = client.call(to, calldata, &overrides).await?;
 - `snapshot: &OverridesSnapshot`
 - `options: &ToStateOverrideOptions`:
   - `pamms: Option<Vec<Address>>` — restrict to these pAMM entries (default all).
-  - `skip_bebop_default: bool` — skip injecting the Bebop default slot, which
-    otherwise applies to every known Bebop venue with no entry in the snapshot
-    (the current deployment plus the superseded ones, which receive no fresh
-    overrides).
+  - `skip_bebop_default: bool` — skip injecting the Bebop default slot when
+    no Bebop entry is present.
 
 **Returns** `StateOverrideSet`.
 

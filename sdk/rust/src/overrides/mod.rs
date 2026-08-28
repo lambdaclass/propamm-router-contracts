@@ -20,7 +20,7 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
-use ethrex_common::{Address, H160, H256, U256};
+use ethrex_common::{Address, H256, U256};
 use hex_literal::hex;
 use rex_sdk::client::eth::StateOverrideSet;
 use serde_json::Value;
@@ -39,17 +39,6 @@ pub const DEFAULT_OVERRIDES_WS_URL: &str = "wss://rpc.titanbuilder.xyz/ws/pamm_q
 pub const BEBOP_DEFAULT_SLOT: H256 = H256(hex!(
     "3ca381a3d43d4e593578057c4abe441ad9df02f080defd17d2b6e6190cdcd936"
 ));
-
-/// Deprecated Bebop deployments that may still be whitelisted on the router.
-/// They receive no fresh overrides, so their stale on-chain prices are always
-/// neutralized (see [`to_state_override`]) until the router de-lists them.
-const LEGACY_BEBOP: [Address; 2] = [
-    H160(hex!("160141A205F5dDcf096BA3F48B7eD21EB52c62EA")),
-    H160(hex!("dB13ad0fcD134E9c48f2fDaEa8f6751a0F5349ca")),
-];
-
-/// Every Bebop venue the SDK knows about: the current one plus [`LEGACY_BEBOP`].
-const BEBOP_ADDRESSES: [Address; 3] = [BEBOP, LEGACY_BEBOP[0], LEGACY_BEBOP[1]];
 
 /// Mainnet beacon-chain genesis time and slot length. The canonical timestamp
 /// of a block is `genesis + slot*12`; venues check `block.timestamp` against the
@@ -197,32 +186,27 @@ pub fn to_state_override(
     options: &ToStateOverrideOptions,
 ) -> StateOverrideSet {
     let mut merged: HashMap<Address, SlotDiffs> = HashMap::new();
-    let mut present_bebop: Vec<Address> = Vec::new();
+    let mut bebop_present = false;
     for (pamm, contracts) in &snapshot.per_pamm {
         if options.pamms.as_ref().is_some_and(|s| !s.contains(pamm)) {
             continue;
         }
-        if BEBOP_ADDRESSES.contains(pamm) {
-            present_bebop.push(*pamm);
+        if *pamm == BEBOP {
+            bebop_present = true;
         }
         for (address, slots) in contracts {
             merged.entry(*address).or_default().extend(slots);
         }
     }
 
-    // Zero the price slot of every known Bebop venue without a fresh override,
-    // so a stale on-chain price can't win a best-quote selection it could never
-    // fill.
-    if !options.skip_bebop_default {
-        for bebop in BEBOP_ADDRESSES {
-            if present_bebop.contains(&bebop) {
-                continue;
-            }
-            merged
-                .entry(bebop)
-                .or_default()
-                .insert(BEBOP_DEFAULT_SLOT, U256::zero());
-        }
+    // Zero Bebop's price slot when the snapshot carries no fresh override for
+    // it, so a stale on-chain price can't win a best-quote selection it could
+    // never fill.
+    if !options.skip_bebop_default && !bebop_present {
+        merged
+            .entry(BEBOP)
+            .or_default()
+            .insert(BEBOP_DEFAULT_SLOT, U256::zero());
     }
 
     let mut set = StateOverrideSet::new();
@@ -586,13 +570,5 @@ mod tests {
             Some(&U256::from(99u64))
         );
         assert!(!set.0.contains_key(&BEBOP));
-        // ...but every legacy Bebop venue, which never has a fresh override, is
-        // still neutralized.
-        for legacy in LEGACY_BEBOP {
-            assert_eq!(
-                set.0[&legacy].state_diff.get(&BEBOP_DEFAULT_SLOT),
-                Some(&U256::zero())
-            );
-        }
     }
 }

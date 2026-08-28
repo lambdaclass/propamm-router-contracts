@@ -43,10 +43,9 @@ const out = await client.call({ ...callParams, stateOverride });
 
 - `snapshot: OverridesSnapshot`
 - `options.pamms?: Address[]` — restrict to these pAMM entries (default all).
-- `options.bebopDefault?: boolean` — inject the Bebop default slot for every
-  known Bebop venue with no entry in the snapshot (default `true`), so a stale
-  on-chain Bebop price can't win venue selection. This covers the current Bebop
-  deployment and the superseded ones that receive no fresh overrides.
+- `options.bebopDefault?: boolean` — inject the Bebop default slot when no
+  Bebop entry is present (default `true`), so a stale on-chain Bebop price
+  can't win venue selection.
 
 **Returns** `StateOverride`.
 

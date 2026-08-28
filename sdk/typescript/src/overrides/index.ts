@@ -68,18 +68,6 @@ export const BEBOP_DEFAULT_SLOT: Hex =
 const ZERO_WORD: Hex = `0x${"0".repeat(64)}`;
 const BEBOP_LOWER = BEBOP.toLowerCase() as Address;
 
-/**
- * Deprecated Bebop deployments that may still be whitelisted on the router.
- * They receive no fresh overrides, so their stale on-chain prices are always
- * neutralized (see `toStateOverride`) until the router de-lists them.
- */
-const LEGACY_BEBOP_LOWER: readonly Address[] = [
-  "0x160141a205f5ddcf096ba3f48b7ed21eb52c62ea",
-  "0xdb13ad0fcd134e9c48f2fdaea8f6751a0f5349ca",
-];
-
-const BEBOP_ADDRESSES: readonly Address[] = [BEBOP_LOWER, ...LEGACY_BEBOP_LOWER];
-
 const META_KEYS = new Set(["slot", "blockNumber", "block_number", "timestamp"]);
 
 /**
@@ -159,22 +147,20 @@ export function toStateOverride(
   const selected = options.pamms?.map((pamm) => pamm.toLowerCase());
 
   const merged: Record<Address, SlotDiffs> = {};
-  const presentBebop = new Set<Address>();
+  let bebopPresent = false;
   for (const [pamm, contracts] of Object.entries(snapshot.perPamm)) {
     if (selected && !selected.includes(pamm)) continue;
-    if (BEBOP_ADDRESSES.includes(pamm as Address)) presentBebop.add(pamm as Address);
+    if (pamm === BEBOP_LOWER) bebopPresent = true;
     for (const [address, slots] of Object.entries(contracts)) {
       merged[address as Address] = { ...merged[address as Address], ...slots };
     }
   }
 
-  // Zero the price slot of every known Bebop venue without a fresh override, so
-  // a stale on-chain price can't win a best-quote selection it could never fill.
-  if (options.bebopDefault !== false) {
-    for (const bebop of BEBOP_ADDRESSES) {
-      if (presentBebop.has(bebop)) continue;
-      merged[bebop] = { ...merged[bebop], [BEBOP_DEFAULT_SLOT]: ZERO_WORD };
-    }
+  // Zero Bebop's price slot when the snapshot carries no fresh override for it,
+  // so a stale on-chain price can't win a best-quote selection it could never
+  // fill.
+  if (options.bebopDefault !== false && !bebopPresent) {
+    merged[BEBOP_LOWER] = { ...merged[BEBOP_LOWER], [BEBOP_DEFAULT_SLOT]: ZERO_WORD };
   }
 
   return Object.entries(merged).map(([address, slots]) => ({

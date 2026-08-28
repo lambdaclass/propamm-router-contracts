@@ -138,9 +138,8 @@ class QuoteOptions:
 - `overrides` — by default uses the router's attached overrides source. Replace
   it for this call with another `OverridesSource`, a fixed `OverridesSnapshot`,
   or `None` to quote raw on-chain state.
-- `bebop_default` — set `False` to keep the raw on-chain slot of every known
-  Bebop venue instead of zeroing the ones absent from the snapshot (default
-  `True`).
+- `bebop_default` — set `False` to keep Bebop's raw on-chain slot instead of
+  zeroing it when the snapshot has no Bebop entry (default `True`).
 - `venues` — restrict the quote to these venues: a single entry quotes that
   venue directly, several pick the best among them. Must be non-empty when
   present.

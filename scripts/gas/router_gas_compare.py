@@ -67,15 +67,11 @@ ROUTER_FNS = {
 }
 
 VENUE_NAMES = {
-    "0x5979458912f80b96d30d4220af8e2e4925a33320": "Fermi (new)",
-    "0xb1076fe3ab5e28005c7c323bac5ac06a680d452e": "Fermi (builtin)",
-    "0x71e790dd841c8a9061487cb3e78c288e75ce0b3d": "Kipseli (new)",
-    "0xccdda3258aa079ce45e6aa6f35829a6612eb7c45": "Kipseli (alt)",
+    "0x5979458912f80b96d30d4220af8e2e4925a33320": "Fermi",
+    "0x71e790dd841c8a9061487cb3e78c288e75ce0b3d": "Kipseli",
     "0xb09aaa5614916d7aeb59c295c52c92ca82addd76": "Bebop",
-    "0xdb13ad0fcd134e9c48f2fdaea8f6751a0f5349ca": "Bebop (superseded)",
     "0x00000003f1ec2379e79f58e12ec6c4f51ee92149": "Tempest",
     "0x217d58931a8549ca539426aa8152e33dafc3d95a": "TaurusFi",
-    "0x97cc760e40897d6a52c28faa97593db88e551223": "TaurusFi (superseded)",
     "0xe715dc29d2c273d0fc5a03e5cca9ccb0abb1dcdb": "Metric",
 }
 
