@@ -69,5 +69,5 @@ raises `InvalidInputError` on bad length or hex.
 | Module | Exports |
 |---|---|
 | `common/tokens` | `ETH_SENTINEL` (signals native ETH), `USDC`, `USDT`, `WETH` |
-| `common/pamms` | `FERMI`, `BEBOP`, `KIPSELI`, `PAMMS` (name → address) |
+| `common/pamms` | `FERMI`, `BEBOP`, `KIPSELI`, `TEMPEST`, `TAURUSFI`, `METRIC`, `PAMMS` (name → address) |
 | `common/accounts` | `account_from_key`, `account_from_mnemonic` |

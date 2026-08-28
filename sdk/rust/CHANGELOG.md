@@ -2,6 +2,20 @@
 
 All notable changes to the Rust SDK (`propamm`) are documented here.
 
+## [Unreleased]
+
+### Added
+
+- `TEMPEST`, `TAURUSFI` and `METRIC` venue constants in `common::pamms`, plus
+  their `tempest` / `taurusfi` / `metric` entries in `PAMMS` (whose length goes
+  from 3 to 6).
+
+### Changed
+
+- **`BEBOP` now points at `0xB09AaA5614916d7AEb59C295C52c92ca82aDdD76`**, the
+  current Bebop deployment. Code that hardcoded the previous Bebop address must
+  be updated.
+
 ## [1.1.2] - 2026-07-01
 
 ### Added

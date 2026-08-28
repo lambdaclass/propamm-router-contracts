@@ -186,20 +186,23 @@ pub fn to_state_override(
     options: &ToStateOverrideOptions,
 ) -> StateOverrideSet {
     let mut merged: HashMap<Address, SlotDiffs> = HashMap::new();
-    let mut has_bebop = false;
+    let mut bebop_present = false;
     for (pamm, contracts) in &snapshot.per_pamm {
         if options.pamms.as_ref().is_some_and(|s| !s.contains(pamm)) {
             continue;
         }
         if *pamm == BEBOP {
-            has_bebop = true;
+            bebop_present = true;
         }
         for (address, slots) in contracts {
             merged.entry(*address).or_default().extend(slots);
         }
     }
 
-    if !options.skip_bebop_default && !has_bebop {
+    // Zero Bebop's price slot when the snapshot carries no fresh override for
+    // it, so a stale on-chain price can't win a best-quote selection it could
+    // never fill.
+    if !options.skip_bebop_default && !bebop_present {
         merged
             .entry(BEBOP)
             .or_default()

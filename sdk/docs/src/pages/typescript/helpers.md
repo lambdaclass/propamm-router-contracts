@@ -60,6 +60,6 @@ formatUnits(1500000n, 6);  // "1.5"
 | Module | Exports |
 |---|---|
 | `common/tokens` | `ETH_SENTINEL` (signals native ETH), `USDC`, `USDT`, `WETH` |
-| `common/pamms` | `FERMI`, `BEBOP`, `KIPSELI`, `PAMMS` (name → address), `PammName` |
+| `common/pamms` | `FERMI`, `BEBOP`, `KIPSELI`, `TEMPEST`, `TAURUSFI`, `METRIC`, `PAMMS` (name → address), `PammName` |
 | `common/chains` | viem's `mainnet`, `anvil`, `sepolia`, `Chain` |
 | `common/accounts` | viem's `privateKeyToAccount`, `mnemonicToAccount`, `Account` |

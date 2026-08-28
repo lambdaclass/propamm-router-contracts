@@ -147,16 +147,19 @@ export function toStateOverride(
   const selected = options.pamms?.map((pamm) => pamm.toLowerCase());
 
   const merged: Record<Address, SlotDiffs> = {};
-  let hasBebop = false;
+  let bebopPresent = false;
   for (const [pamm, contracts] of Object.entries(snapshot.perPamm)) {
     if (selected && !selected.includes(pamm)) continue;
-    if (pamm === BEBOP_LOWER) hasBebop = true;
+    if (pamm === BEBOP_LOWER) bebopPresent = true;
     for (const [address, slots] of Object.entries(contracts)) {
       merged[address as Address] = { ...merged[address as Address], ...slots };
     }
   }
 
-  if (options.bebopDefault !== false && !hasBebop) {
+  // Zero Bebop's price slot when the snapshot carries no fresh override for it,
+  // so a stale on-chain price can't win a best-quote selection it could never
+  // fill.
+  if (options.bebopDefault !== false && !bebopPresent) {
     merged[BEBOP_LOWER] = { ...merged[BEBOP_LOWER], [BEBOP_DEFAULT_SLOT]: ZERO_WORD };
   }
 
