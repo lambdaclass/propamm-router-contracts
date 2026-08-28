@@ -106,7 +106,7 @@ WETH_ADDR = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
 # The current-generation PropAMMs to compare (lowercased) -> name. Every one
 # speaks the STANDARD quote (0xb6466384) selector; Bebop additionally has a
 # bespoke swap entrypoint (IBebopRouter).
-NAMED_VENUES = {
+MEASURED_PROPAMMS = {
     "0x5979458912f80b96d30d4220af8e2e4925a33320": "Fermi",
     "0x71e790dd841c8a9061487cb3e78c288e75ce0b3d": "Kipseli",
     "0xb09aaa5614916d7aeb59c295c52c92ca82addd76": "Bebop",
@@ -116,7 +116,7 @@ NAMED_VENUES = {
 }
 
 # Whitelisted PropAMMs plus the fallback, for labeling.
-VENUE_NAMES = {**NAMED_VENUES, UNISWAP_FALLBACK: "Uniswap V3 (fallback)"}
+ADDRESS_LABELS = {**MEASURED_PROPAMMS, UNISWAP_FALLBACK: "Uniswap V3 (fallback)"}
 
 SYMBOLS = {
     "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2": ("WETH", 18),
@@ -207,7 +207,7 @@ def decimals(addr: str) -> int:
 
 
 def venue_name(addr: str) -> str:
-    return VENUE_NAMES.get(addr.lower(), addr[:6] + "…" + addr[-4:])
+    return ADDRESS_LABELS.get(addr.lower(), addr[:6] + "…" + addr[-4:])
 
 
 def human(raw: int, addr: str) -> str:
@@ -638,7 +638,7 @@ def main() -> int:
 
         for i, sw in enumerate(swaps, 1):
             mm = sw["market_maker"].lower()
-            if mm in NAMED_VENUES:
+            if mm in MEASURED_PROPAMMS:
                 seen_named.add(mm)
             try:
                 srow = analyze_swap(url, sw, run_id, now_ts, args.router)
@@ -667,7 +667,7 @@ def main() -> int:
                 time.sleep(args.delay)
 
         # Document any named venue the router never routed to in the window.
-        for addr, name in NAMED_VENUES.items():
+        for addr, name in MEASURED_PROPAMMS.items():
             if addr not in seen_named:
                 note = f"checked: no router routing to {name} ({addr}) in window"
                 srow = {f: "" for f in SWAP_FIELDS}
