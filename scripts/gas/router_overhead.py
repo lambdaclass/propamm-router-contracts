@@ -103,27 +103,20 @@ UNISWAP_FALLBACK = "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45"  # UniV3 SwapRou
 ETH_SENTINEL = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 WETH_ADDR = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
 
-# The whitelisted PropAMMs. Every one speaks the STANDARD quote (0xb6466384)
-# selector; Bebop additionally has a bespoke swap entrypoint (IBebopRouter).
-VENUE_NAMES = {
+# The current-generation PropAMMs to compare (lowercased) -> name. Every one
+# speaks the STANDARD quote (0xb6466384) selector; Bebop additionally has a
+# bespoke swap entrypoint (IBebopRouter).
+PROPAMMS = {
     "0x5979458912f80b96d30d4220af8e2e4925a33320": "Fermi",
     "0x71e790dd841c8a9061487cb3e78c288e75ce0b3d": "Kipseli",
     "0xb09aaa5614916d7aeb59c295c52c92ca82addd76": "Bebop",
     "0x00000003f1ec2379e79f58e12ec6c4f51ee92149": "Tempest",
     "0x217d58931a8549ca539426aa8152e33dafc3d95a": "TaurusFi",
     "0xe715dc29d2c273d0fc5a03e5cca9ccb0abb1dcdb": "Metric",
-    UNISWAP_FALLBACK: "Uniswap V3 (fallback)",
 }
 
-# The current-generation PropAMMs to compare (lowercased) -> name.
-NAMED_VENUES = {
-    "0x5979458912f80b96d30d4220af8e2e4925a33320": "Fermi",
-    "0x71e790dd841c8a9061487cb3e78c288e75ce0b3d": "Kipseli",
-    "0xb09aaa5614916d7aeb59c295c52c92ca82addd76": "Bebop",
-    "0x00000003f1ec2379e79f58e12ec6c4f51ee92149": "Tempest",
-    "0x217d58931a8549ca539426aa8152e33dafc3d95a": "TaurusFi",
-    "0xe715dc29d2c273d0fc5a03e5cca9ccb0abb1dcdb": "Metric",
-}
+# Whitelisted PropAMMs plus the fallback, for labeling.
+ALL_VENUES = {**PROPAMMS, UNISWAP_FALLBACK: "Uniswap V3 (fallback)"}
 
 SYMBOLS = {
     "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2": ("WETH", 18),
@@ -214,7 +207,7 @@ def decimals(addr: str) -> int:
 
 
 def venue_name(addr: str) -> str:
-    return VENUE_NAMES.get(addr.lower(), addr[:6] + "…" + addr[-4:])
+    return ALL_VENUES.get(addr.lower(), addr[:6] + "…" + addr[-4:])
 
 
 def human(raw: int, addr: str) -> str:
@@ -645,7 +638,7 @@ def main() -> int:
 
         for i, sw in enumerate(swaps, 1):
             mm = sw["market_maker"].lower()
-            if mm in NAMED_VENUES:
+            if mm in PROPAMMS:
                 seen_named.add(mm)
             try:
                 srow = analyze_swap(url, sw, run_id, now_ts, args.router)
@@ -674,7 +667,7 @@ def main() -> int:
                 time.sleep(args.delay)
 
         # Document any named venue the router never routed to in the window.
-        for addr, name in NAMED_VENUES.items():
+        for addr, name in PROPAMMS.items():
             if addr not in seen_named:
                 note = f"checked: no router routing to {name} ({addr}) in window"
                 srow = {f: "" for f in SWAP_FIELDS}

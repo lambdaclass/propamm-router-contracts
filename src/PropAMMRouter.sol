@@ -58,7 +58,7 @@ contract PropAMMRouter is
     /// considered by `swapV1` / `quoteV1` without a contract upgrade. The Uniswap
     /// V3 fallback (`fallbackSwapRouter`) is the always-available safety net and is
     /// intentionally NOT a member — it is accepted independently of this set.
-    /// Seeded with the known propAMMs in `initialize` and managed (access-controlled)
+    /// Starts empty (`initialize` seeds no venues) and is managed (access-controlled)
     /// via `addVenue` / `removeVenue`, so its size (and thus the
     /// `_pickBestVenue` loop bound) is trusted to stay small.
     /// @dev Declared last to keep the upgradeable storage layout append-only.
