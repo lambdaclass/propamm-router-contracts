@@ -139,7 +139,7 @@ contract PropAMMRouterForkTests is Test {
         // venue actually reads empty, so `getState` reverts with `0x666a2814`
         // and the whole quote fails. When that happens, refresh this address
         // from the `getState` caller in `forge test -vvvv`.
-        address priceTarget = 0xD0fD9FC7f36e8406A174B6763d3dF00AAB24e1C9;
+        address priceTarget = 0x5B56042558012d21Fd3578C8b1d4519196517241;
         uint256 laneIndex = 0x2eec03b8999af9793df60f1395a1b41c29e22b324ea3200ca21bc692979b9d46;
         // Single packed price slot; replayed verbatim, the timestamp is
         // restamped to fork time in `_updateRegistryState`.
