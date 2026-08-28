@@ -733,10 +733,9 @@ contract PropAMMRouter is
         _addVenue(venue);
     }
 
-    /// @dev Shared whitelist-insertion core for the public `addVenue` and the
-    /// venue seeding in `initialize`. Reverts `ZeroAddress` if `venue` is zero
-    /// and `VenueAlreadyWhitelisted` if it is already listed; emits
-    /// `VenueWhitelisted` on success.
+    /// @dev Whitelist-insertion core behind the public `addVenue`. Reverts
+    /// `ZeroAddress` if `venue` is zero and `VenueAlreadyWhitelisted` if it is
+    /// already listed; emits `VenueWhitelisted` on success.
     function _addVenue(address venue) private {
         require(venue != address(0), ZeroAddress());
         bool added = _whitelistedVenues.add(venue);
