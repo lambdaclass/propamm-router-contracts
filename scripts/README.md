@@ -3,8 +3,8 @@
 This directory holds three kinds of scripts:
 
 - **Foundry deploy/ops scripts** (`*.s.sol`): `Deploy.s.sol`, `Execute.s.sol`,
-  `Upgrade.s.sol`, `setupRouterVariables.s.sol`. See the root `README.md` and
-  `.env.example` for how to run those with `forge script`.
+  `Upgrade.s.sol`. See the root `README.md` and `.env.example` for how to run
+  those with `forge script`.
 - **On-chain swap drivers** (`execute_swaps.sh`, `execute_direct_swaps.sh`): fire
   real `$1` swaps through the PropAMM router (or directly at each venue) to
   generate the transactions the gas tools below later analyze.
