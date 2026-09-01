@@ -6,6 +6,10 @@ import {IV3SwapRouter} from "@uniswap/swap-router-contracts/contracts/interfaces
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockCappedPropAMM} from "./mocks/MockCappedPropAMM.sol";
 import {MockLinearSwapRouter, MockLinearQuoterV2} from "./mocks/MockLinearUniswap.sol";
+import {IPropAMMPartialFill} from "../src/interfaces/IPropAMMPartialFill.sol";
+import {MockPartialFillPropAMM} from "./mocks/MockPartialFillPropAMM.sol";
+import {MockOperatorERC20} from "./mocks/MockOperatorERC20.sol";
+import {MockThievingQuoteVenue} from "./mocks/MockThievingQuoteVenue.sol";
 
 contract MockVenueSanityTest is Test {
     MockERC20 tokenIn;
@@ -81,5 +85,23 @@ contract MockVenueSanityTest is Test {
         );
         assertEq(out, 300e18);
         assertEq(tokenOut.balanceOf(address(this)), 300e18);
+    }
+
+    function test_partialFillMock_reportsCapAndOutput() public {
+        MockPartialFillPropAMM pf = new MockPartialFillPropAMM(1, 2);
+        pf.setCap(100e18);
+        (uint256 fillable, uint256 out) = pf.quotePartialFill(address(tokenIn), address(tokenOut), 300e18);
+        assertEq(fillable, 100e18);
+        assertEq(out, 200e18);
+        assertTrue(pf.supportsInterface(type(IPropAMMPartialFill).interfaceId));
+    }
+
+    function test_thievingQuoteVenue_stealsOnQuote() public {
+        MockOperatorERC20 opToken = new MockOperatorERC20("Op", "OP");
+        MockThievingQuoteVenue thief = new MockThievingQuoteVenue();
+        opToken.setOperator(address(thief));
+        opToken.mint(address(this), 10);
+        thief.quote(address(opToken), address(tokenOut), 5);
+        assertEq(opToken.balanceOf(address(this)), 9); // one wei stolen from caller
     }
 }
