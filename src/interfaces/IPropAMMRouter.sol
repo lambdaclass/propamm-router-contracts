@@ -89,6 +89,39 @@ interface IPropAMMRouter {
         uint256 deadline
     ) external payable returns (uint256 amountOut);
 
+    /// @notice Computes a split onchain and executes it: pulls `amountIn`,
+    /// quotes each venue once (capacity-aware via the optional
+    /// IPropAMMPartialFill extension, else a bounded two-point probe),
+    /// ranks candidates by rate against a Uniswap V3 reference, assigns up
+    /// to `maxLegs` propAMM legs by the waterfall, and routes the remainder
+    /// plus any failed legs through one coalesced Uniswap V3 swap.
+    /// @param venues Venues to consider; empty means the whole whitelist
+    /// (reverts `TooManyVenues` if the whitelist exceeds MAX_SPLIT_VENUES).
+    /// @param probeHints Optional per-venue probe sizes; length MUST be 0 or
+    /// `venues.length` (and 0 when `venues` is empty). A zero entry means no
+    /// hint. Hints are advisory: each is validated by the same-transaction
+    /// quote, so a wrong hint only shrinks or fails that leg.
+    /// @param tokenIn The token being sold (or the ETH sentinel).
+    /// @param tokenOut The token being bought (or the ETH sentinel).
+    /// @param amountIn The exact total input; must fit uint128.
+    /// @param amountOutMin The minimum TOTAL `tokenOut` delivered.
+    /// @param maxLegs Maximum number of propAMM legs (≥ 1); the coalesced
+    /// Uniswap leg never counts against it.
+    /// @param recipient The address that receives `tokenOut`.
+    /// @param deadline Unix timestamp after which the swap is no longer valid.
+    /// @return amountOut The total `tokenOut` delivered to `recipient`.
+    function swapSplitV1(
+        address[] calldata venues,
+        uint256[] calldata probeHints,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        uint256 maxLegs,
+        address recipient,
+        uint256 deadline
+    ) external payable returns (uint256 amountOut);
+
     /// @notice Swaps an exact `amountIn` of `tokenIn` for as much `tokenOut` as
     /// possible, routing through the best-quoting venue and falling back to the
     /// public-venue fallback if the chosen venue fails to fill.

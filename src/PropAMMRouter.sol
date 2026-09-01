@@ -5,6 +5,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
+import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {
@@ -13,9 +14,11 @@ import {
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {IPropAMMRouter} from "./interfaces/IPropAMMRouter.sol";
 import {IPropAMM} from "./interfaces/IPropAMM.sol";
+import {IPropAMMPartialFill} from "./interfaces/IPropAMMPartialFill.sol";
 import {IWETH} from "./interfaces/IWETH.sol";
 import {BEBOP_ROUTER, IBebopRouter} from "./interfaces/IBebopRouter.sol";
 import {UniV3Router} from "./libraries/UniV3Router.sol";
+import {SplitPlanner} from "./libraries/SplitPlanner.sol";
 import {FrontendFees} from "./libraries/FrontendFees.sol";
 import {ETH_SENTINEL, USDC, USDT, WETH} from "./libraries/Constants.sol";
 import "./libraries/Errors.sol";
@@ -326,6 +329,275 @@ contract PropAMMRouter is
         address tokenIn_ = _pullFunds(tokenIn, totalIn);
         uint256 deliveredGross = _executeLegs(legs, tokenIn, tokenIn_, tokenOut, grossMin, address(this), deadline);
         amountOut = FrontendFees._skimAndDisburse(tokenOut, deliveredGross, fee, recipient);
+    }
+
+    /// @inheritdoc IPropAMMRouter
+    /// @dev Bounds `amountIn` to uint128 so every cross-multiplied rate
+    /// comparison in `SplitPlanner` stays below 2^256, then plans and executes
+    /// in one transaction. The planned legs always sum to `amountIn`, so the
+    /// caller's `amountOutMin` is enforced by `_executeLegs` against the
+    /// aggregate delivery exactly as in `swapMultiLegV1` — including the same
+    /// MEV caveat for the slice of the coalesced fallback that covers legs
+    /// which failed at execution time.
+    function swapSplitV1(
+        address[] calldata venues,
+        uint256[] calldata probeHints,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        uint256 maxLegs,
+        address recipient,
+        uint256 deadline
+    ) external payable whenNotPaused nonReentrant returns (uint256 amountOut) {
+        require(block.timestamp <= deadline, Expired());
+        require(amountIn > 0, ZeroAmount());
+        require(amountIn <= type(uint128).max, AmountTooLarge(amountIn));
+        require(maxLegs >= 1, InvalidLegCount(0));
+
+        (address[] memory venueSet, uint256[] memory hints) = _resolveVenueSet(venues, probeHints);
+
+        address tokenIn_ = _pullFunds(tokenIn, amountIn);
+        address tokenOut_ = tokenOut == ETH_SENTINEL ? WETH : tokenOut;
+
+        IPropAMMRouter.Leg[] memory legs = _planSplit(venueSet, hints, tokenIn_, tokenOut_, amountIn, maxLegs);
+        amountOut = _executeLegs(legs, tokenIn, tokenIn_, tokenOut, amountOutMin, recipient, deadline);
+    }
+
+    /// @dev Resolves the candidate venue set: the caller's list, or the whole
+    /// whitelist when empty. Validates set size and the probeHints shape
+    /// (length 0 or venues.length; must be 0 in whitelist mode).
+    /// @param venues The caller-supplied venue list, or empty for the whitelist.
+    /// @param probeHints The caller-supplied probe sizes, or empty for none.
+    /// @return venueSet The venues to probe.
+    /// @return hints The per-venue probe hints, zero-filled when unsupplied.
+    function _resolveVenueSet(address[] calldata venues, uint256[] calldata probeHints)
+        internal
+        view
+        returns (address[] memory venueSet, uint256[] memory hints)
+    {
+        if (venues.length == 0) {
+            require(probeHints.length == 0, ArrayLengthMismatch());
+            uint256 n = whitelistedVenueCount();
+            require(n > 0, NoQuotesAvailable());
+            require(n <= MAX_SPLIT_VENUES, TooManyVenues(n));
+            venueSet = new address[](n);
+            for (uint256 i = 0; i < n; i++) {
+                venueSet[i] = whitelistedVenueAt(i);
+            }
+            hints = new uint256[](n);
+        } else {
+            require(venues.length <= MAX_SPLIT_VENUES, TooManyVenues(venues.length));
+            require(probeHints.length == 0 || probeHints.length == venues.length, ArrayLengthMismatch());
+            venueSet = venues;
+            if (probeHints.length == venues.length) {
+                hints = probeHints;
+            } else {
+                hints = new uint256[](venues.length);
+            }
+        }
+    }
+
+    /// @notice Quote phase + planning for `swapSplitV1`.
+    /// @dev Quotes run while this contract holds the pulled `amountIn`, so the
+    /// R1 snapshot-delta invariant brackets them: the balance is snapshotted
+    /// after the pull and required to be EXACTLY equal afterwards, so any
+    /// venue quote that net-consumes in-flight user funds reverts the whole
+    /// call. The check is `==` and not `>= amountIn` on purpose — pre-existing
+    /// router dust would otherwise mask a theft of the same size.
+    /// @param venueSet The venues to probe.
+    /// @param hints The per-venue probe hints (0 = none).
+    /// @param tokenIn_ The resolved ERC-20 being sold.
+    /// @param tokenOut_ The resolved ERC-20 being bought.
+    /// @param amountIn The total input the returned legs must sum to.
+    /// @param maxLegs The maximum number of propAMM legs.
+    /// @return legs The planned legs, summing to `amountIn`.
+    function _planSplit(
+        address[] memory venueSet,
+        uint256[] memory hints,
+        address tokenIn_,
+        address tokenOut_,
+        uint256 amountIn,
+        uint256 maxLegs
+    ) internal returns (IPropAMMRouter.Leg[] memory legs) {
+        uint256 snap = IERC20(tokenIn_).balanceOf(address(this));
+
+        SplitPlanner.Candidate[] memory cands = _gatherCandidates(venueSet, hints, tokenIn_, tokenOut_, amountIn);
+
+        require(IERC20(tokenIn_).balanceOf(address(this)) == snap, QuoteBalanceInvariantViolated());
+
+        SplitPlanner.sortByRateDesc(cands);
+        legs = _waterfall(cands, tokenIn_, tokenOut_, amountIn, maxLegs);
+    }
+
+    /// @dev One candidate per venue: the partial-fill extension when the
+    /// venue advertises it (ERC165), else the two-point probe at
+    /// `min(hint or amountIn, amountIn)` and half that, with τ-band
+    /// saturation detection. Dead venues (both points revert or zero) and
+    /// absurd quotes (out > uint128.max, which would overflow the rate
+    /// comparisons) yield no candidate. Duplicates are deduped.
+    /// @param venueSet The venues to probe.
+    /// @param hints The per-venue probe hints (0 = none).
+    /// @param tokenIn_ The resolved ERC-20 being sold.
+    /// @param tokenOut_ The resolved ERC-20 being bought.
+    /// @param amountIn The total input being split.
+    /// @return cands The live candidates, unsorted.
+    function _gatherCandidates(
+        address[] memory venueSet,
+        uint256[] memory hints,
+        address tokenIn_,
+        address tokenOut_,
+        uint256 amountIn
+    ) internal returns (SplitPlanner.Candidate[] memory cands) {
+        SplitPlanner.Candidate[] memory tmp = new SplitPlanner.Candidate[](venueSet.length);
+        uint256 count = 0;
+        for (uint256 i = 0; i < venueSet.length; i++) {
+            bool dup = false;
+            for (uint256 j = 0; j < i; j++) {
+                if (venueSet[j] == venueSet[i]) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (dup) continue;
+
+            (uint256 fill, uint256 out) = _probeVenue(venueSet[i], hints[i], tokenIn_, tokenOut_, amountIn);
+            if (fill == 0 || out == 0 || out > type(uint128).max) continue;
+            tmp[count++] = SplitPlanner.Candidate({venue: venueSet[i], fill: fill, out: out});
+        }
+        cands = new SplitPlanner.Candidate[](count);
+        for (uint256 i = 0; i < count; i++) {
+            cands[i] = tmp[i];
+        }
+    }
+
+    /// @dev Extension path or two-point probe for one venue. Probe points:
+    /// p = min(hint or amountIn, amountIn) and p/2. Failure legend: a
+    /// reverting, zero, or oversized quote at a point is a dead point; both
+    /// dead → no candidate; one alive → that point; both alive → the τ-band
+    /// saturation test picks full vs half.
+    /// @param venue The venue to probe.
+    /// @param hint The caller's probe size for this venue (0 = none).
+    /// @param tokenIn_ The resolved ERC-20 being sold.
+    /// @param tokenOut_ The resolved ERC-20 being bought.
+    /// @param amountIn The total input being split (the probe's upper bound).
+    /// @return fill The input size this venue is a candidate for.
+    /// @return out The `tokenOut` that `fill` was quoted to yield.
+    function _probeVenue(address venue, uint256 hint, address tokenIn_, address tokenOut_, uint256 amountIn)
+        internal
+        returns (uint256 fill, uint256 out)
+    {
+        if (ERC165Checker.supportsInterface(venue, type(IPropAMMPartialFill).interfaceId)) {
+            try IPropAMMPartialFill(venue).quotePartialFill(tokenIn_, tokenOut_, amountIn) returns (
+                uint256 fillable, uint256 amountOut_
+            ) {
+                if (fillable > amountIn) fillable = amountIn;
+                return (fillable, amountOut_);
+            } catch {
+                return (0, 0);
+            }
+        }
+
+        uint256 p = hint == 0 || hint > amountIn ? amountIn : hint;
+        // An out-of-range quote is discarded HERE, before it is used: it feeds
+        // `isSaturated`, whose `out * BPS` would overflow and revert the whole
+        // split — a griefing vector any single whitelisted venue could aim at
+        // every other caller's split, including ones not naming it.
+        uint256 outFull = _tryQuote(venue, tokenIn_, tokenOut_, p);
+        if (outFull > type(uint128).max) outFull = 0;
+        uint256 half = p / 2;
+        if (half == 0) return (p, outFull);
+        uint256 outHalf = _tryQuote(venue, tokenIn_, tokenOut_, half);
+        if (outHalf > type(uint128).max) outHalf = 0;
+
+        if (outFull == 0 && outHalf == 0) return (0, 0);
+        if (outFull == 0) return (half, outHalf);
+        if (outHalf == 0) return (p, outFull);
+        if (SplitPlanner.isSaturated(outFull, outHalf)) return (half, outHalf);
+        return (p, outFull);
+    }
+
+    /// @dev A single venue quote that reports failure as zero instead of
+    /// reverting. Routed through `this.quoteVenueV1` so the try/catch has an
+    /// external call boundary and every venue type (incl. the fallback and
+    /// Bebop branches) is priced by the same code as production quoting. Safe
+    /// under `nonReentrant` because `quoteVenueV1` carries no guard.
+    /// @param venue The venue to quote.
+    /// @param tokenIn_ The resolved ERC-20 being sold.
+    /// @param tokenOut_ The resolved ERC-20 being bought.
+    /// @param amount The input size to quote.
+    /// @return out The quoted `tokenOut`, or 0 if the venue could not price it.
+    function _tryQuote(address venue, address tokenIn_, address tokenOut_, uint256 amount)
+        internal
+        returns (uint256 out)
+    {
+        try this.quoteVenueV1(venue, tokenIn_, tokenOut_, amount) returns (uint256 amountOut_, address) {
+            out = amountOut_;
+        } catch {
+            out = 0;
+        }
+    }
+
+    /// @dev Assigns up to `maxLegs` prop legs in rate order, gated by the
+    /// Uniswap reference rate quoted at the residual lower bound (floored at
+    /// amountIn/100 so a tiny reference cannot round to a rate of zero and
+    /// disable the cutoff). On the first contested candidate the reference
+    /// is refined ONCE at the true prospective fallback size. The remainder
+    /// becomes a fallback leg (minOut 0 — `_executeLegs` derives the
+    /// shortfall min). Per-leg minimums are the pro-rata share of the RANKING
+    /// quote, never a fresh quote at the final leg size: a requote is a price
+    /// an adversarial venue gets to pick after it has already won.
+    /// @param cands The candidates, pre-sorted by descending rate.
+    /// @param tokenIn_ The resolved ERC-20 being sold.
+    /// @param tokenOut_ The resolved ERC-20 being bought.
+    /// @param amountIn The total input the legs must sum to.
+    /// @param maxLegs The maximum number of propAMM legs (the coalesced
+    /// Uniswap leg is exempt — it is the safety net, not a planning choice).
+    /// @return legs The planned legs, summing to `amountIn`.
+    function _waterfall(
+        SplitPlanner.Candidate[] memory cands,
+        address tokenIn_,
+        address tokenOut_,
+        uint256 amountIn,
+        uint256 maxLegs
+    ) internal returns (IPropAMMRouter.Leg[] memory legs) {
+        uint256 residualLb = amountIn;
+        for (uint256 i = 0; i < cands.length; i++) {
+            residualLb = cands[i].fill >= residualLb ? 0 : residualLb - cands[i].fill;
+        }
+        uint256 refSize = residualLb > amountIn / 100 ? residualLb : amountIn / 100;
+        if (refSize == 0) refSize = 1;
+        uint256 refOut = _tryQuote(fallbackSwapRouter, tokenIn_, tokenOut_, refSize);
+
+        IPropAMMRouter.Leg[] memory tmp = new IPropAMMRouter.Leg[](cands.length + 1);
+        uint256 legCount = 0;
+        uint256 remaining = amountIn;
+        bool refined = false;
+
+        for (uint256 i = 0; i < cands.length && remaining > 0 && legCount < maxLegs; i++) {
+            // contested: rate_v <= uniRate  <=>  out * refSize <= refOut * fill
+            if (cands[i].out * refSize <= refOut * cands[i].fill) {
+                if (refined) break;
+                refined = true;
+                refSize = remaining;
+                refOut = _tryQuote(fallbackSwapRouter, tokenIn_, tokenOut_, refSize);
+                if (cands[i].out * refSize <= refOut * cands[i].fill) break;
+            }
+            uint256 leg = cands[i].fill >= remaining ? remaining : cands[i].fill;
+            tmp[legCount++] = IPropAMMRouter.Leg({
+                venue: cands[i].venue, amountIn: leg, minOut: SplitPlanner.proRataMin(cands[i].out, cands[i].fill, leg)
+            });
+            remaining -= leg;
+        }
+
+        if (remaining > 0) {
+            tmp[legCount++] = IPropAMMRouter.Leg({venue: fallbackSwapRouter, amountIn: remaining, minOut: 0});
+        }
+
+        legs = new IPropAMMRouter.Leg[](legCount);
+        for (uint256 i = 0; i < legCount; i++) {
+            legs[i] = tmp[i];
+        }
     }
 
     /// @dev Validates leg count, per-leg venue membership and non-zero

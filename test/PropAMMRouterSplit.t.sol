@@ -1,0 +1,220 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.35;
+
+import {Test} from "forge-std/Test.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
+import {IPropAMMRouter} from "../src/interfaces/IPropAMMRouter.sol";
+import {PropAMMRouter} from "../src/PropAMMRouter.sol";
+import {MockERC20} from "./mocks/MockERC20.sol";
+import {MockOperatorERC20} from "./mocks/MockOperatorERC20.sol";
+import {MockCappedPropAMM} from "./mocks/MockCappedPropAMM.sol";
+import {MockPartialFillPropAMM} from "./mocks/MockPartialFillPropAMM.sol";
+import {MockThievingQuoteVenue} from "./mocks/MockThievingQuoteVenue.sol";
+import {MockLinearSwapRouter, MockLinearQuoterV2} from "./mocks/MockLinearUniswap.sol";
+import "../src/libraries/Errors.sol";
+
+contract PropAMMRouterSplitTest is Test {
+    PropAMMRouter router;
+    AccessManager manager;
+    MockLinearSwapRouter uni;
+    MockLinearQuoterV2 quoter;
+    MockERC20 tokenIn;
+    MockERC20 tokenOut;
+
+    address owner = makeAddr("owner");
+    address user = makeAddr("user");
+
+    function setUp() public {
+        uni = new MockLinearSwapRouter();
+        quoter = new MockLinearQuoterV2();
+        tokenIn = new MockERC20("In", "IN");
+        tokenOut = new MockERC20("Out", "OUT");
+        manager = new AccessManager(owner);
+        PropAMMRouter impl = new PropAMMRouter();
+        bytes memory data = abi.encodeCall(PropAMMRouter.initialize, (address(uni), address(quoter), address(manager)));
+        router = PropAMMRouter(payable(address(new ERC1967Proxy(address(impl), data))));
+        // Uniswap pays 1:1 by default; venues are configured per test.
+        uni.setPrice(1, 1);
+        quoter.setPrice(1, 1);
+    }
+
+    function _newVenue(uint256 num, uint256 den, uint256 cap, MockCappedPropAMM.CapMode mode)
+        internal
+        returns (MockCappedPropAMM v)
+    {
+        v = new MockCappedPropAMM(num, den);
+        v.setCap(cap);
+        v.setCapMode(mode);
+        tokenOut.mint(address(v), 100_000_000e18);
+        vm.prank(owner);
+        router.addVenue(address(v));
+    }
+
+    function _fundUser(uint256 amount) internal {
+        tokenIn.mint(user, amount);
+        vm.prank(user);
+        tokenIn.approve(address(router), amount);
+    }
+
+    function _split(
+        address[] memory venues,
+        uint256[] memory hints,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        uint256 maxLegs
+    ) internal returns (uint256) {
+        vm.prank(user);
+        return router.swapSplitV1(
+            venues,
+            hints,
+            address(tokenIn),
+            address(tokenOut),
+            amountIn,
+            amountOutMin,
+            maxLegs,
+            user,
+            block.timestamp + 1
+        );
+    }
+
+    function _noHints() internal pure returns (uint256[] memory h) {
+        return h;
+    }
+
+    /// @dev The router is a pass-through: it must never retain input funds.
+    function _assertRouterEmpty() internal view {
+        assertEq(tokenIn.balanceOf(address(router)), 0, "router retained tokenIn");
+        assertEq(tokenOut.balanceOf(address(router)), 0, "router retained tokenOut");
+    }
+
+    function test_split_capacityConstrained_waterfallsAcrossTwoVenues() public {
+        // A pays x1.2 with a 150 cap (inside the probe window: the full probe
+        // at 250 reverts, the half probe at 125 succeeds, so A is discovered
+        // as a 125-fill candidate); B pays x1.1 uncapped. Order = 250.
+        MockCappedPropAMM a = _newVenue(10, 12, 150e18, MockCappedPropAMM.CapMode.HardRevert);
+        MockCappedPropAMM b = _newVenue(10, 11, 0, MockCappedPropAMM.CapMode.HardRevert);
+        _fundUser(250e18);
+
+        address[] memory venues = new address[](2);
+        venues[0] = address(a);
+        venues[1] = address(b);
+
+        uint256 amountOut = _split(venues, _noHints(), 250e18, 0, 8);
+
+        // A quoted at 250 (revert) and 125 (ok, x1.2 -> 150): fill 125.
+        // B quoted at 250 ok (x1.1 -> 275): fill 250.
+        // Ranking: A (1.2) > B (1.1) > uni (1.0). Legs: A 125, B 125.
+        // Delivered: 125*1.2 + 125*1.1 = 150 + 137.5 = 287.5.
+        assertEq(amountOut, 287.5e18);
+        assertEq(tokenIn.balanceOf(address(a)), 125e18);
+        assertEq(tokenIn.balanceOf(address(b)), 125e18);
+        assertEq(tokenOut.balanceOf(user), 287.5e18);
+        assertEq(tokenIn.balanceOf(user), 0);
+        _assertRouterEmpty();
+    }
+
+    function test_split_partialFillExtensionGivesExactCapacity() public {
+        // Same economics but A implements IPropAMMPartialFill: exact 150 cap
+        // is used instead of the probe's 125 estimate.
+        MockPartialFillPropAMM a = new MockPartialFillPropAMM(10, 12);
+        a.setCap(150e18);
+        tokenOut.mint(address(a), 1_000_000e18);
+        vm.prank(owner);
+        router.addVenue(address(a));
+        MockCappedPropAMM b = _newVenue(10, 11, 0, MockCappedPropAMM.CapMode.HardRevert);
+        _fundUser(250e18);
+
+        address[] memory venues = new address[](2);
+        venues[0] = address(a);
+        venues[1] = address(b);
+
+        uint256 amountOut = _split(venues, _noHints(), 250e18, 0, 8);
+        // Legs: A 150 (exact cap, x1.2 -> 180), B 100 (x1.1 -> 110).
+        assertEq(amountOut, 290e18);
+        assertEq(tokenIn.balanceOf(address(a)), 150e18);
+        assertEq(tokenIn.balanceOf(address(b)), 100e18);
+        assertEq(tokenOut.balanceOf(user), 290e18);
+        _assertRouterEmpty();
+    }
+
+    function test_split_saturatingVenueReducedToHalfPoint() public {
+        // A saturates above 100 (Fermi pattern): quote(250) = 120 (bad rate),
+        // quote(125) = 150 (good rate x1.2). Saturation detection must keep
+        // the half point, not eliminate A.
+        MockCappedPropAMM a = _newVenue(10, 12, 100e18, MockCappedPropAMM.CapMode.Saturate);
+        _fundUser(250e18);
+
+        address[] memory venues = new address[](1);
+        venues[0] = address(a);
+
+        uint256 amountOut = _split(venues, _noHints(), 250e18, 0, 8);
+        // quote(250) = cap*1.2 = 120; quote(125) = 120 too (125 > cap ->
+        // saturate). Both points saturated: out(250)=120 == out(125)=120 ->
+        // isSaturated(120, 120) = true -> fill = 125 at out 120 (rate 0.96
+        // < uni 1.0) -> A LOSES to uniswap. Everything routes via uniswap.
+        assertEq(amountOut, 250e18);
+        assertEq(tokenIn.balanceOf(address(a)), 0);
+        assertEq(tokenOut.balanceOf(user), 250e18);
+        _assertRouterEmpty();
+    }
+
+    function test_split_probeHintDiscoversSmallCap() public {
+        // Same saturating venue, but the caller hints its true cap: the
+        // probe quotes at 100 (ok, x1.2 -> 120) and 50; A wins a 100 leg.
+        MockCappedPropAMM a = _newVenue(10, 12, 100e18, MockCappedPropAMM.CapMode.Saturate);
+        _fundUser(250e18);
+
+        address[] memory venues = new address[](1);
+        venues[0] = address(a);
+        uint256[] memory hints = new uint256[](1);
+        hints[0] = 100e18;
+
+        uint256 amountOut = _split(venues, hints, 250e18, 0, 8);
+        // A leg: 100 -> 120. Remainder 150 -> uniswap 1:1 -> 150. Total 270.
+        assertEq(amountOut, 270e18);
+        assertEq(tokenIn.balanceOf(address(a)), 100e18);
+        assertEq(tokenOut.balanceOf(user), 270e18);
+        _assertRouterEmpty();
+    }
+
+    function test_split_zeroQuoteVenueSkipped() public {
+        MockCappedPropAMM a = _newVenue(10, 12, 100e18, MockCappedPropAMM.CapMode.ZeroQuote);
+        _fundUser(250e18);
+        address[] memory venues = new address[](1);
+        venues[0] = address(a);
+        uint256 amountOut = _split(venues, _noHints(), 250e18, 0, 8);
+        // Both probe points above cap -> zero quotes -> skipped -> all uniswap.
+        assertEq(amountOut, 250e18);
+        assertEq(tokenIn.balanceOf(address(a)), 0);
+        _assertRouterEmpty();
+    }
+
+    function test_split_r1_thievingQuoteReverts() public {
+        // tokenIn is operator-enabled; a whitelisted venue steals 1 wei
+        // during its quote. The split must revert the R1 invariant.
+        MockOperatorERC20 opIn = new MockOperatorERC20("OpIn", "OPIN");
+        MockThievingQuoteVenue thief = new MockThievingQuoteVenue();
+        opIn.setOperator(address(thief));
+        vm.prank(owner);
+        router.addVenue(address(thief));
+
+        opIn.mint(user, 100e18);
+        vm.prank(user);
+        opIn.approve(address(router), 100e18);
+
+        address[] memory venues = new address[](1);
+        venues[0] = address(thief);
+
+        vm.prank(user);
+        vm.expectRevert(QuoteBalanceInvariantViolated.selector);
+        router.swapSplitV1(
+            venues, _noHints(), address(opIn), address(tokenOut), 100e18, 0, 8, user, block.timestamp + 1
+        );
+
+        // The whole call rolled back: the user still holds every wei.
+        assertEq(opIn.balanceOf(user), 100e18);
+        assertEq(opIn.balanceOf(address(router)), 0);
+        assertEq(opIn.balanceOf(address(thief)), 0);
+    }
+}
