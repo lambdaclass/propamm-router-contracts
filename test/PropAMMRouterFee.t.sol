@@ -9,6 +9,7 @@ import {IPropAMMRouter} from "../src/interfaces/IPropAMMRouter.sol";
 import {PropAMMRouter} from "../src/PropAMMRouter.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockFeeOnTransferERC20} from "./mocks/MockFeeOnTransferERC20.sol";
+import {MockPropAMM} from "./mocks/MockPropAMM.sol";
 import {MockV3SwapRouter} from "./mocks/MockV3SwapRouter.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
 import "../src/libraries/Errors.sol";
@@ -127,6 +128,62 @@ contract PropAMMRouterFeeTest is Test {
         assertEq(executedVenue, address(swapRouter), "executed venue mismatch");
         assertEq(tokenOut.balanceOf(user), expectedNet);
         assertEq(tokenOut.balanceOf(feeRecipient), expectedFee);
+    }
+
+    // Regression test for audit Issue C: `swapViaSelectedVenuesWithFeeV1` must
+    // compare a selected venue's quote against `grossMin`, not the net
+    // `amountOutMin`. Comparing against the net min lets a venue that cannot
+    // cover output + fee win selection, so the router burns gas on a venue
+    // attempt that the execution-time `grossMin` check can only reject.
+    //
+    // The venue below quotes 902e18, inside the affected interval
+    // [amountOutMin, grossMin) = [900e18, ~904.52e18), and is configured to
+    // FILL 910e18. Letting it fill is what makes the defect observable: if the
+    // venue under-delivered, the fixed and broken paths would both end up on
+    // the Uniswap fallback and the rolled-back venue attempt would leave no
+    // trace to assert on. Because it can fill, a router that wrongly selects it
+    // reports the propAMM as `executedVenue`; a correct one never picks it and
+    // reports the fallback.
+    function test_swapViaSelectedVenuesWithFee_skipsVenueQuotingBelowGrossMin() public {
+        uint16 feeBps = 50;
+        uint256 netMin = 900e18;
+        uint256 grossMin = Math.ceilDiv(netMin * 10_000, 10_000 - feeBps); // ~904.52e18
+
+        // Fallback delivers comfortably above grossMin, so the swap settles there.
+        _prepare(1_000e18, 1_000e18);
+
+        MockPropAMM propAMM = new MockPropAMM();
+        propAMM.setQuote(902e18); // netMin <= quote < grossMin
+        propAMM.setAmountOut(910e18); // could fill grossMin if it were ever called
+        assertGe(propAMM.quoteToReturn(), netMin, "quote must clear the net min");
+        assertLt(propAMM.quoteToReturn(), grossMin, "quote must fall short of the gross min");
+        assertGe(propAMM.amountOutToDeliver(), grossMin, "venue must be able to fill grossMin");
+
+        vm.prank(owner);
+        router.addVenue(address(propAMM));
+
+        address[] memory venues = new address[](1);
+        venues[0] = address(propAMM);
+
+        vm.prank(user);
+        (uint256 amountOut, address executedVenue) = router.swapViaSelectedVenuesWithFeeV1(
+            venues,
+            address(tokenIn),
+            address(tokenOut),
+            1_000e18,
+            netMin,
+            user,
+            block.timestamp + 1,
+            IPropAMMRouter.FrontendFee({bps: feeBps, recipient: feeRecipient})
+        );
+
+        assertEq(executedVenue, address(swapRouter), "venue quoting below grossMin must not be selected");
+        // Independent of `executedVenue`: dispatching a venue pushes `tokenIn` to
+        // it first, and a successful fill would leave that balance behind rather
+        // than rolling it back. A zero balance proves it was never attempted.
+        assertEq(tokenIn.balanceOf(address(propAMM)), 0, "propAMM must never have been pushed tokenIn");
+        assertGe(amountOut, netMin, "recipient must still clear the net minimum");
+        assertEq(tokenOut.balanceOf(user), amountOut);
     }
 
     function test_swapWithFee_revertsFeeTooHigh() public {
