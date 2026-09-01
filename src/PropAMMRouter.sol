@@ -279,6 +279,19 @@ contract PropAMMRouter is
     uint256 public constant MAX_SPLIT_VENUES = 8;
 
     /// @inheritdoc IPropAMMRouter
+    /// @dev The coalesced fallback leg's minimum is the larger of the
+    /// aggregate shortfall against `amountOutMin` and the sum of EXPLICIT
+    /// fallback legs' `minOut` — see `_executeLegs`. A failed prop leg's own
+    /// `minOut` is deliberately not carried into that fallback minimum: it
+    /// was priced off that venue's (typically better) rate, so applying it
+    /// to Uniswap would revert the fallback exactly when it is needed to
+    /// recover the leg. Consequently, when the surviving legs already cover
+    /// `amountOutMin`, the fallback portion covering failed legs may execute
+    /// with no floor at all and is MEV-exposed for that slice — weaker than
+    /// `swapV1`'s single-venue fallback, which always receives the caller's
+    /// full `amountOutMin`. Callers wanting per-portion protection must
+    /// either supply explicit fallback legs carrying their own `minOut`, or
+    /// tighten the aggregate `amountOutMin`.
     function swapMultiLegV1(
         IPropAMMRouter.Leg[] calldata legs,
         address tokenIn,
@@ -328,9 +341,12 @@ contract PropAMMRouter is
     /// coalesced into ONE Uniswap V3 swap at the end, whose min is the
     /// larger of (a) the aggregate shortfall vs `amountOutMin` (saturating —
     /// over-delivering prop legs must not underflow) and (b) the sum of the
-    /// explicit fallback legs' `minOut`. Emits one `Swapped` per executed
-    /// leg. `tokenIn` is the caller-visible token (sentinel allowed, for
-    /// events); `tokenIn_` is the resolved ERC-20 being sold.
+    /// explicit fallback legs' `minOut`. A failed prop leg's `minOut` is
+    /// intentionally NOT folded into (b) — see `swapMultiLegV1`'s NatSpec for
+    /// why, and for the resulting MEV-exposure caveat when (a) collapses to
+    /// zero. Emits one `Swapped` per executed leg. `tokenIn` is the
+    /// caller-visible token (sentinel allowed, for events); `tokenIn_` is the
+    /// resolved ERC-20 being sold.
     function _executeLegs(
         IPropAMMRouter.Leg[] memory legs,
         address tokenIn,

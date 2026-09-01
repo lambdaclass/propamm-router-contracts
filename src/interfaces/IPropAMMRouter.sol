@@ -53,7 +53,10 @@ interface IPropAMMRouter {
     /// failing it falls back to Uniswap V3 (coalesced with other failed
     /// legs). Zero means no per-leg floor: the leg then falls back only on a
     /// hard venue revert, not on under-delivery — the aggregate
-    /// `amountOutMin` still gates the whole swap.
+    /// `amountOutMin` still gates the whole swap. Note: if THIS leg fails and
+    /// falls back, `minOut` is NOT applied to its fallback execution (see
+    /// `swapMultiLegV1`) — only a leg that names the fallback venue directly
+    /// contributes its `minOut` to the coalesced fallback's floor.
     struct Leg {
         address venue;
         uint256 amountIn;
@@ -64,6 +67,12 @@ interface IPropAMMRouter {
     /// Pulls `sum(legs.amountIn)` once, runs each leg, coalesces failed legs
     /// into a single Uniswap V3 fallback swap, and enforces the AGGREGATE
     /// `amountOutMin` on the total delivered.
+    /// @dev When the surviving legs already cover `amountOutMin`, the
+    /// coalesced fallback covering the failed legs may execute with no floor
+    /// of its own (a failed leg's `minOut` is not inherited by its fallback)
+    /// and is MEV-exposed for that slice — weaker than `swapV1`'s
+    /// single-venue fallback. Supply explicit fallback legs with their own
+    /// `minOut`, or a tighter `amountOutMin`, for per-portion protection.
     /// @param legs The legs to execute (1..MAX_SPLIT_VENUES entries).
     /// @param tokenIn The token being sold (or the ETH sentinel).
     /// @param tokenOut The token being bought (or the ETH sentinel).
