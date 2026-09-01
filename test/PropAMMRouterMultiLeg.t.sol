@@ -14,6 +14,7 @@ import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockCappedPropAMM} from "./mocks/MockCappedPropAMM.sol";
 import {MockLinearSwapRouter, MockLinearQuoterV2} from "./mocks/MockLinearUniswap.sol";
 import {MockWETH} from "./mocks/MockWETH.sol";
+import {FrontendFees} from "../src/libraries/FrontendFees.sol";
 import "../src/libraries/Errors.sol";
 
 contract PropAMMRouterMultiLegTest is Test {
@@ -28,6 +29,7 @@ contract PropAMMRouterMultiLegTest is Test {
 
     address owner = makeAddr("owner");
     address user = makeAddr("user");
+    address feeRecipient = makeAddr("feeRecipient");
 
     function setUp() public {
         uni = new MockLinearSwapRouter();
@@ -341,5 +343,54 @@ contract PropAMMRouterMultiLegTest is Test {
         assertEq(user.balance - balBefore, 6e18); // raw ETH received
         assertEq(address(router).balance, 0, "router retained ETH");
         assertEq(IERC20(WETH).balanceOf(address(router)), 0, "router retained WETH");
+    }
+
+    function test_swapMultiLegWithFee_skimsAggregate() public {
+        _fundUser(300e18);
+        IPropAMMRouter.Leg[] memory legs = new IPropAMMRouter.Leg[](2);
+        legs[0] = _leg(address(venueA), 100e18, 0);
+        legs[1] = _leg(address(venueB), 200e18, 0);
+
+        uint256 gross = 600e18;
+        uint256 fee = gross * 50 / 10_000; // 3e18
+        uint256 net = gross - fee;
+
+        vm.prank(user);
+        uint256 amountOut = router.swapMultiLegWithFeeV1(
+            legs,
+            address(tokenIn),
+            address(tokenOut),
+            net,
+            user,
+            block.timestamp + 1,
+            IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
+        );
+
+        assertEq(amountOut, net);
+        assertEq(tokenOut.balanceOf(user), net);
+        assertEq(tokenOut.balanceOf(feeRecipient), fee);
+        assertEq(tokenOut.balanceOf(address(router)), 0, "router retained tokenOut");
+    }
+
+    function test_swapMultiLegWithFee_netMinGrossedUp() public {
+        _fundUser(300e18);
+        IPropAMMRouter.Leg[] memory legs = new IPropAMMRouter.Leg[](2);
+        legs[0] = _leg(address(venueA), 100e18, 0);
+        legs[1] = _leg(address(venueB), 200e18, 0);
+
+        // Gross delivery is 600e18; demanding a net of 600e18 at 50bps needs
+        // gross ~603e18 -> must revert InsufficientOutput on the grossed min.
+        uint256 grossMin = FrontendFees._grossUp(600e18, 50);
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(InsufficientOutput.selector, grossMin, 600e18));
+        router.swapMultiLegWithFeeV1(
+            legs,
+            address(tokenIn),
+            address(tokenOut),
+            600e18,
+            user,
+            block.timestamp + 1,
+            IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
+        );
     }
 }

@@ -306,6 +306,28 @@ contract PropAMMRouter is
         amountOut = _executeLegs(legs, tokenIn, tokenIn_, tokenOut, amountOutMin, recipient, deadline);
     }
 
+    /// @notice `swapMultiLegV1` plus a frontend fee skimmed from the
+    /// aggregate output. Implementation-only, like the other `*WithFeeV1`
+    /// entrypoints. Legs deliver to this contract; the fee and the net are
+    /// then forwarded. `amountOutMin` is the NET minimum the user receives.
+    function swapMultiLegWithFeeV1(
+        IPropAMMRouter.Leg[] calldata legs,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountOutMin,
+        address recipient,
+        uint256 deadline,
+        FrontendFee calldata fee
+    ) external payable whenNotPaused nonReentrant returns (uint256 amountOut) {
+        FrontendFees._validateFee(fee);
+        require(block.timestamp <= deadline, Expired());
+        uint256 totalIn = _validateLegs(legs);
+        uint256 grossMin = FrontendFees._grossUp(amountOutMin, fee.bps);
+        address tokenIn_ = _pullFunds(tokenIn, totalIn);
+        uint256 deliveredGross = _executeLegs(legs, tokenIn, tokenIn_, tokenOut, grossMin, address(this), deadline);
+        amountOut = FrontendFees._skimAndDisburse(tokenOut, deliveredGross, fee, recipient);
+    }
+
     /// @dev Validates leg count, per-leg venue membership and non-zero
     /// amounts; returns the total input to pull. Venues are validated up
     /// front (revert before pulling funds) rather than relying on
