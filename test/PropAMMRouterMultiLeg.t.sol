@@ -203,4 +203,76 @@ contract PropAMMRouterMultiLegTest is Test {
         vm.expectRevert(); // MockLinearSwapRouter's own "uni-slippage" require
         router.swapMultiLegV1(legs, address(tokenIn), address(tokenOut), 0, user, block.timestamp + 1);
     }
+
+    function test_swapMultiLeg_revertsOnZeroLegs() public {
+        IPropAMMRouter.Leg[] memory legs = new IPropAMMRouter.Leg[](0);
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(InvalidLegCount.selector, 0));
+        router.swapMultiLegV1(legs, address(tokenIn), address(tokenOut), 0, user, block.timestamp + 1);
+    }
+
+    function test_swapMultiLeg_revertsOnTooManyLegs() public {
+        IPropAMMRouter.Leg[] memory legs = new IPropAMMRouter.Leg[](9);
+        for (uint256 i = 0; i < 9; i++) {
+            legs[i] = _leg(address(venueA), 1e18, 0);
+        }
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(InvalidLegCount.selector, 9));
+        router.swapMultiLegV1(legs, address(tokenIn), address(tokenOut), 0, user, block.timestamp + 1);
+    }
+
+    function test_swapMultiLeg_revertsOnUnknownVenue() public {
+        IPropAMMRouter.Leg[] memory legs = new IPropAMMRouter.Leg[](1);
+        legs[0] = _leg(makeAddr("notAVenue"), 1e18, 0);
+        vm.prank(user);
+        vm.expectRevert(UnknownVenue.selector);
+        router.swapMultiLegV1(legs, address(tokenIn), address(tokenOut), 0, user, block.timestamp + 1);
+    }
+
+    function test_swapMultiLeg_revertsOnZeroLegAmount() public {
+        IPropAMMRouter.Leg[] memory legs = new IPropAMMRouter.Leg[](1);
+        legs[0] = _leg(address(venueA), 0, 0);
+        vm.prank(user);
+        vm.expectRevert(ZeroAmount.selector);
+        router.swapMultiLegV1(legs, address(tokenIn), address(tokenOut), 0, user, block.timestamp + 1);
+    }
+
+    function test_swapMultiLeg_revertsOnStrayMsgValueForERC20() public {
+        _fundUser(1e18);
+        vm.deal(user, 1 ether);
+        IPropAMMRouter.Leg[] memory legs = new IPropAMMRouter.Leg[](1);
+        legs[0] = _leg(address(venueA), 1e18, 0);
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(InvalidValue.selector, 0, 1 ether));
+        router.swapMultiLegV1{value: 1 ether}(legs, address(tokenIn), address(tokenOut), 0, user, block.timestamp + 1);
+    }
+
+    function test_swapMultiLeg_revertsPastDeadline() public {
+        IPropAMMRouter.Leg[] memory legs = new IPropAMMRouter.Leg[](1);
+        legs[0] = _leg(address(venueA), 1e18, 0);
+        vm.prank(user);
+        vm.expectRevert(Expired.selector);
+        router.swapMultiLegV1(legs, address(tokenIn), address(tokenOut), 0, user, block.timestamp - 1);
+    }
+
+    function test_swapMultiLeg_revertsWhenPaused() public {
+        vm.prank(owner);
+        router.pause();
+        IPropAMMRouter.Leg[] memory legs = new IPropAMMRouter.Leg[](1);
+        legs[0] = _leg(address(venueA), 1e18, 0);
+        vm.prank(user);
+        vm.expectRevert(); // PausableUpgradeable.EnforcedPause
+        router.swapMultiLegV1(legs, address(tokenIn), address(tokenOut), 0, user, block.timestamp + 1);
+    }
+
+    function test_swapMultiLeg_duplicateVenuesAllowed() public {
+        _fundUser(200e18);
+        IPropAMMRouter.Leg[] memory legs = new IPropAMMRouter.Leg[](2);
+        legs[0] = _leg(address(venueA), 100e18, 0);
+        legs[1] = _leg(address(venueA), 100e18, 0);
+        vm.prank(user);
+        uint256 amountOut =
+            router.swapMultiLegV1(legs, address(tokenIn), address(tokenOut), 400e18, user, block.timestamp + 1);
+        assertEq(amountOut, 400e18);
+    }
 }
