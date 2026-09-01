@@ -24,8 +24,8 @@ event PairFeeUpdated(address indexed tokenA, address indexed tokenB, uint24 oldF
 /// @param to The recipient of the rescued tokens.
 /// @param amount The amount transferred.
 event TokensRescued(address indexed token, address indexed to, uint256 amount);
-/// @notice Emitted when a propAMM venue is added to the whitelist — via
-/// `addVenue`, or for each seeded default venue during `initialize`.
+/// @notice Emitted when a propAMM venue is added to the whitelist via
+/// `addVenue`. `initialize` seeds no venues, so the whitelist starts empty.
 /// @param venue The venue address added.
 event VenueWhitelisted(address indexed venue);
 /// @notice Emitted when an authorized account removes a propAMM venue from the whitelist.

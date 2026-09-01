@@ -2,6 +2,29 @@
 
 All notable changes to the Rust SDK (`propamm`) are documented here.
 
+## [1.2.0] - 2026-08-28
+
+### Added
+
+- `TEMPEST`, `TAURUSFI` and `METRIC` venue constants in `common::pamms`, plus
+  their `tempest` / `taurusfi` / `metric` entries in `PAMMS` (whose length goes
+  from 3 to 6).
+
+### Changed
+
+- **`BEBOP` now points at `0xB09AaA5614916d7AEb59C295C52c92ca82aDdD76`**, the
+  current Bebop deployment. Code that hardcoded the previous Bebop address must
+  be updated.
+
+## [1.1.2] - 2026-07-01
+
+### Added
+
+- The `swap` and `swap_with` functions (and their `_and_wait` variants) now attach a hardcoded
+  per-function gas limit and skip node gas estimation, which can under-shoot when
+  execution takes a heavier branch than it simulated. Override the gas limit per
+  call with the new `SwapOptions.gas_limit`.
+
 ## [1.1.1] - 2026-06-25
 
 ### Fixed

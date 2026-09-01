@@ -103,6 +103,7 @@ jobs:
       - name: Run tests
         env:
           REQUIRE_CONTRACT_ABI: "1"
+          REQUIRE_CONTRACT_SRC: "1"
         run: cargo test
 
   docs:

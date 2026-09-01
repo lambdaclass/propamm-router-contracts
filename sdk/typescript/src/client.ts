@@ -58,7 +58,31 @@ export interface ReadParams {
 export interface WriteParams extends ReadParams {
   /** ETH value to send along with the call, in wei. */
   value?: bigint;
+  /**
+   * Explicit gas limit. Overrides both the per-function default
+   * ({@link GAS_LIMIT_BY_FUNCTION}) and viem's estimation.
+   */
+  gasLimit?: bigint;
 }
+
+/**
+ * Hardcoded gas limit per on-chain function. `write` attaches this value
+ * directly to the transaction, skipping gas estimation entirely — estimation
+ * under-shoots when execution takes a heavier branch than it simulated (e.g. a
+ * cheap venue fill estimated, but the ~2x-costlier Uniswap fallback executed).
+ *
+ * Keyed by on-chain function name; the tiers reflect how much quoting each
+ * entrypoint does (none → all venues). Functions absent here are sent without an
+ * explicit gas limit, so viem estimates them as usual.
+ */
+export const GAS_LIMIT_BY_FUNCTION: Record<string, bigint> = {
+  swapV1: 700_000n,
+  swapWithFeeV1: 750_000n,
+  swapViaSelectedVenuesV1: 700_000n,
+  swapViaSelectedVenuesWithFeeV1: 750_000n,
+  swapViaVenueV1: 500_000n,
+  swapViaVenueWithFeeV1: 550_000n,
+};
 
 export interface CallParams extends WriteParams {
   /** State overrides applied to the `eth_call` (third RPC parameter). */
@@ -187,6 +211,9 @@ export class ContractClient {
   /**
    * Send a state-changing contract call. Simulates first so reverts surface
    * as errors before any gas is spent. Returns the transaction hash.
+   *
+   * Gas limit precedence: an explicit `params.gas`, else the per-function
+   * default ({@link GAS_LIMIT_BY_FUNCTION}), else viem's estimation.
    */
   async write(params: WriteParams): Promise<Hash> {
     if (!this.walletClient || !this.account) {
@@ -202,7 +229,10 @@ export class ContractClient {
       value: params.value,
     });
 
-    return this.walletClient.writeContract(request);
+    return this.walletClient.writeContract({
+      ...request,
+      gas: params.gasLimit ?? GAS_LIMIT_BY_FUNCTION[params.functionName] ?? request.gas,
+    });
   }
 
   /** Wait until a transaction is mined and return its receipt. */

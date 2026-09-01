@@ -2,6 +2,36 @@
 
 All notable changes to the Python SDK (`propamm`) are documented here.
 
+## [1.2.0] - 2026-08-28
+
+### Added
+
+- `TEMPEST`, `TAURUSFI` and `METRIC` venue constants in `common.pamms`, plus
+  their `tempest` / `taurusfi` / `metric` entries in `PAMMS`.
+
+### Changed
+
+- **`BEBOP` now points at `0xB09AaA5614916d7AEb59C295C52c92ca82aDdD76`**, the
+  current Bebop deployment. Code that hardcoded the previous Bebop address must
+  be updated.
+
+### Removed
+
+- `_LEGACY_BEBOP_LOWER` and the legacy-Bebop handling in `to_state_override`.
+  The superseded Bebop deployments are no longer whitelisted on the router, so
+  they can be neither quoted nor dispatched and need no price neutralization;
+  `bebop_default` now zeroes only the current `BEBOP` slot when a snapshot
+  omits it.
+
+## [1.1.3] - 2026-07-01
+
+### Added
+
+- The `swap` and `swap_and_wait` functions now attach a hardcoded per-function gas limit and
+  skip gas estimation, which can under-shoot when execution takes a heavier
+  branch than it simulated. Override the gas limit per call with the new
+  `SwapOptions.gas_limit`.
+
 ## [1.1.2] - 2026-06-25
 
 ### Fixed

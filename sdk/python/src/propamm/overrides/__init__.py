@@ -49,11 +49,6 @@ BEACON_GENESIS_TS = 1_606_824_023
 SECS_PER_SLOT = 12
 
 _BEBOP_LOWER = BEBOP.lower()
-# Deprecated Bebop deployment still whitelisted on the router; it receives no
-# fresh overrides, so its stale on-chain price is always neutralized (see
-# `to_state_override`) until the router removes it from the whitelist.
-_LEGACY_BEBOP_LOWER = "0x160141a205f5ddcf096ba3f48b7ed21eb52c62ea"
-_BEBOP_ADDRESSES = (_BEBOP_LOWER, _LEGACY_BEBOP_LOWER)
 _META_KEYS = {"slot", "blockNumber", "block_number", "timestamp"}
 
 # Storage slot diffs for one contract: slot -> value (both ints).
@@ -183,21 +178,20 @@ def to_state_override(
     selected = {pamm.lower() for pamm in pamms} if pamms is not None else None
 
     merged: dict[str, SlotDiffs] = {}
-    present_bebop: set[str] = set()
+    bebop_present = False
     for pamm, contracts in snapshot.per_pamm.items():
         if selected is not None and pamm not in selected:
             continue
-        if pamm in _BEBOP_ADDRESSES:
-            present_bebop.add(pamm)
+        if pamm == _BEBOP_LOWER:
+            bebop_present = True
         for address, slots in contracts.items():
             merged.setdefault(address, {}).update(slots)
 
-    # Zero the price slot of every known Bebop venue without a fresh override, so
-    # a stale on-chain price can't win a best-quote selection it could never fill.
-    if bebop_default:
-        for bebop in _BEBOP_ADDRESSES:
-            if bebop not in present_bebop:
-                merged.setdefault(bebop, {})[int(BEBOP_DEFAULT_SLOT, 16)] = 0
+    # Zero Bebop's price slot when the snapshot carries no fresh override for it,
+    # so a stale on-chain price can't win a best-quote selection it could never
+    # fill.
+    if bebop_default and not bebop_present:
+        merged.setdefault(_BEBOP_LOWER, {})[int(BEBOP_DEFAULT_SLOT, 16)] = 0
 
     return {
         to_checksum_address(address): {

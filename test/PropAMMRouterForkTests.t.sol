@@ -24,8 +24,7 @@ contract PropAMMRouterForkTests is Test {
     // The address of the mainnet PropAMMRouter contract (demo environment)
     address constant MAINNET_PROPAMM_ROUTER_ADDRESS = 0x4DdF368080CD7946db5b459aD591c350158175e1;
 
-    /// @dev The Kipseli PAMM whitelisted by the live demo router — the same
-    /// address `initialize` now seeds as the built-in Kipseli venue.
+    /// @dev The Kipseli PAMM whitelisted (via `addVenue`) on the live demo router.
     address constant NEW_KIPSELI_PAMM = 0x71e790dd841c8A9061487cb3E78C288E75cE0B3d;
     address constant NEW_FERMI_ROUTER = 0x5979458912F80B96d30D4220af8E2e4925A33320;
 
@@ -139,7 +138,7 @@ contract PropAMMRouterForkTests is Test {
         // venue actually reads empty, so `getState` reverts with `0x666a2814`
         // and the whole quote fails. When that happens, refresh this address
         // from the `getState` caller in `forge test -vvvv`.
-        address priceTarget = 0xD0fD9FC7f36e8406A174B6763d3dF00AAB24e1C9;
+        address priceTarget = 0x5B56042558012d21Fd3578C8b1d4519196517241;
         uint256 laneIndex = 0x2eec03b8999af9793df60f1395a1b41c29e22b324ea3200ca21bc692979b9d46;
         // Single packed price slot; replayed verbatim, the timestamp is
         // restamped to fork time in `_updateRegistryState`.

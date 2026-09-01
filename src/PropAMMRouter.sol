@@ -57,7 +57,7 @@ contract PropAMMRouter is
     /// considered by `swapV1` / `quoteV1` without a contract upgrade. The Uniswap
     /// V3 fallback (`fallbackSwapRouter`) is the always-available safety net and is
     /// intentionally NOT a member — it is accepted independently of this set.
-    /// Seeded with the known propAMMs in `initialize` and managed (access-controlled)
+    /// Starts empty (`initialize` seeds no venues) and is managed (access-controlled)
     /// via `addVenue` / `removeVenue`, so its size (and thus the
     /// `_pickBestPropAMM` loop bound) is trusted to stay small.
     /// @dev Declared last to keep the upgradeable storage layout append-only.
@@ -504,7 +504,7 @@ contract PropAMMRouter is
 
     /// @dev Shared quote body for `quoteVenueV1` (whitelist-gated) and
     /// `_quoteVenueUnchecked` (self-only). Resolves the ETH sentinel to WETH and
-    /// dispatches to the fallback quoter, Bebop, or the common `IPropAMM` interface.
+    /// dispatches to the fallback quoter or the common `IPropAMM` interface.
     function _quoteVenue(address venue, address tokenIn, address tokenOut, uint256 amount)
         private
         returns (uint256 amountOut)
@@ -756,10 +756,9 @@ contract PropAMMRouter is
         _addVenue(venue);
     }
 
-    /// @dev Shared whitelist-insertion core for the public `addVenue` and the
-    /// venue seeding in `initialize`. Reverts `ZeroAddress` if `venue` is zero
-    /// and `VenueAlreadyWhitelisted` if it is already listed; emits
-    /// `VenueWhitelisted` on success.
+    /// @dev Whitelist-insertion core behind the public `addVenue`. Reverts
+    /// `ZeroAddress` if `venue` is zero and `VenueAlreadyWhitelisted` if it is
+    /// already listed; emits `VenueWhitelisted` on success.
     function _addVenue(address venue) private {
         require(venue != address(0), ZeroAddress());
         bool added = _whitelistedVenues.add(venue);

@@ -129,6 +129,9 @@ class SwapOptions:
     #: Optional frontend fee skimmed from the output; routes through the
     #: contract's ``WithFee`` selector (validated before sending).
     frontend_fee: FrontendFee | None = None
+    #: Explicit gas limit (gas units) for the transaction. Overrides the
+    #: hardcoded per-function default.
+    gas_limit: int | None = None
 
 
 # Quote function name per venue-restriction mode.
@@ -224,7 +227,7 @@ class PropAmmRouter:
         function = getattr(self._contract.functions, with_fee if fee else plain)(*args)
         # Native-ETH input is signalled by the sentinel and paid via msg.value.
         value = params.amount_in if _eq(params.token_in, ETH_SENTINEL) else None
-        return await self._send(function, value)
+        return await self._send(function, value, opts.gas_limit)
 
     async def swap_and_wait(
         self, params: SwapParams, opts: SwapOptions | None = None
@@ -310,10 +313,12 @@ class PropAmmRouter:
 
     # ------ Internals ------
 
-    async def _send(self, function: Any, value: int | None = None) -> str:
+    async def _send(
+        self, function: Any, value: int | None = None, gas_limit: int | None = None
+    ) -> str:
         """Send via the client, naming any router custom error in the revert."""
         try:
-            return await self.client.send(function, value)
+            return await self.client.send(function, value, gas_limit)
         except RevertError as error:
             raise _named_revert(error) from error
 

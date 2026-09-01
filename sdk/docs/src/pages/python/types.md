@@ -94,6 +94,7 @@ Per-swap options, accepted by [`swap`](/python/router/swap) and
 class SwapOptions:
     venues: list[str] | None = None
     frontend_fee: FrontendFee | None = None
+    gas_limit: int | None = None
 ```
 
 - `venues` — restrict the swap to these venues: a single entry executes
@@ -102,6 +103,8 @@ class SwapOptions:
   best-quoting venue overall.
 - `frontend_fee` — skim a [frontend fee](#frontendfee) from the output; routes
   the call through the contract's `WithFee` selector.
+- `gas_limit` — explicit transaction gas limit, in gas units. Overrides the
+  hardcoded per-function default (see [swap](/python/router/swap#gas-limits)).
 
 ## FrontendFee
 

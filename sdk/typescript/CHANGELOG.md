@@ -2,6 +2,32 @@
 
 All notable changes to the TypeScript SDK (`propamm`) are documented here.
 
+## [1.3.0] - 2026-08-28
+
+### Added
+
+- `TEMPEST`, `TAURUSFI` and `METRIC` venue constants in `common/pamms`, plus
+  their `tempest` / `taurusfi` / `metric` entries in `PAMMS` (and therefore in
+  the `PammName` union).
+
+### Changed
+
+- **`BEBOP` now points at `0xB09AaA5614916d7AEb59C295C52c92ca82aDdD76`**, the
+  current Bebop deployment. Code that hardcoded the previous Bebop address must
+  be updated.
+
+## [1.2.2] - 2026-07-01
+
+### Added
+
+- The `swap` and `swapAndWait` functions now attach a hardcoded per-function gas limit and skip
+  node gas estimation, which can under-shoot when execution takes a heavier
+  branch than it simulated. Override the gas limit per call with the new
+  `SwapOptions.gasLimit`.
+- `PropAmmRouter.gasLimitFor(opts?)` returns the gas limit a swap will attach
+  for the given options (the explicit `gasLimit`, else the per-function
+  default) — for previewing the maximum network fee without sending.
+
 ## [1.2.1] - 2026-06-25
 
 ### Fixed
