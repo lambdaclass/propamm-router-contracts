@@ -4,6 +4,7 @@ pragma solidity ^0.8.35;
 import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
+import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {IPropAMMRouter} from "../src/interfaces/IPropAMMRouter.sol";
 import {PropAMMRouter} from "../src/PropAMMRouter.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
@@ -256,12 +257,13 @@ contract PropAMMRouterMultiLegTest is Test {
     }
 
     function test_swapMultiLeg_revertsWhenPaused() public {
+        _fundUser(1e18);
         vm.prank(owner);
         router.pause();
         IPropAMMRouter.Leg[] memory legs = new IPropAMMRouter.Leg[](1);
         legs[0] = _leg(address(venueA), 1e18, 0);
         vm.prank(user);
-        vm.expectRevert(); // PausableUpgradeable.EnforcedPause
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         router.swapMultiLegV1(legs, address(tokenIn), address(tokenOut), 0, user, block.timestamp + 1);
     }
 
