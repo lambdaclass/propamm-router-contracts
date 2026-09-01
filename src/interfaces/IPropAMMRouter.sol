@@ -45,6 +45,41 @@ interface IPropAMMRouter {
         address recipient;
     }
 
+    /// @notice One leg of a multileg swap.
+    /// @param venue The venue to route this leg through — a whitelisted
+    /// propAMM, or the fallback router address for a plain Uniswap V3 leg.
+    /// @param amountIn The exact amount of `tokenIn` this leg sells.
+    /// @param minOut The minimum `tokenOut` this leg must deliver; a leg
+    /// failing it falls back to Uniswap V3 (coalesced with other failed
+    /// legs). Zero means no per-leg floor: the leg then falls back only on a
+    /// hard venue revert, not on under-delivery — the aggregate
+    /// `amountOutMin` still gates the whole swap.
+    struct Leg {
+        address venue;
+        uint256 amountIn;
+        uint256 minOut;
+    }
+
+    /// @notice Executes a caller-computed split across whitelisted venues.
+    /// Pulls `sum(legs.amountIn)` once, runs each leg, coalesces failed legs
+    /// into a single Uniswap V3 fallback swap, and enforces the AGGREGATE
+    /// `amountOutMin` on the total delivered.
+    /// @param legs The legs to execute (1..MAX_SPLIT_VENUES entries).
+    /// @param tokenIn The token being sold (or the ETH sentinel).
+    /// @param tokenOut The token being bought (or the ETH sentinel).
+    /// @param amountOutMin The minimum TOTAL `tokenOut` across all legs.
+    /// @param recipient The address that receives `tokenOut`.
+    /// @param deadline Unix timestamp after which the swap is no longer valid.
+    /// @return amountOut The total `tokenOut` delivered to `recipient`.
+    function swapMultiLegV1(
+        Leg[] calldata legs,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountOutMin,
+        address recipient,
+        uint256 deadline
+    ) external payable returns (uint256 amountOut);
+
     /// @notice Swaps an exact `amountIn` of `tokenIn` for as much `tokenOut` as
     /// possible, routing through the best-quoting venue and falling back to the
     /// public-venue fallback if the chosen venue fails to fill.

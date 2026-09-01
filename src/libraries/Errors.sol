@@ -46,3 +46,22 @@ error UnexpectedETHSender();
 /// @notice Thrown when a swap's input and output resolve to the same token
 /// (including `ETH_SENTINEL` against `WETH`), which no venue can fill.
 error IdenticalTokens();
+/// @notice Thrown when a multileg call supplies zero legs or more than
+/// `MAX_SPLIT_VENUES` legs.
+error InvalidLegCount(uint256 count);
+/// @notice Thrown when an amount that must be non-zero is zero (a leg's
+/// `amountIn`, or a splitter's `amountIn`).
+error ZeroAmount();
+/// @notice Thrown when `swapSplitV1`'s `amountIn` exceeds `type(uint128).max`,
+/// the bound that keeps the planner's cross-multiplied rate comparisons
+/// overflow-free.
+error AmountTooLarge(uint256 amount);
+/// @notice Thrown when the resolved venue set for a split exceeds
+/// `MAX_SPLIT_VENUES` (including "empty venues = whole whitelist" when the
+/// whitelist has grown past the bound — set order is unstable, so silent
+/// truncation would be nondeterministic).
+error TooManyVenues(uint256 count);
+/// @notice Thrown when the router's `tokenIn` balance after the split quote
+/// phase differs from the post-pull snapshot — some venue's quote consumed
+/// in-flight user funds (R1 invariant, see the design spec).
+error QuoteBalanceInvariantViolated();

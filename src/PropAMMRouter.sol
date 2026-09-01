@@ -271,6 +271,124 @@ contract PropAMMRouter is
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
 
+    //------------//
+    // Multileg   //
+    //------------//
+
+    /// @notice Maximum number of legs per multileg call and venues per split.
+    uint256 public constant MAX_SPLIT_VENUES = 8;
+
+    /// @inheritdoc IPropAMMRouter
+    function swapMultiLegV1(
+        IPropAMMRouter.Leg[] calldata legs,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountOutMin,
+        address recipient,
+        uint256 deadline
+    ) external payable whenNotPaused nonReentrant returns (uint256 amountOut) {
+        require(block.timestamp <= deadline, Expired());
+        uint256 totalIn = _validateLegs(legs);
+        address tokenIn_ = _pullFunds(tokenIn, totalIn);
+        amountOut = _executeLegs(legs, tokenIn, tokenIn_, tokenOut, amountOutMin, recipient, deadline);
+    }
+
+    /// @dev Validates leg count, per-leg venue membership and non-zero
+    /// amounts; returns the total input to pull. Venues are validated up
+    /// front (revert before pulling funds) rather than relying on
+    /// `_dispatchVenue`'s whitelist check, which inside the per-leg
+    /// `try/catch` would silently convert an unknown venue into a fallback
+    /// leg.
+    function _validateLegs(IPropAMMRouter.Leg[] calldata legs) internal view returns (uint256 totalIn) {
+        require(legs.length >= 1 && legs.length <= MAX_SPLIT_VENUES, InvalidLegCount(legs.length));
+        for (uint256 i = 0; i < legs.length; i++) {
+            require(_isVenue(legs[i].venue), UnknownVenue());
+            require(legs[i].amountIn > 0, ZeroAmount());
+            totalIn += legs[i].amountIn;
+        }
+    }
+
+    /// @dev Pulls `amountIn` of `tokenIn` from the caller (wrapping ETH when
+    /// `tokenIn` is the sentinel) and returns the resolved ERC-20 the swap
+    /// legs will actually sell. Mirrors `_coreSwap`'s pull block.
+    function _pullFunds(address tokenIn, uint256 amountIn) internal returns (address tokenIn_) {
+        tokenIn_ = tokenIn;
+        if (tokenIn == ETH_SENTINEL) {
+            require(msg.value == amountIn, InvalidValue(amountIn, msg.value));
+            IWETH(WETH).deposit{value: msg.value}();
+            tokenIn_ = WETH;
+        } else {
+            require(msg.value == 0, InvalidValue(0, msg.value));
+            IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
+        }
+    }
+
+    /// @notice Runs a list of legs with funds already held by this contract.
+    /// @dev Legs naming the fallback router and legs whose venue fails are
+    /// coalesced into ONE Uniswap V3 swap at the end, whose min is the
+    /// larger of (a) the aggregate shortfall vs `amountOutMin` (saturating —
+    /// over-delivering prop legs must not underflow) and (b) the sum of the
+    /// explicit fallback legs' `minOut`. Emits one `Swapped` per executed
+    /// leg. `tokenIn` is the caller-visible token (sentinel allowed, for
+    /// events); `tokenIn_` is the resolved ERC-20 being sold.
+    function _executeLegs(
+        IPropAMMRouter.Leg[] memory legs,
+        address tokenIn,
+        address tokenIn_,
+        address tokenOut,
+        uint256 amountOutMin,
+        address recipient,
+        uint256 deadline
+    ) internal returns (uint256 delivered) {
+        address tokenOut_ = tokenOut;
+        address recipient_ = recipient;
+        if (tokenOut == ETH_SENTINEL) {
+            tokenOut_ = WETH;
+            recipient_ = address(this);
+        }
+        require(tokenIn_ != tokenOut_, IdenticalTokens());
+
+        uint256 fbAmount = 0;
+        uint256 fbMinOut = 0;
+        for (uint256 i = 0; i < legs.length; i++) {
+            if (legs[i].venue == fallbackSwapRouter) {
+                fbAmount += legs[i].amountIn;
+                fbMinOut += legs[i].minOut;
+                continue;
+            }
+            uint256 prevBal = IERC20(tokenOut_).balanceOf(recipient_);
+            try this._dispatchVenue(
+                legs[i].venue, tokenIn_, tokenOut_, legs[i].amountIn, legs[i].minOut, recipient_, deadline, prevBal
+            ) returns (
+                uint256 legOut
+            ) {
+                delivered += legOut;
+                _emitSwapped(legs[i].venue, tokenIn, tokenOut, legs[i].amountIn, legOut, recipient);
+            } catch {
+                fbAmount += legs[i].amountIn;
+            }
+        }
+
+        if (fbAmount > 0) {
+            uint256 uniMin = delivered >= amountOutMin ? 0 : amountOutMin - delivered;
+            if (fbMinOut > uniMin) uniMin = fbMinOut;
+            uint256 prevBal = IERC20(tokenOut_).balanceOf(recipient_);
+            UniV3Router.swapExactIn(
+                tokenIn_, tokenOut_, resolvedFee(tokenIn_, tokenOut_), fbAmount, uniMin, recipient_, fallbackSwapRouter
+            );
+            uint256 fbOut = IERC20(tokenOut_).balanceOf(recipient_) - prevBal;
+            require(fbOut >= uniMin, InsufficientOutput(uniMin, fbOut));
+            delivered += fbOut;
+            _emitSwapped(fallbackSwapRouter, tokenIn, tokenOut, fbAmount, fbOut, recipient);
+        }
+
+        require(delivered >= amountOutMin, InsufficientOutput(amountOutMin, delivered));
+
+        if (tokenOut == ETH_SENTINEL) {
+            _sendWrappedETH(recipient, delivered);
+        }
+    }
+
     /// @notice Pulls funds once and executes a swap, attempting `venue` first
     /// and recovering via the fallback if it fails.
     /// @dev Shared core for all the public swap entrypoints; unguarded so each
