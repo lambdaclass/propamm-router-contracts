@@ -361,6 +361,17 @@ contract PropAMMRouter is
         address tokenOut_ = tokenOut == ETH_SENTINEL ? WETH : tokenOut;
 
         IPropAMMRouter.Leg[] memory legs = _planSplit(venueSet, hints, tokenIn_, tokenOut_, amountIn, maxLegs);
+        // `_validateLegs` is deliberately NOT called here, and restoring it
+        // would break every split that uses all 8 prop legs: a plan may
+        // legitimately hold MAX_SPLIT_VENUES prop legs PLUS the coalesced
+        // remainder leg, and 9 legs trips its `InvalidLegCount` bound. Each
+        // invariant it would have checked is already established by
+        // construction: venue membership by `_probeVenue`'s `_isVenue` gate
+        // (re-checked at execution by `_dispatchVenue`, so a mid-transaction
+        // de-listing degrades to the fallback rather than stranding funds);
+        // non-zero leg amounts by `_gatherCandidates` dropping `fill == 0`
+        // candidates and `_waterfall` appending the remainder leg only while
+        // `remaining > 0`; and `msg.value` by `_pullFunds` above.
         amountOut = _executeLegs(legs, tokenIn, tokenIn_, tokenOut, amountOutMin, recipient, deadline);
     }
 
@@ -476,6 +487,14 @@ contract PropAMMRouter is
     /// reverting, zero, or oversized quote at a point is a dead point; both
     /// dead → no candidate; one alive → that point; both alive → the τ-band
     /// saturation test picks full vs half.
+    /// Membership is checked HERE rather than relying on `quoteVenueV1`'s
+    /// `_isVenue` gate: the extension branch calls `quotePartialFill` directly,
+    /// so without this the router would execute arbitrary caller-supplied code
+    /// (an address whose `supportsInterface` returns true) while holding the
+    /// pulled funds, and that address could return a maximal quote to sweep the
+    /// ranking and starve the real venues. Non-members are skipped, matching
+    /// the documented "venues that revert while quoting — including
+    /// non-whitelisted addresses — are skipped" behavior of the other paths.
     /// @param venue The venue to probe.
     /// @param hint The caller's probe size for this venue (0 = none).
     /// @param tokenIn_ The resolved ERC-20 being sold.
@@ -487,6 +506,8 @@ contract PropAMMRouter is
         internal
         returns (uint256 fill, uint256 out)
     {
+        if (!_isVenue(venue)) return (0, 0);
+
         if (ERC165Checker.supportsInterface(venue, type(IPropAMMPartialFill).interfaceId)) {
             try IPropAMMPartialFill(venue).quotePartialFill(tokenIn_, tokenOut_, amountIn) returns (
                 uint256 fillable, uint256 amountOut_
@@ -539,9 +560,15 @@ contract PropAMMRouter is
     }
 
     /// @dev Assigns up to `maxLegs` prop legs in rate order, gated by the
-    /// Uniswap reference rate quoted at the residual lower bound (floored at
-    /// amountIn/100 so a tiny reference cannot round to a rate of zero and
-    /// disable the cutoff). On the first contested candidate the reference
+    /// Uniswap reference rate quoted at the residual lower bound. The
+    /// amountIn/100 floor on that reference size is best-effort, not a
+    /// guarantee: it stops a dust-sized residual from rounding the reference
+    /// rate to zero, but for an `amountIn` under 100 wei the floor is itself
+    /// zero-ish and Uniswap quotes 0, which disables the cutoff entirely and
+    /// lets every candidate through. That is the same by-design behavior as a
+    /// fallback that cannot be priced at all, and it is benign: each leg still
+    /// carries its own pro-rata `minOut` and the aggregate `amountOutMin` still
+    /// gates the swap. On the first contested candidate the reference
     /// is refined ONCE at the true prospective fallback size. The remainder
     /// becomes a fallback leg (minOut 0 — `_executeLegs` derives the
     /// shortfall min). Per-leg minimums are the pro-rata share of the RANKING
@@ -551,8 +578,12 @@ contract PropAMMRouter is
     /// @param tokenIn_ The resolved ERC-20 being sold.
     /// @param tokenOut_ The resolved ERC-20 being bought.
     /// @param amountIn The total input the legs must sum to.
-    /// @param maxLegs The maximum number of propAMM legs (the coalesced
-    /// Uniswap leg is exempt — it is the safety net, not a planning choice).
+    /// @param maxLegs The maximum number of propAMM legs. Only the
+    /// automatically appended coalesced remainder leg is exempt — it is the
+    /// safety net, not a planning choice. A `fallbackSwapRouter` address the
+    /// caller listed in `venues` is ranked like any other candidate and DOES
+    /// consume a slot (it is then merged into the coalesced swap by
+    /// `_executeLegs`).
     /// @return legs The planned legs, summing to `amountIn`.
     function _waterfall(
         SplitPlanner.Candidate[] memory cands,
@@ -567,7 +598,13 @@ contract PropAMMRouter is
         }
         uint256 refSize = residualLb > amountIn / 100 ? residualLb : amountIn / 100;
         if (refSize == 0) refSize = 1;
+        // Clamped like the probe quotes so `refOut * fill` below is provably
+        // in range, leaving no unbounded product for a reader to reason about.
+        // The quoter is trusted admin config, so this is hygiene, not a
+        // control: a zero reference is already the "cannot price the fallback"
+        // path, which simply lets every candidate through the cutoff.
         uint256 refOut = _tryQuote(fallbackSwapRouter, tokenIn_, tokenOut_, refSize);
+        if (refOut > type(uint128).max) refOut = 0;
 
         IPropAMMRouter.Leg[] memory tmp = new IPropAMMRouter.Leg[](cands.length + 1);
         uint256 legCount = 0;
@@ -581,6 +618,7 @@ contract PropAMMRouter is
                 refined = true;
                 refSize = remaining;
                 refOut = _tryQuote(fallbackSwapRouter, tokenIn_, tokenOut_, refSize);
+                if (refOut > type(uint128).max) refOut = 0;
                 if (cands[i].out * refSize <= refOut * cands[i].fill) break;
             }
             uint256 leg = cands[i].fill >= remaining ? remaining : cands[i].fill;

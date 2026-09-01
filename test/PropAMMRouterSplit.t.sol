@@ -138,10 +138,14 @@ contract PropAMMRouterSplitTest is Test {
         _assertRouterEmpty();
     }
 
-    function test_split_saturatingVenueReducedToHalfPoint() public {
-        // A saturates above 100 (Fermi pattern): quote(250) = 120 (bad rate),
-        // quote(125) = 150 (good rate x1.2). Saturation detection must keep
-        // the half point, not eliminate A.
+    function test_split_saturatedVenueLosingToUniswapIsCutOff() public {
+        // A saturates so far below the order size that even its half point is
+        // above the cap, so BOTH probe points return the same saturated
+        // output and the surviving candidate's rate (0.96) is worse than
+        // Uniswap's 1.0. This pins the reference-rate CUTOFF: a candidate that
+        // loses to Uniswap gets no leg at all. (It does not pin saturation
+        // detection itself — see
+        // test_split_saturationDetectionKeepsHalfPointLeg for that.)
         MockCappedPropAMM a = _newVenue(10, 12, 100e18, MockCappedPropAMM.CapMode.Saturate);
         _fundUser(250e18);
 
@@ -156,6 +160,31 @@ contract PropAMMRouterSplitTest is Test {
         assertEq(amountOut, 250e18);
         assertEq(tokenIn.balanceOf(address(a)), 0);
         assertEq(tokenOut.balanceOf(user), 250e18);
+        _assertRouterEmpty();
+    }
+
+    function test_split_saturationDetectionKeepsHalfPointLeg() public {
+        // A pays x2 with a 100 cap, saturating above it. Order = 150.
+        // quote(150) saturates to 200 (rate 1.33); quote(75) is under the cap
+        // and returns 150 (rate 2.0). isSaturated(200, 150) is true, so the
+        // candidate is the HALF point: fill 75 -> out 150.
+        //
+        // Decisive by construction: without saturation detection the
+        // candidate would be fill 150 / out 200, the leg would be sized 150,
+        // the venue's own cap check would revert it, and the entire 150 would
+        // coalesce into Uniswap for a total of 150e18 with the venue paid
+        // nothing. Both assertions below separate the two outcomes.
+        MockCappedPropAMM a = _newVenue(10, 20, 100e18, MockCappedPropAMM.CapMode.Saturate);
+        _fundUser(150e18);
+
+        address[] memory venues = new address[](1);
+        venues[0] = address(a);
+
+        uint256 amountOut = _split(venues, _noHints(), 150e18, 0, 8);
+        // A leg: 75 -> 150. Remainder 75 -> uniswap 1:1 -> 75. Total 225.
+        assertEq(amountOut, 225e18);
+        assertEq(tokenIn.balanceOf(address(a)), 75e18);
+        assertEq(tokenOut.balanceOf(user), 225e18);
         _assertRouterEmpty();
     }
 
@@ -178,7 +207,12 @@ contract PropAMMRouterSplitTest is Test {
         _assertRouterEmpty();
     }
 
-    function test_split_zeroQuoteVenueSkipped() public {
+    /// @dev Smoke test, not a regression guard for the `out == 0` skip: a
+    /// zero-quote candidate is inert either way, because the reference cutoff
+    /// reads `0 <= 0` as contested and breaks out of the waterfall, giving the
+    /// same all-Uniswap result whether or not `_gatherCandidates` filtered it.
+    /// The filter is defensive; its absence is not observable from outside.
+    function test_split_zeroQuoteVenueDoesNotDisruptRouting() public {
         MockCappedPropAMM a = _newVenue(10, 12, 100e18, MockCappedPropAMM.CapMode.ZeroQuote);
         _fundUser(250e18);
         address[] memory venues = new address[](1);
