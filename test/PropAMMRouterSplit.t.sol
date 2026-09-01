@@ -333,4 +333,93 @@ contract PropAMMRouterSplitTest is Test {
         assertEq(tokenIn.balanceOf(user), 100e18);
         _assertRouterEmpty();
     }
+
+    function test_split_emptyVenuesUsesWhitelist() public {
+        MockCappedPropAMM a = _newVenue(10, 12, 0, MockCappedPropAMM.CapMode.HardRevert);
+        _fundUser(100e18);
+        address[] memory none = new address[](0);
+        uint256 amountOut = _split(none, _noHints(), 100e18, 0, 8);
+        assertEq(amountOut, 120e18);
+        assertEq(tokenIn.balanceOf(address(a)), 100e18);
+        _assertRouterEmpty();
+    }
+
+    function test_split_whitelistLargerThanMaxReverts() public {
+        for (uint256 i = 0; i < 9; i++) {
+            _newVenue(10, 12, 0, MockCappedPropAMM.CapMode.HardRevert);
+        }
+        _fundUser(1e18);
+        address[] memory none = new address[](0);
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(TooManyVenues.selector, 9));
+        router.swapSplitV1(none, _noHints(), address(tokenIn), address(tokenOut), 1e18, 0, 8, user, block.timestamp + 1);
+        // Reverted before any fund pull: the user's balance is untouched.
+        assertEq(tokenIn.balanceOf(user), 1e18);
+        _assertRouterEmpty();
+    }
+
+    function test_split_hintsWithEmptyVenuesReverts() public {
+        _newVenue(10, 12, 0, MockCappedPropAMM.CapMode.HardRevert);
+        _fundUser(1e18);
+        address[] memory none = new address[](0);
+        uint256[] memory hints = new uint256[](1);
+        hints[0] = 1;
+        vm.prank(user);
+        vm.expectRevert(ArrayLengthMismatch.selector);
+        router.swapSplitV1(none, hints, address(tokenIn), address(tokenOut), 1e18, 0, 8, user, block.timestamp + 1);
+        assertEq(tokenIn.balanceOf(user), 1e18);
+        _assertRouterEmpty();
+    }
+
+    function test_split_hintsLengthMismatchReverts() public {
+        MockCappedPropAMM a = _newVenue(10, 12, 0, MockCappedPropAMM.CapMode.HardRevert);
+        _fundUser(1e18);
+        address[] memory venues = new address[](1);
+        venues[0] = address(a);
+        uint256[] memory hints = new uint256[](2);
+        vm.prank(user);
+        vm.expectRevert(ArrayLengthMismatch.selector);
+        router.swapSplitV1(venues, hints, address(tokenIn), address(tokenOut), 1e18, 0, 8, user, block.timestamp + 1);
+        assertEq(tokenIn.balanceOf(user), 1e18);
+        _assertRouterEmpty();
+    }
+
+    function test_split_amountAboveUint128Reverts() public {
+        _newVenue(10, 12, 0, MockCappedPropAMM.CapMode.HardRevert);
+        uint256 huge = uint256(type(uint128).max) + 1;
+        address[] memory none = new address[](0);
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(AmountTooLarge.selector, huge));
+        router.swapSplitV1(none, _noHints(), address(tokenIn), address(tokenOut), huge, 0, 8, user, block.timestamp + 1);
+    }
+
+    function test_split_zeroMaxLegsReverts() public {
+        _newVenue(10, 12, 0, MockCappedPropAMM.CapMode.HardRevert);
+        address[] memory none = new address[](0);
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(InvalidLegCount.selector, 0));
+        router.swapSplitV1(none, _noHints(), address(tokenIn), address(tokenOut), 1e18, 0, 0, user, block.timestamp + 1);
+    }
+
+    function test_split_duplicateVenuesDeduped() public {
+        // Capped below amountIn so a duplicate, undeduped probe is
+        // observable: each duplicate entry independently probes and would
+        // contribute its own leg (2x50 -> 120 total, venue balance 100e18)
+        // if dedup were removed, versus the single-leg outcome asserted
+        // below (50 -> 60 from the venue, 50 -> 50 from uniswap, 110e18
+        // total, venue balance 50e18). With the brief's original uncapped
+        // venue, a single probe already fills the whole order, so the
+        // deduped and undeduped outcomes were numerically identical and the
+        // test could not have caught a missing dedup; capping the venue
+        // makes the assertions decisive.
+        MockCappedPropAMM a = _newVenue(10, 12, 60e18, MockCappedPropAMM.CapMode.HardRevert);
+        _fundUser(100e18);
+        address[] memory venues = new address[](2);
+        venues[0] = address(a);
+        venues[1] = address(a);
+        uint256 amountOut = _split(venues, _noHints(), 100e18, 0, 8);
+        assertEq(amountOut, 110e18); // one leg (50 -> 60) + uniswap (50 -> 50), not two prop legs
+        assertEq(tokenIn.balanceOf(address(a)), 50e18);
+        _assertRouterEmpty();
+    }
 }
