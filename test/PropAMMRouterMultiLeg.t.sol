@@ -393,4 +393,48 @@ contract PropAMMRouterMultiLegTest is Test {
             IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
         );
     }
+
+    function test_swapMultiLegWithFee_ethOut_skimsAndForwardsRawETH() public {
+        // Same wiring as test_swapMultiLeg_ethOut_unwrapsAggregateOnce, but with
+        // a frontend fee: `_executeLegs` unwraps the aggregate WETH to raw ETH
+        // held by the router (recipient == address(this) internally), then
+        // `_skimAndDisburse` must notice tokenOut == ETH_SENTINEL and push raw
+        // ETH to both the fee recipient and the user, leaving nothing behind.
+        _etchWETH();
+        vm.deal(address(this), 10 ether);
+        IWETH(WETH).deposit{value: 10 ether}();
+        IERC20(WETH).transfer(address(venueA), 6 ether);
+        IERC20(WETH).transfer(address(venueB), 4 ether);
+        venueA.setPrice(1, 2); // in tokenIn -> out WETH at x2
+        venueB.setPrice(1, 2);
+        _fundUser(3e18);
+
+        IPropAMMRouter.Leg[] memory legs = new IPropAMMRouter.Leg[](2);
+        legs[0] = _leg(address(venueA), 1e18, 0);
+        legs[1] = _leg(address(venueB), 2e18, 0);
+
+        uint256 gross = 6e18; // 1e18*2 + 2e18*2
+        uint256 fee = gross * 50 / 10_000;
+        uint256 net = gross - fee;
+
+        uint256 userBalBefore = user.balance;
+        uint256 feeRecipientBalBefore = feeRecipient.balance;
+
+        vm.prank(user);
+        uint256 amountOut = router.swapMultiLegWithFeeV1(
+            legs,
+            address(tokenIn),
+            ETH_SENTINEL,
+            net,
+            user,
+            block.timestamp + 1,
+            IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
+        );
+
+        assertEq(amountOut, net);
+        assertEq(user.balance - userBalBefore, net, "user did not receive net raw ETH");
+        assertEq(feeRecipient.balance - feeRecipientBalBefore, fee, "fee recipient did not receive raw ETH fee");
+        assertEq(address(router).balance, 0, "router retained ETH");
+        assertEq(IERC20(WETH).balanceOf(address(router)), 0, "router retained WETH");
+    }
 }
