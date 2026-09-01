@@ -98,4 +98,109 @@ contract PropAMMRouterMultiLegTest is Test {
         vm.expectRevert(abi.encodeWithSelector(InsufficientOutput.selector, 601e18, 600e18));
         router.swapMultiLegV1(legs, address(tokenIn), address(tokenOut), 601e18, user, block.timestamp + 1);
     }
+
+    function test_swapMultiLeg_failedLegsCoalesceIntoOneUniswapSwap() public {
+        // Both prop legs revert (inactive) -> ONE uniswap swap for the total.
+        venueA.setActive(false);
+        venueB.setActive(false);
+        uni.setPrice(1, 1); // uni pays 1:1
+        _fundUser(300e18);
+
+        IPropAMMRouter.Leg[] memory legs = new IPropAMMRouter.Leg[](2);
+        legs[0] = _leg(address(venueA), 100e18, 0);
+        legs[1] = _leg(address(venueB), 200e18, 0);
+
+        vm.expectEmit(true, true, true, true, address(router));
+        emit IPropAMMRouter.Swapped(user, address(tokenIn), address(tokenOut), 300e18, 300e18, user, address(uni));
+        vm.prank(user);
+        uint256 amountOut =
+            router.swapMultiLegV1(legs, address(tokenIn), address(tokenOut), 300e18, user, block.timestamp + 1);
+
+        assertEq(amountOut, 300e18);
+        assertEq(tokenOut.balanceOf(user), 300e18);
+        assertEq(tokenIn.balanceOf(address(uni)), 300e18); // one pull of the coalesced total
+    }
+
+    function test_swapMultiLeg_explicitFallbackLegJoinsCoalescedSwap() public {
+        uni.setPrice(1, 1);
+        _fundUser(300e18);
+
+        IPropAMMRouter.Leg[] memory legs = new IPropAMMRouter.Leg[](2);
+        legs[0] = _leg(address(venueA), 100e18, 200e18);
+        legs[1] = _leg(address(uni), 200e18, 200e18); // explicit uniswap leg
+
+        vm.prank(user);
+        uint256 amountOut =
+            router.swapMultiLegV1(legs, address(tokenIn), address(tokenOut), 400e18, user, block.timestamp + 1);
+
+        // venueA: 100 -> 200; uni: 200 -> 200.
+        assertEq(amountOut, 400e18);
+    }
+
+    function test_swapMultiLeg_shortfallMinIsSaturating() public {
+        // Prop leg over-delivers past the aggregate min while a fallback leg
+        // remains: the coalesced uniswap min must clamp to 0, not underflow.
+        uni.setPrice(1, 1);
+        _fundUser(200e18);
+
+        IPropAMMRouter.Leg[] memory legs = new IPropAMMRouter.Leg[](2);
+        legs[0] = _leg(address(venueA), 100e18, 0); // delivers 200e18
+        legs[1] = _leg(address(uni), 100e18, 0); // delivers 100e18
+
+        vm.prank(user);
+        uint256 amountOut =
+            router.swapMultiLegV1(legs, address(tokenIn), address(tokenOut), 150e18, user, block.timestamp + 1);
+        // 150e18 min already exceeded by leg 0 alone (200e18): no revert, both legs run.
+        assertEq(amountOut, 300e18);
+    }
+
+    function test_swapMultiLeg_underDeliveryTripsPerLegMinAndFallsBack() public {
+        // venueA quotes x2 but delivers 10% short and ignores minOut checks
+        // itself; the ROUTER's per-leg min must catch it and reroute the leg.
+        venueA.setHonorMinOut(false);
+        venueA.setShortChangeBps(1_000);
+        uni.setPrice(1, 1);
+        _fundUser(100e18);
+
+        IPropAMMRouter.Leg[] memory legs = new IPropAMMRouter.Leg[](1);
+        legs[0] = _leg(address(venueA), 100e18, 200e18); // real floor
+
+        vm.prank(user);
+        uint256 amountOut =
+            router.swapMultiLegV1(legs, address(tokenIn), address(tokenOut), 100e18, user, block.timestamp + 1);
+
+        // Leg failed the 200e18 floor (delivered would be 180e18) -> rolled
+        // back -> uniswap fallback filled 100 -> 100.
+        assertEq(amountOut, 100e18);
+        assertEq(tokenIn.balanceOf(address(venueA)), 0); // push transfer rolled back
+    }
+
+    function test_swapMultiLeg_zeroMinLegAcceptsUnderDelivery() public {
+        // Same short-changing venue, but minOut = 0: the leg "succeeds" short
+        // and only the aggregate min protects.
+        venueA.setHonorMinOut(false);
+        venueA.setShortChangeBps(1_000);
+        _fundUser(100e18);
+
+        IPropAMMRouter.Leg[] memory legs = new IPropAMMRouter.Leg[](1);
+        legs[0] = _leg(address(venueA), 100e18, 0);
+
+        vm.prank(user);
+        uint256 amountOut =
+            router.swapMultiLegV1(legs, address(tokenIn), address(tokenOut), 0, user, block.timestamp + 1);
+        assertEq(amountOut, 180e18); // 200e18 quote minus 10% short-change
+    }
+
+    function test_swapMultiLeg_explicitFallbackLegMinOutHonored() public {
+        // uni pays 1:2 (half), explicit uni leg demands more than it can pay.
+        uni.setPrice(2, 1);
+        _fundUser(100e18);
+
+        IPropAMMRouter.Leg[] memory legs = new IPropAMMRouter.Leg[](1);
+        legs[0] = _leg(address(uni), 100e18, 60e18); // uni will deliver 50e18 < 60e18
+
+        vm.prank(user);
+        vm.expectRevert(); // MockLinearSwapRouter's own "uni-slippage" require
+        router.swapMultiLegV1(legs, address(tokenIn), address(tokenOut), 0, user, block.timestamp + 1);
+    }
 }
