@@ -375,6 +375,37 @@ contract PropAMMRouter is
         amountOut = _executeLegs(legs, tokenIn, tokenIn_, tokenOut, amountOutMin, recipient, deadline);
     }
 
+    /// @notice `swapSplitV1` plus a frontend fee skimmed from the aggregate
+    /// output. Implementation-only. `amountOutMin` is the NET minimum.
+    function swapSplitWithFeeV1(
+        address[] calldata venues,
+        uint256[] calldata probeHints,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        uint256 maxLegs,
+        address recipient,
+        uint256 deadline,
+        IPropAMMRouter.FrontendFee calldata fee
+    ) external payable whenNotPaused nonReentrant returns (uint256 amountOut) {
+        FrontendFees._validateFee(fee);
+        require(block.timestamp <= deadline, Expired());
+        require(amountIn > 0, ZeroAmount());
+        require(amountIn <= type(uint128).max, AmountTooLarge(amountIn));
+        require(maxLegs >= 1, InvalidLegCount(0));
+
+        (address[] memory venueSet, uint256[] memory hints) = _resolveVenueSet(venues, probeHints);
+        uint256 grossMin = FrontendFees._grossUp(amountOutMin, fee.bps);
+
+        address tokenIn_ = _pullFunds(tokenIn, amountIn);
+        address tokenOut_ = tokenOut == ETH_SENTINEL ? WETH : tokenOut;
+        IPropAMMRouter.Leg[] memory legs = _planSplit(venueSet, hints, tokenIn_, tokenOut_, amountIn, maxLegs);
+
+        uint256 deliveredGross = _executeLegs(legs, tokenIn, tokenIn_, tokenOut, grossMin, address(this), deadline);
+        amountOut = FrontendFees._skimAndDisburse(tokenOut, deliveredGross, fee, recipient);
+    }
+
     /// @dev Resolves the candidate venue set: the caller's list, or the whole
     /// whitelist when empty. Validates set size and the probeHints shape
     /// (length 0 or venues.length; must be 0 in whitelist mode).

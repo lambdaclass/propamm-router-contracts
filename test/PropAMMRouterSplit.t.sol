@@ -12,6 +12,7 @@ import {MockCappedPropAMM} from "./mocks/MockCappedPropAMM.sol";
 import {MockPartialFillPropAMM} from "./mocks/MockPartialFillPropAMM.sol";
 import {MockThievingQuoteVenue} from "./mocks/MockThievingQuoteVenue.sol";
 import {MockLinearSwapRouter, MockLinearQuoterV2} from "./mocks/MockLinearUniswap.sol";
+import {FrontendFees} from "../src/libraries/FrontendFees.sol";
 import "../src/libraries/Errors.sol";
 
 contract PropAMMRouterSplitTest is Test {
@@ -24,6 +25,7 @@ contract PropAMMRouterSplitTest is Test {
 
     address owner = makeAddr("owner");
     address user = makeAddr("user");
+    address feeRecipient = makeAddr("feeRecipient");
 
     function setUp() public {
         uni = new MockLinearSwapRouter();
@@ -421,5 +423,35 @@ contract PropAMMRouterSplitTest is Test {
         assertEq(amountOut, 110e18); // one leg (50 -> 60) + uniswap (50 -> 50), not two prop legs
         assertEq(tokenIn.balanceOf(address(a)), 50e18);
         _assertRouterEmpty();
+    }
+
+    function test_splitWithFee_skimsAggregate() public {
+        MockCappedPropAMM a = _newVenue(10, 12, 0, MockCappedPropAMM.CapMode.HardRevert);
+        _fundUser(100e18);
+        address[] memory venues = new address[](1);
+        venues[0] = address(a);
+
+        uint256 gross = 120e18;
+        uint256 fee = gross * 50 / 10_000;
+        uint256 net = gross - fee;
+
+        vm.prank(user);
+        uint256 amountOut = router.swapSplitWithFeeV1(
+            venues,
+            _noHints(),
+            address(tokenIn),
+            address(tokenOut),
+            100e18,
+            net,
+            8,
+            user,
+            block.timestamp + 1,
+            IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
+        );
+
+        assertEq(amountOut, net);
+        assertEq(tokenOut.balanceOf(user), net);
+        assertEq(tokenOut.balanceOf(feeRecipient), fee);
+        assertEq(tokenOut.balanceOf(address(router)), 0);
     }
 }
