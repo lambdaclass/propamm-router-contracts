@@ -5,11 +5,15 @@ import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IPropAMMRouter} from "../src/interfaces/IPropAMMRouter.sol";
 import {PropAMMRouter} from "../src/PropAMMRouter.sol";
+import {IWETH} from "../src/interfaces/IWETH.sol";
+import {ETH_SENTINEL, WETH} from "../src/libraries/Constants.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockCappedPropAMM} from "./mocks/MockCappedPropAMM.sol";
 import {MockLinearSwapRouter, MockLinearQuoterV2} from "./mocks/MockLinearUniswap.sol";
+import {MockWETH} from "./mocks/MockWETH.sol";
 import "../src/libraries/Errors.sol";
 
 contract PropAMMRouterMultiLegTest is Test {
@@ -276,5 +280,62 @@ contract PropAMMRouterMultiLegTest is Test {
         uint256 amountOut =
             router.swapMultiLegV1(legs, address(tokenIn), address(tokenOut), 400e18, user, block.timestamp + 1);
         assertEq(amountOut, 400e18);
+    }
+
+    function _etchWETH() internal {
+        // Place a WETH implementation at the hardcoded mainnet address. Etch
+        // copies code only (storage starts empty), and the etched contract
+        // needs ETH to honor withdraw() for balances minted via deposit().
+        MockWETH impl = new MockWETH();
+        vm.etch(WETH, address(impl).code);
+        vm.deal(WETH, 100 ether);
+    }
+
+    function test_swapMultiLeg_ethIn_wrapsOnceAndSplits() public {
+        _etchWETH();
+        vm.deal(user, 3 ether);
+
+        IPropAMMRouter.Leg[] memory legs = new IPropAMMRouter.Leg[](2);
+        legs[0] = _leg(address(venueA), 1 ether, 0);
+        legs[1] = _leg(address(venueB), 2 ether, 0);
+
+        vm.prank(user);
+        uint256 amountOut = router.swapMultiLegV1{value: 3 ether}(
+            legs, ETH_SENTINEL, address(tokenOut), 6 ether, user, block.timestamp + 1
+        );
+        assertEq(amountOut, 6 ether);
+        assertEq(tokenOut.balanceOf(user), 6 ether);
+    }
+
+    function test_swapMultiLeg_ethIn_wrongValueReverts() public {
+        _etchWETH();
+        vm.deal(user, 3 ether);
+        IPropAMMRouter.Leg[] memory legs = new IPropAMMRouter.Leg[](1);
+        legs[0] = _leg(address(venueA), 2 ether, 0);
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(InvalidValue.selector, 2 ether, 1 ether));
+        router.swapMultiLegV1{value: 1 ether}(legs, ETH_SENTINEL, address(tokenOut), 0, user, block.timestamp + 1);
+    }
+
+    function test_swapMultiLeg_ethOut_unwrapsAggregateOnce() public {
+        _etchWETH();
+        // Venues deliver WETH: fund them at the etched WETH address.
+        vm.deal(address(this), 10 ether);
+        IWETH(WETH).deposit{value: 10 ether}();
+        IERC20(WETH).transfer(address(venueA), 6 ether);
+        IERC20(WETH).transfer(address(venueB), 4 ether);
+        venueA.setPrice(1, 2); // in tokenIn -> out WETH at x2
+        venueB.setPrice(1, 2);
+        _fundUser(3e18);
+
+        IPropAMMRouter.Leg[] memory legs = new IPropAMMRouter.Leg[](2);
+        legs[0] = _leg(address(venueA), 1e18, 0);
+        legs[1] = _leg(address(venueB), 2e18, 0);
+
+        uint256 balBefore = user.balance;
+        vm.prank(user);
+        uint256 amountOut = router.swapMultiLegV1(legs, address(tokenIn), ETH_SENTINEL, 6e18, user, block.timestamp + 1);
+        assertEq(amountOut, 6e18);
+        assertEq(user.balance - balBefore, 6e18); // raw ETH received
     }
 }
