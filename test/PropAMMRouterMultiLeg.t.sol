@@ -437,4 +437,33 @@ contract PropAMMRouterMultiLegTest is Test {
         assertEq(address(router).balance, 0, "router retained ETH");
         assertEq(IERC20(WETH).balanceOf(address(router)), 0, "router retained WETH");
     }
+
+    /// forge-config: default.fuzz.runs = 512
+    function testFuzz_swapMultiLeg_conservesInputAndMeetsMin(uint96 rawA, uint96 rawB, bool failA) public {
+        // Bounded to 100_000e18 (not the brief's 1_000_000e18): at venueA/B's
+        // x2 price a maximal leg would demand a 2_000_000e18 payout, but
+        // `setUp` only funds each venue with 1_000_000e18, so the venue's
+        // transfer would revert for reasons unrelated to the invariant here.
+        uint256 amtA = bound(uint256(rawA), 1, 100_000e18);
+        uint256 amtB = bound(uint256(rawB), 1, 100_000e18);
+        if (failA) venueA.setActive(false);
+        uni.setPrice(1, 1);
+        _fundUser(amtA + amtB);
+
+        IPropAMMRouter.Leg[] memory legs = new IPropAMMRouter.Leg[](2);
+        legs[0] = _leg(address(venueA), amtA, 0);
+        legs[1] = _leg(address(venueB), amtB, 0);
+
+        // Expected: legB always x2; legA x2 when healthy, 1:1 via uniswap when failed.
+        uint256 expected = amtB * 2 + (failA ? amtA : amtA * 2);
+
+        vm.prank(user);
+        uint256 amountOut =
+            router.swapMultiLegV1(legs, address(tokenIn), address(tokenOut), expected, user, block.timestamp + 1);
+
+        assertEq(amountOut, expected);
+        assertEq(tokenIn.balanceOf(user), 0);
+        assertEq(tokenIn.balanceOf(address(router)), 0); // input fully routed
+        assertEq(tokenOut.balanceOf(user), expected);
+    }
 }
