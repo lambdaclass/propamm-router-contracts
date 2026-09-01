@@ -454,4 +454,27 @@ contract PropAMMRouterSplitTest is Test {
         assertEq(tokenOut.balanceOf(feeRecipient), fee);
         assertEq(tokenOut.balanceOf(address(router)), 0);
     }
+
+    /// forge-config: default.fuzz.runs = 256
+    function testFuzz_split_alwaysMeetsMinOrReverts(uint96 rawAmount, uint64 capA, uint8 modeA, uint64 rateBpsA)
+        public
+    {
+        uint256 amountIn = bound(uint256(rawAmount), 1e6, 1_000_000e18);
+        uint256 rate = bound(uint256(rateBpsA), 5_000, 20_000); // 0.5x .. 2.0x
+        MockCappedPropAMM a = _newVenue(10_000, rate, uint256(capA), MockCappedPropAMM.CapMode(modeA % 3));
+        _fundUser(amountIn);
+
+        address[] memory venues = new address[](1);
+        venues[0] = address(a);
+
+        // Uniswap 1:1 floor: whatever the venue does, the split can always
+        // deliver >= amountIn via the fallback, so demand exactly that.
+        vm.prank(user);
+        uint256 amountOut = router.swapSplitV1(
+            venues, _noHints(), address(tokenIn), address(tokenOut), amountIn, amountIn, 8, user, block.timestamp + 1
+        );
+        assertGe(amountOut, amountIn);
+        assertEq(tokenIn.balanceOf(address(router)), 0); // nothing stranded
+        assertEq(tokenIn.balanceOf(user), 0);
+    }
 }
