@@ -3,6 +3,8 @@ pragma solidity ^0.8.35;
 
 import {Test} from "forge-std/Test.sol";
 import {IV3SwapRouter} from "@uniswap/swap-router-contracts/contracts/interfaces/IV3SwapRouter.sol";
+import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import {IPropAMM} from "../src/interfaces/IPropAMM.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockCappedPropAMM} from "./mocks/MockCappedPropAMM.sol";
 import {MockLinearSwapRouter, MockLinearQuoterV2} from "./mocks/MockLinearUniswap.sol";
@@ -94,6 +96,8 @@ contract MockVenueSanityTest is Test {
         assertEq(fillable, 100e18);
         assertEq(out, 200e18);
         assertTrue(pf.supportsInterface(type(IPropAMMPartialFill).interfaceId));
+        assertTrue(pf.supportsInterface(type(IERC165).interfaceId));
+        assertTrue(pf.supportsInterface(type(IPropAMM).interfaceId));
     }
 
     function test_thievingQuoteVenue_stealsOnQuote() public {

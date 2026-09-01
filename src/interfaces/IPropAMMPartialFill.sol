@@ -9,8 +9,18 @@ import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 /// largest portion of an order they can fill right now. One call returns
 /// both inputs the router's split planner needs (price and capacity),
 /// replacing the two-point probe of the degraded mode.
-/// @dev Like {IPropAMMExactOut}, detection is via ERC165:
-/// `supportsInterface(type(IPropAMMPartialFill).interfaceId)`.
+/// @dev Because partial-fill reporting is optional, this interface also
+/// inherits {IERC165} so the router and off-chain integrators can detect
+/// support at runtime without a trial call — e.g. `ERC165Checker.supportsInterface(venue,
+/// type(IPropAMMPartialFill).interfaceId)`. A conforming venue MUST report `true`
+/// from `supportsInterface` for `type(IERC165).interfaceId`,
+/// `type(IPropAMM).interfaceId`, and `type(IPropAMMPartialFill).interfaceId`.
+/// Note `type(IPropAMMPartialFill).interfaceId` covers only the
+/// `quotePartialFill` selector declared here (Solidity excludes inherited
+/// functions), so it is distinct from `type(IPropAMM).interfaceId` — a venue
+/// that advertises only one of the three is not fully detectable. Plain
+/// exact-input venues that do not implement ERC165 are still supported: an
+/// `ERC165Checker` probe returns `false` for them rather than reverting.
 /// Requirements:
 ///  - `fillableAmountIn` MUST be ≤ `amountIn`;
 ///  - `amountOut` MUST be what a swap of exactly `fillableAmountIn` would
