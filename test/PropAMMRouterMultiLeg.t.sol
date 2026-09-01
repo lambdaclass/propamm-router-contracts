@@ -305,6 +305,8 @@ contract PropAMMRouterMultiLegTest is Test {
         );
         assertEq(amountOut, 6 ether);
         assertEq(tokenOut.balanceOf(user), 6 ether);
+        assertEq(address(router).balance, 0, "router retained ETH");
+        assertEq(IERC20(WETH).balanceOf(address(router)), 0, "router retained WETH");
     }
 
     function test_swapMultiLeg_ethIn_wrongValueReverts() public {
@@ -337,5 +339,7 @@ contract PropAMMRouterMultiLegTest is Test {
         uint256 amountOut = router.swapMultiLegV1(legs, address(tokenIn), ETH_SENTINEL, 6e18, user, block.timestamp + 1);
         assertEq(amountOut, 6e18);
         assertEq(user.balance - balBefore, 6e18); // raw ETH received
+        assertEq(address(router).balance, 0, "router retained ETH");
+        assertEq(IERC20(WETH).balanceOf(address(router)), 0, "router retained WETH");
     }
 }
