@@ -608,4 +608,101 @@ contract RealGasForkTest is ForkGate {
             console2.log("     marginal     ", int256(sp[n]) - int256(sp[n - 1]));
         }
     }
+
+    // ---- every method, one basis: move exactly 10,000 USDC -> WETH --------
+
+    uint256 constant ORDER = 10_000e6;
+
+    function _sel(address[] memory vs, uint256 n, uint256 amt) internal returns (uint256 g) {
+        address[] memory sub = new address[](n);
+        for (uint256 i = 0; i < n; i++) {
+            sub[i] = vs[i];
+        }
+        vm.startPrank(taker);
+        uint256 st = gasleft();
+        router.swapViaSelectedVenuesV1(sub, USDC, WETH, amt, 0, taker, block.timestamp + 300);
+        g = st - gasleft();
+        vm.stopPrank();
+    }
+
+    function _swapV1(uint256 amt) internal returns (uint256 g) {
+        vm.startPrank(taker);
+        uint256 st = gasleft();
+        router.swapV1(USDC, WETH, amt, 0, taker, block.timestamp + 300);
+        g = st - gasleft();
+        vm.stopPrank();
+    }
+
+    function _mlSplitEven(address[] memory vs, uint256 n, uint256 amt) internal returns (uint256 g) {
+        IPropAMMRouter.Leg[] memory legs = new IPropAMMRouter.Leg[](n);
+        for (uint256 i = 0; i < n; i++) {
+            legs[i] = IPropAMMRouter.Leg({venue: vs[i], amountIn: amt / n, minOut: 0});
+        }
+        vm.startPrank(taker);
+        uint256 st = gasleft();
+        router.swapMultiLegV1(legs, USDC, WETH, 0, 0, taker, block.timestamp + 300);
+        g = st - gasleft();
+        vm.stopPrank();
+    }
+
+    function _spEven(address[] memory vs, uint256 n, uint256 amt) internal returns (uint256 g, uint256 ev) {
+        address[] memory sub = new address[](n);
+        uint256[] memory h = new uint256[](n);
+        for (uint256 i = 0; i < n; i++) {
+            sub[i] = vs[i];
+            h[i] = amt / n;
+        }
+        vm.recordLogs();
+        vm.startPrank(taker);
+        uint256 st = gasleft();
+        router.swapSplitV1(sub, h, USDC, WETH, amt, 0, 0, 8, taker, block.timestamp + 300);
+        g = st - gasleft();
+        vm.stopPrank();
+        Vm.Log[] memory lg = vm.getRecordedLogs();
+        bytes32 t = keccak256("Swapped(address,address,address,uint256,uint256,address,address)");
+        for (uint256 i = 0; i < lg.length; i++) {
+            if (lg[i].emitter == address(router) && lg[i].topics[0] == t) ev++;
+        }
+    }
+
+    function test_allMethodsSameOrder() public {
+        (uint256 nf, address[] memory fresh) = _forceAllFresh();
+        require(nf >= 4, "need 4 fresh venues");
+        console2.log("=== ALL METHODS, 10,000 USDC -> WETH, fork block", block.number);
+        console2.log("");
+
+        _forceAllFresh();
+        _viaVenue(FERMI, ORDER);
+        _forceAllFresh();
+        console2.log("swapViaVenueV1 -> Fermi        ", _viaVenue(FERMI, ORDER));
+        _forceAllFresh();
+        _viaVenue(UNISWAP_ROUTER_02, ORDER);
+        _forceAllFresh();
+        console2.log("swapViaVenueV1 -> Uniswap V3   ", _viaVenue(UNISWAP_ROUTER_02, ORDER));
+        _forceAllFresh();
+        _swapV1(ORDER);
+        _forceAllFresh();
+        console2.log("swapV1 (quotes all 6)          ", _swapV1(ORDER));
+        console2.log("");
+
+        for (uint256 n = 2; n <= 4; n++) {
+            _forceAllFresh();
+            _sel(fresh, n, ORDER);
+            _forceAllFresh();
+            uint256 a = _sel(fresh, n, ORDER);
+            _forceAllFresh();
+            _mlSplitEven(fresh, n, ORDER);
+            _forceAllFresh();
+            uint256 b = _mlSplitEven(fresh, n, ORDER);
+            _forceAllFresh();
+            _spEven(fresh, n, ORDER);
+            _forceAllFresh();
+            (uint256 c, uint256 ev) = _spEven(fresh, n, ORDER);
+            console2.log("--- n =", n);
+            console2.log("  swapViaSelectedVenuesV1  ", a);
+            console2.log("  swapMultiLegV1           ", b);
+            console2.log("  swapSplitV1              ", c);
+            console2.log("     Swapped events        ", ev);
+        }
+    }
 }
