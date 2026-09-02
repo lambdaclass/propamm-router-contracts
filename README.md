@@ -21,8 +21,8 @@ Venues are identified **by address**: the proprietary AMM routers (FermiSwap, Ki
 - `swapV1(tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline)`: pulls `amountIn` of `tokenIn` from `msg.sender`, routes through the best-quoting venue, and falls back to Uniswap V3 if that venue reverts or under-delivers. Returns `(amountOut, executedVenue)`, where `executedVenue` is the proprietary venue that filled or the SwapRouter02 address when the fallback ran. Reverts `InsufficientOutput` before pulling funds if the best quote is below `amountOutMin`, and re-checks `amountOutMin` against the measured balance delta of `recipient` after execution (the same error covers both the pre-pull and post-execution shortfall). Reverts when the contract is paused (see [Pausing the contract](#pausing-the-contract)); quote functions remain callable.
 - `swapViaVenueV1(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline)`: attempts the caller-specified `venue` first. A proprietary venue still falls back to Uniswap V3 if it fails to fill; naming the Uniswap V3 SwapRouter02 address routes directly to Uniswap V3 (it *is* the fallback, so there is nothing further to fall back to). Reverts `UnknownVenue` if `venue` is neither a whitelisted proprietary AMM nor the SwapRouter02 address.
 - `swapViaSelectedVenuesV1(venues, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline)`: like `swapV1`, but considers only the caller-supplied `venues` subset. An on-chain requote across them selects the best, which executes — with the Uniswap V3 fallback still applying as the transparent safety net if the chosen venue fails to fill. Reverts `NoQuotesAvailable` if none of the listed venues can be priced. Returns `(amountOut, executedVenue)`. List the SwapRouter02 address among `venues` to opt Uniswap V3 into the selection (it is not a selection candidate otherwise, only the execution-time safety net).
-- `swapMultiLegV1(legs, tokenIn, tokenOut, amountOutMin, recipient, deadline)`: executes a caller-computed split — an array of `Leg { venue, amountIn, minOut }` — pulling the total once and enforcing the **aggregate** `amountOutMin`. Legs that fail (or explicitly name the SwapRouter02 address) are coalesced into a single Uniswap V3 swap. Emits one `Swapped` per executed leg. A `minOut` of 0 means that leg only falls back on a hard venue revert, not on under-delivery.
-- `swapSplitV1(venues, probeHints, tokenIn, tokenOut, amountIn, amountOutMin, fallbackMinOut, maxLegs, recipient, deadline)`: computes the split onchain — pulls funds, quotes each venue once (via the optional `IPropAMMPartialFill` extension, else a bounded two-point probe steered by the optional `probeHints`), ranks candidates by rate against a Uniswap V3 reference, and executes up to `maxLegs` propAMM legs plus one coalesced Uniswap remainder leg. Empty `venues` means the whole whitelist; an empty whitelist is not an error and simply routes everything through Uniswap V3. `fallbackMinOut` is an optional absolute floor on that coalesced Uniswap swap — the per-portion protection that `swapMultiLegV1` callers get from explicit fallback legs, which a `swapSplitV1` caller cannot supply because the router plans the legs. A venue whose quote is flat across both probe points is declined rather than handed a leg it would not fill in full. Fee variants `swapMultiLegWithFeeV1` / `swapSplitWithFeeV1` skim the aggregate output (implementation-only, like the other `*WithFeeV1` entrypoints).
+- `swapMultiLegV1(legs, tokenIn, tokenOut, amountOutMin, fallbackMinOut, recipient, deadline)`: executes a caller-computed split — an array of `Leg { venue, amountIn, minOut }` — pulling the total once and enforcing the **aggregate** `amountOutMin`. Legs that fail (or explicitly name the SwapRouter02 address) are coalesced into a single Uniswap V3 swap, floored by `fallbackMinOut`. Emits one `Swapped` per executed leg. A `minOut` of 0 means that leg only falls back on a hard venue revert, not on under-delivery.
+- `swapSplitV1(venues, probeHints, tokenIn, tokenOut, amountIn, amountOutMin, fallbackMinOut, maxLegs, recipient, deadline)`: computes the split onchain — pulls funds, quotes each venue once (via the optional `IPropAMMPartialFill` extension, else a bounded two-point probe steered by the optional `probeHints`), ranks candidates by rate against a Uniswap V3 reference, and executes up to `maxLegs` propAMM legs plus one coalesced Uniswap remainder leg. Empty `venues` means the whole whitelist; an empty whitelist is not an error and simply routes everything through Uniswap V3. `fallbackMinOut` is an absolute floor on that coalesced Uniswap swap (see [Protecting the coalesced fallback](#protecting-the-coalesced-fallback)). A venue whose quote is flat across both probe points is declined rather than handed a leg it would not fill in full. Empty `venues` stops working once the whitelist grows past `MAX_SPLIT_VENUES` (8) — call `isSplitWhitelistModeAvailable()` to check, and name venues explicitly past that point. Fee variants `swapMultiLegWithFeeV1` / `swapSplitWithFeeV1` skim the aggregate output (implementation-only, like the other `*WithFeeV1` entrypoints).
 - `quoteV1(tokenIn, tokenOut, amount)`: quotes every venue (the proprietary AMMs and the Uniswap V3 fallback) and returns the best `amountOut` along with the venue address that produced it. Reverts `NoQuotesAvailable` if every venue is skipped or reverts.
 - `quoteVenueV1(venue, tokenIn, tokenOut, amount)`: quotes a single venue by address. Reverts `UnknownVenue` for any address that is neither a proprietary AMM nor the SwapRouter02 fallback, and bubbles up any underlying venue revert.
 - `quoteSelectedVenuesV1(venues, tokenIn, tokenOut, amountIn)`: quotes only the caller-supplied `venues` subset and returns the best `(bestAmountOut, bestVenue)`. Venues that revert (including non-whitelisted addresses) are skipped; reverts `NoQuotesAvailable` if none of them can be priced.
@@ -43,6 +43,60 @@ As a consequence:
 
 - `quoteV1` and `quoteVenueV1` are not `view`. They must be called via `eth_call` (staticcall) from off-chain so the simulated swaps are rolled back automatically.
 - The Kipseli simulation pulls `tokenIn` from the router's own balance. When quoting against Kipseli (directly via `quoteVenueV1`, or implicitly through `quoteV1`), the RPC call must include a `stateDiff` override that gives the router a sufficient balance of `tokenIn`. Without the override, the Kipseli branch is silently skipped while the other branches still quote.
+
+### Protecting the coalesced fallback
+
+`swapMultiLegV1` and `swapSplitV1` both funnel every leg that names the Uniswap V3
+SwapRouter02 address, plus every propAMM leg that fails at execution time, into **one**
+Uniswap V3 swap at the end. That swap's slippage floor is the largest of three terms:
+
+1. **The aggregate shortfall** against `amountOutMin`. Best-effort only — it is *zero*
+   whenever the propAMM legs that succeeded already cover `amountOutMin`, which is the
+   normal outcome of splitting into better-than-Uniswap venues.
+2. **The explicit fallback legs' `minOut`**, extended over the whole coalesced slice at
+   those legs' own per-unit rate. The scaling matters: a failed propAMM leg joins the same
+   swap contributing no floor of its own, so an unscaled `sum(minOut)` would silently
+   become a looser rate over a larger input, leaving the failed slice unprotected *and*
+   diluting the explicit legs' floor. Extending the caller's own rate is sound because
+   both slices execute on Uniswap. A failed **propAMM** leg's `minOut` is deliberately
+   *not* inherited — it was priced off a better venue, so applying it to Uniswap would
+   revert the recovery exactly when it is needed.
+3. **`fallbackMinOut`** — the caller's absolute floor on that swap.
+
+**Pass a real `fallbackMinOut`.** It is the only term that survives a sandwich, and it
+must come from the caller for a structural reason: pricing that slice correctly needs the
+fair Uniswap rate, and the router can only learn that from a quote against the same pool
+in the same transaction — which an attacker moving the pool moves along with the floor.
+No formula over the router's own state substitutes for it. In particular a pro-rata share
+of `amountOutMin` would demand the Uniswap slice deliver at the *blended* rate of the
+better-priced propAMM legs, reverting sound swaps. Derive `fallbackMinOut` from an
+**off-chain** Uniswap quote for the slice you expect, minus your slippage tolerance.
+
+Passing `0` disables term 3. That is supported and sometimes correct (e.g. when you have
+tightened `amountOutMin` so term 1 binds), but it leaves the coalesced slice MEV-exposed
+whenever the surviving propAMM legs already cover the aggregate minimum.
+
+In the `*WithFeeV1` variants both `amountOutMin` and `fallbackMinOut` are **net** minimums
+— what the user is left with after the fee — and each is grossed up by `fee.bps` internally.
+
+### Split planning and the venue whitelist
+
+`swapSplitV1` probes at most `MAX_SPLIT_VENUES` (8) venues. Passing an empty `venues`
+array means "probe the whole whitelist", and that convenience **stops working once the
+whitelist grows past 8**: those calls revert `TooManyVenues`, because `EnumerableSet`
+ordering is unstable across removals and silently probing "the first eight" would make the
+split's venue set nondeterministic. Every other entrypoint is unaffected — `swapV1` and
+`quoteV1` keep iterating the full whitelist — and callers naming venues explicitly are
+unaffected too. `addVenue` deliberately does **not** cap the whitelist, since that would
+limit the protocol's venue roster to eight for one optional convenience path. Use
+`isSplitWhitelistModeAvailable()` to check the mode before listing a venue, and migrate
+integrators to explicit `venues` lists before crossing the bound.
+
+The split path is also **not compatible with rebasing or reflection `tokenIn` tokens**. It
+brackets its quote phase with an exact balance check (`==`) to catch a venue that consumes
+in-flight user funds while quoting; a token that credits the router on its own during that
+window trips the same check and reverts an honest split. Route such tokens through
+`swapV1`.
 
 ### Frontend fees
 

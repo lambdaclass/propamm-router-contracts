@@ -46,6 +46,9 @@ contract PropAMMRouterSplitForkTest is Test {
     uint256 constant USDC_BALANCES_SLOT = 9;
 
     uint256 constant SPLIT_AMOUNT = 1_000_000e6; // above Fermi's ~500k measured cap
+    uint256 constant FERMI_MEASURED_CAP = 500_000e6; // Phase 0 measurement; sizes the remainder floor
+    uint256 constant FALLBACK_TOLERANCE_BPS = 100; // 1% slack on the remainder floor
+    uint256 constant BPS = 10_000;
     uint256 constant PROBE_AMOUNT = 1_000e6; // small size, only used to test quotability
     uint256 constant ONE_YEAR = 365 days;
 
@@ -95,9 +98,22 @@ contract PropAMMRouterSplitForkTest is Test {
         venues[0] = FERMI;
         uint256[] memory noHints = new uint256[](0);
 
+        // `fallbackMinOut` matters here and must not be 0. Fermi beats Uniswap,
+        // so its leg alone clears `amountOutMin` and the aggregate shortfall
+        // term collapses to zero — leaving the ~500k USDC Uniswap remainder
+        // unfloored if the caller passes nothing. A real integrator derives
+        // this from an OFFCHAIN quote; the closest stand-in available inside a
+        // fork test is the onchain quote for the prospective remainder size,
+        // discounted for tolerance. That is NOT sandwich-proof (it reads the
+        // same pool in the same transaction) and is used here only to exercise
+        // the parameter end to end — see `swapSplitV1`'s NatSpec.
+        uint256 remainderSize = SPLIT_AMOUNT - FERMI_MEASURED_CAP;
+        (uint256 remainderQuote,) = router.quoteVenueV1(UNISWAP_ROUTER_02, USDC, WETH, remainderSize);
+        uint256 fallbackMinOut = remainderQuote * (BPS - FALLBACK_TOLERANCE_BPS) / BPS;
+
         vm.prank(taker);
         uint256 amountOut = router.swapSplitV1(
-            venues, noHints, USDC, WETH, SPLIT_AMOUNT, allUniQuote, 0, 8, taker, block.timestamp + 120
+            venues, noHints, USDC, WETH, SPLIT_AMOUNT, allUniQuote, fallbackMinOut, 8, taker, block.timestamp + 120
         );
 
         assertGe(amountOut, allUniQuote, "split should beat or match all-uniswap");

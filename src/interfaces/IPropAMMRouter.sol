@@ -55,8 +55,12 @@ interface IPropAMMRouter {
     /// hard venue revert, not on under-delivery — the aggregate
     /// `amountOutMin` still gates the whole swap. Note: if THIS leg fails and
     /// falls back, `minOut` is NOT applied to its fallback execution (see
-    /// `swapMultiLegV1`) — only a leg that names the fallback venue directly
-    /// contributes its `minOut` to the coalesced fallback's floor.
+    /// `swapMultiLegV1`) — it was priced off this venue's typically better
+    /// rate, so applying it to Uniswap would revert the fallback exactly when
+    /// it is needed. Only a leg that names the fallback venue directly
+    /// contributes its `minOut` to the coalesced fallback's floor, and that
+    /// contribution is scaled up over any failed prop legs merged into the
+    /// same swap so it is not diluted by them.
     struct Leg {
         address venue;
         uint256 amountIn;
@@ -67,16 +71,28 @@ interface IPropAMMRouter {
     /// Pulls `sum(legs.amountIn)` once, runs each leg, coalesces failed legs
     /// into a single Uniswap V3 fallback swap, and enforces the AGGREGATE
     /// `amountOutMin` on the total delivered.
-    /// @dev When the surviving legs already cover `amountOutMin`, the
-    /// coalesced fallback covering the failed legs may execute with no floor
-    /// of its own (a failed leg's `minOut` is not inherited by its fallback)
-    /// and is MEV-exposed for that slice — weaker than `swapV1`'s
-    /// single-venue fallback. Supply explicit fallback legs with their own
-    /// `minOut`, or a tighter `amountOutMin`, for per-portion protection.
+    /// @dev `amountOutMin` is an AGGREGATE floor, so it alone does not protect
+    /// the coalesced fallback slice: once the prop legs that succeeded clear
+    /// it, the shortfall term collapses to zero and that slice would swap
+    /// unfloored. `fallbackMinOut` is the lever that closes this, and it MUST
+    /// come from the caller — a floor the router derived from its own onchain
+    /// quote would be read from the same pool in the same transaction, so a
+    /// sandwich attacker moving that pool moves the floor with it.
+    ///
+    /// Explicit fallback legs are a second, partial lever: their `minOut`
+    /// contributes to the slice's floor, and because the caller priced it for
+    /// Uniswap the router extends that same per-unit rate over any failed prop
+    /// legs merged into the same swap. It is only partial because the rate is
+    /// inferred from the explicit legs alone. Prefer `fallbackMinOut`.
     /// @param legs The legs to execute (1..MAX_SPLIT_VENUES entries).
     /// @param tokenIn The token being sold (or the ETH sentinel).
     /// @param tokenOut The token being bought (or the ETH sentinel).
     /// @param amountOutMin The minimum TOTAL `tokenOut` across all legs.
+    /// @param fallbackMinOut Absolute floor on the ONE coalesced Uniswap V3
+    /// swap that absorbs every leg naming the fallback venue plus every prop
+    /// leg that failed. Zero disables it and leaves that slice MEV-exposed
+    /// whenever the surviving prop legs already cover `amountOutMin`; pass a
+    /// real value derived from an OFFCHAIN Uniswap quote.
     /// @param recipient The address that receives `tokenOut`.
     /// @param deadline Unix timestamp after which the swap is no longer valid.
     /// @return amountOut The total `tokenOut` delivered to `recipient`.
@@ -85,6 +101,7 @@ interface IPropAMMRouter {
         address tokenIn,
         address tokenOut,
         uint256 amountOutMin,
+        uint256 fallbackMinOut,
         address recipient,
         uint256 deadline
     ) external payable returns (uint256 amountOut);

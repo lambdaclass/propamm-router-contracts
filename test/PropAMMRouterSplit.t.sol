@@ -551,6 +551,85 @@ contract PropAMMRouterSplitTest is Test {
         assertEq(tokenOut.balanceOf(address(router)), 0);
     }
 
+    /// @dev `swapSplitWithFeeV1` treats `fallbackMinOut` as a NET minimum and
+    /// grosses it up by `fee.bps`, matching `amountOutMin`. The whole 100e18
+    /// goes through the coalesced Uniswap leg (no venues named), Uniswap pays
+    /// 1:1, so the slice delivers a gross 100e18. A net floor of 100e18 needs
+    /// gross ceil(100e18 * 10000/9950) = 100.502...e18 and must revert; 99e18
+    /// net needs 99.497...e18 gross and must pass.
+    function test_splitWithFee_fallbackMinOutIsNetBasis() public {
+        address[] memory none = new address[](0);
+
+        _fundUser(100e18);
+        vm.prank(user);
+        vm.expectRevert(); // MockLinearSwapRouter's own "uni-slippage"
+        router.swapSplitWithFeeV1(
+            none,
+            _noHints(),
+            address(tokenIn),
+            address(tokenOut),
+            100e18,
+            0,
+            100e18,
+            8,
+            user,
+            block.timestamp + 1,
+            IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
+        );
+
+        _fundUser(100e18);
+        vm.prank(user);
+        uint256 amountOut = router.swapSplitWithFeeV1(
+            none,
+            _noHints(),
+            address(tokenIn),
+            address(tokenOut),
+            100e18,
+            0,
+            99e18,
+            8,
+            user,
+            block.timestamp + 1,
+            IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
+        );
+        assertEq(amountOut, 100e18 - (100e18 * 50 / 10_000), "net of the 50bp fee");
+        _assertRouterEmpty();
+    }
+
+    /// @dev `isSplitWhitelistModeAvailable` must track the bound that
+    /// `_resolveVenueSet` enforces, so an admin can see the empty-`venues`
+    /// convenience path go away BEFORE it starts reverting for users. Pairs
+    /// with `test_split_whitelistLargerThanMaxReverts`, which pins the revert.
+    function test_split_whitelistModeAvailabilityTracksTheBound() public {
+        assertTrue(router.isSplitWhitelistModeAvailable(), "empty whitelist is within the bound");
+
+        for (uint256 i = 0; i < 8; i++) {
+            _newVenue(10, 12, 0, MockCappedPropAMM.CapMode.HardRevert);
+            assertTrue(router.isSplitWhitelistModeAvailable(), "at or below MAX_SPLIT_VENUES");
+        }
+
+        // The ninth is the one that bricks the convenience path.
+        _newVenue(10, 12, 0, MockCappedPropAMM.CapMode.HardRevert);
+        assertFalse(router.isSplitWhitelistModeAvailable(), "past MAX_SPLIT_VENUES");
+
+        // And it really does revert, while an explicit venue list still works.
+        _fundUser(1e18);
+        address[] memory none = new address[](0);
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(TooManyVenues.selector, 9));
+        router.swapSplitV1(
+            none, _noHints(), address(tokenIn), address(tokenOut), 1e18, 0, 0, 8, user, block.timestamp + 1
+        );
+
+        address[] memory explicitOne = new address[](1);
+        explicitOne[0] = router.whitelistedVenueAt(0);
+        vm.prank(user);
+        router.swapSplitV1(
+            explicitOne, _noHints(), address(tokenIn), address(tokenOut), 1e18, 0, 0, 8, user, block.timestamp + 1
+        );
+        _assertRouterEmpty();
+    }
+
     /// forge-config: default.fuzz.runs = 256
     function testFuzz_split_alwaysMeetsMinOrReverts(uint96 rawAmount, uint64 capA, uint8 modeA, uint64 rateBpsA)
         public

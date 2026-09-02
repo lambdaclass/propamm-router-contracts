@@ -6,6 +6,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {
@@ -301,24 +302,32 @@ contract PropAMMRouter is
     }
 
     /// @inheritdoc IPropAMMRouter
-    /// @dev The coalesced fallback leg's minimum is the larger of the
-    /// aggregate shortfall against `amountOutMin` and the sum of EXPLICIT
-    /// fallback legs' `minOut` — see `_executeLegs`. A failed prop leg's own
-    /// `minOut` is deliberately not carried into that fallback minimum: it
-    /// was priced off that venue's (typically better) rate, so applying it
-    /// to Uniswap would revert the fallback exactly when it is needed to
-    /// recover the leg. Consequently, when the surviving legs already cover
-    /// `amountOutMin`, the fallback portion covering failed legs may execute
-    /// with no floor at all and is MEV-exposed for that slice — weaker than
-    /// `swapV1`'s single-venue fallback, which always receives the caller's
-    /// full `amountOutMin`. Callers wanting per-portion protection must
-    /// either supply explicit fallback legs carrying their own `minOut`, or
-    /// tighten the aggregate `amountOutMin`.
+    /// @dev The coalesced fallback swap's floor is the largest of the
+    /// aggregate shortfall against `amountOutMin`, the EXPLICIT fallback
+    /// legs' `minOut` extended over the whole slice at their own per-unit
+    /// rate, and `fallbackMinOut` — see `_executeLegs`. A failed prop leg's
+    /// own `minOut` is deliberately not carried in: it was priced off that
+    /// venue's (typically better) rate, so applying it to Uniswap would
+    /// revert the fallback exactly when it is needed to recover the leg.
+    ///
+    /// The shortfall term is best-effort ONLY. It collapses to zero the
+    /// moment the prop legs that succeeded clear `amountOutMin`, which is the
+    /// normal outcome of splitting into better-than-Uniswap venues, so a
+    /// caller relying on it alone leaves the fallback slice MEV-exposed.
+    /// `fallbackMinOut` is the term that actually protects that slice, and it
+    /// is caller-supplied for an unavoidable reason: the fair Uniswap rate is
+    /// information the router can only obtain from an onchain quote against
+    /// the same pool in the same transaction, which a sandwich attacker moves
+    /// along with the floor. No formula over the router's own state can
+    /// substitute — a pro-rata share of `amountOutMin` would demand the
+    /// Uniswap slice deliver at the BLENDED rate of the better-priced prop
+    /// legs, reverting sound swaps.
     function swapMultiLegV1(
         IPropAMMRouter.Leg[] calldata legs,
         address tokenIn,
         address tokenOut,
         uint256 amountOutMin,
+        uint256 fallbackMinOut,
         address recipient,
         uint256 deadline
     ) external payable whenNotPaused nonReentrant returns (uint256 amountOut) {
@@ -332,10 +341,7 @@ contract PropAMMRouter is
                 tokenIn_: tokenIn_,
                 tokenOut: tokenOut,
                 amountOutMin: amountOutMin,
-                // Explicit fallback legs carrying their own `minOut` are this
-                // entrypoint's per-portion lever, so it needs no separate
-                // floor on the coalesced swap.
-                fallbackMinOut: 0,
+                fallbackMinOut: fallbackMinOut,
                 payTo: recipient,
                 swapFor: recipient,
                 deadline: deadline
@@ -346,12 +352,21 @@ contract PropAMMRouter is
     /// @notice `swapMultiLegV1` plus a frontend fee skimmed from the
     /// aggregate output. Implementation-only, like the other `*WithFeeV1`
     /// entrypoints. Legs deliver to this contract; the fee and the net are
-    /// then forwarded. `amountOutMin` is the NET minimum the user receives.
+    /// then forwarded.
+    /// @dev BOTH `amountOutMin` and `fallbackMinOut` are NET minimums — what
+    /// the user must be left with after the fee. Each is grossed up by
+    /// `fee.bps` before it reaches `_executeLegs`, which applies its floors
+    /// to the pre-fee amounts the legs actually deliver. Grossing up both
+    /// keeps one basis across the whole signature; forwarding
+    /// `fallbackMinOut` raw would silently give the caller up to `fee.bps`
+    /// less protection on that slice than the same number buys them via
+    /// `amountOutMin`.
     function swapMultiLegWithFeeV1(
         IPropAMMRouter.Leg[] calldata legs,
         address tokenIn,
         address tokenOut,
         uint256 amountOutMin,
+        uint256 fallbackMinOut,
         address recipient,
         uint256 deadline,
         FrontendFee calldata fee
@@ -360,6 +375,7 @@ contract PropAMMRouter is
         require(block.timestamp <= deadline, Expired());
         uint256 totalIn = _validateLegs(legs);
         uint256 grossMin = FrontendFees._grossUp(amountOutMin, fee.bps);
+        uint256 grossFallbackMin = FrontendFees._grossUp(fallbackMinOut, fee.bps);
         address tokenIn_ = _pullFunds(tokenIn, totalIn);
         uint256 deliveredGross = _executeLegs(
             legs,
@@ -368,10 +384,7 @@ contract PropAMMRouter is
                 tokenIn_: tokenIn_,
                 tokenOut: tokenOut,
                 amountOutMin: grossMin,
-                // Explicit fallback legs carrying their own `minOut` are this
-                // entrypoint's per-portion lever, so it needs no separate
-                // floor on the coalesced swap.
-                fallbackMinOut: 0,
+                fallbackMinOut: grossFallbackMin,
                 payTo: address(this),
                 swapFor: recipient,
                 deadline: deadline
@@ -446,7 +459,14 @@ contract PropAMMRouter is
     }
 
     /// @notice `swapSplitV1` plus a frontend fee skimmed from the aggregate
-    /// output. Implementation-only. `amountOutMin` is the NET minimum.
+    /// output. Implementation-only.
+    /// @dev BOTH `amountOutMin` and `fallbackMinOut` are NET minimums — what
+    /// the user must be left with after the fee — and each is grossed up by
+    /// `fee.bps` before reaching `_executeLegs`, which applies its floors to
+    /// the pre-fee amounts the legs deliver. Grossing up both keeps one basis
+    /// across the whole signature; forwarding `fallbackMinOut` raw would
+    /// silently give the caller up to `fee.bps` less protection on that slice
+    /// than the same number buys them via `amountOutMin`.
     function swapSplitWithFeeV1(
         address[] calldata venues,
         uint256[] calldata probeHints,
@@ -468,6 +488,7 @@ contract PropAMMRouter is
 
         (address[] memory venueSet, uint256[] memory hints) = _resolveVenueSet(venues, probeHints);
         uint256 grossMin = FrontendFees._grossUp(amountOutMin, fee.bps);
+        uint256 grossFallbackMin = FrontendFees._grossUp(fallbackMinOut, fee.bps);
 
         address tokenIn_ = _pullFunds(tokenIn, amountIn);
         address tokenOut_ = tokenOut == ETH_SENTINEL ? WETH : tokenOut;
@@ -480,7 +501,7 @@ contract PropAMMRouter is
                 tokenIn_: tokenIn_,
                 tokenOut: tokenOut,
                 amountOutMin: grossMin,
-                fallbackMinOut: fallbackMinOut,
+                fallbackMinOut: grossFallbackMin,
                 payTo: address(this),
                 swapFor: recipient,
                 deadline: deadline
@@ -535,6 +556,14 @@ contract PropAMMRouter is
     /// venue quote that net-consumes in-flight user funds reverts the whole
     /// call. The check is `==` and not `>= amountIn` on purpose — pre-existing
     /// router dust would otherwise mask a theft of the same size.
+    ///
+    /// The flip side of `==` is that a balance INCREASE across the quote phase
+    /// also reverts. That is intended for a venue that pushes tokens mid-quote
+    /// (nothing legitimate does), but it makes the split path incompatible with
+    /// a `tokenIn` whose balances move on their own — rebasing and
+    /// reflection/fee-redistribution tokens can credit this contract while a
+    /// quote is in flight and revert an honest split. Do not whitelist venues
+    /// for such tokens, or route them through `swapV1` instead.
     ///
     /// The check sits after `_waterfall`, not after `_gatherCandidates`, so
     /// that it covers EVERY quote taken while the funds are held — including
@@ -776,6 +805,18 @@ contract PropAMMRouter is
         uint256 amountIn,
         uint256 maxLegs
     ) internal returns (IPropAMMRouter.Leg[] memory legs) {
+        // No candidates means no cutoff comparison will ever run, so the
+        // reference quote below would be dead. It is not free: `_tryQuote`
+        // against the fallback router reaches `IQuoterV2.quoteExactInputSingle`,
+        // which simulates a full pool swap and reverts internally. This is the
+        // documented outcome for an empty whitelist and for a venue list whose
+        // every entry is dead or de-listed, so it is worth short-circuiting.
+        if (cands.length == 0) {
+            legs = new IPropAMMRouter.Leg[](1);
+            legs[0] = IPropAMMRouter.Leg({venue: fallbackSwapRouter, amountIn: amountIn, minOut: 0});
+            return legs;
+        }
+
         uint256 residualLb = amountIn;
         for (uint256 i = 0; i < cands.length; i++) {
             residualLb = cands[i].fill >= residualLb ? 0 : residualLb - cands[i].fill;
@@ -805,6 +846,16 @@ contract PropAMMRouter is
                 if (refOut > type(uint128).max) refOut = 0;
                 if (cands[i].out * refSize <= refOut * cands[i].fill) break;
             }
+            // NOTE on staleness: candidates after the refinement are still
+            // compared against `(refSize, refOut)` sized for the residual as
+            // it stood at the refining candidate, which is LARGER than their
+            // own prospective residual. Uniswap's unit rate degrades with
+            // size, so the stale reference is a LOOSER cutoff: it can admit a
+            // candidate marginally worse than the true Uniswap rate, never
+            // reject a better one. Bounded economic slippage, and every
+            // admitted leg still carries its own pro-rata `minOut` while the
+            // aggregate `amountOutMin` gates the swap. Re-quoting per
+            // candidate would cost a pool simulation each and is not worth it.
             uint256 leg = cands[i].fill >= remaining ? remaining : cands[i].fill;
             tmp[legCount++] = IPropAMMRouter.Leg({
                 venue: cands[i].venue, amountIn: leg, minOut: SplitPlanner.proRataMin(cands[i].out, cands[i].fill, leg)
@@ -854,18 +905,33 @@ contract PropAMMRouter is
 
     /// @notice Runs a list of legs with funds already held by this contract.
     /// @dev Legs naming the fallback router and legs whose venue fails are
-    /// coalesced into ONE Uniswap V3 swap at the end, whose min is the
-    /// largest of (a) the aggregate shortfall vs `amountOutMin` (saturating —
-    /// over-delivering prop legs must not underflow), (b) the sum of the
-    /// explicit fallback legs' `minOut`, and (c) the caller's
-    /// `fallbackMinOut`. A failed prop leg's `minOut` is intentionally NOT
-    /// folded into (b) — see `swapMultiLegV1`'s NatSpec for why, and for the
-    /// MEV-exposure caveat that applies when (a) collapses to zero and
-    /// neither (b) nor (c) is supplied. Emits one `Swapped` per executed leg,
-    /// naming `swapFor` so the events attribute the swap to the user even
-    /// when legs deliver to the router. `tokenIn` is the caller-visible token
-    /// (sentinel allowed, for events); `tokenIn_` is the resolved ERC-20
-    /// being sold.
+    /// coalesced into ONE Uniswap V3 swap at the end, whose floor is the
+    /// largest of:
+    ///  (a) the aggregate shortfall vs `amountOutMin` (saturating —
+    ///      over-delivering prop legs must not underflow). BEST-EFFORT ONLY:
+    ///      it is zero whenever the prop legs that succeeded already clear
+    ///      `amountOutMin`, which is the normal outcome of splitting into
+    ///      better-than-Uniswap venues.
+    ///  (b) the explicit fallback legs' `minOut`, extended over the WHOLE
+    ///      slice at those legs' own per-unit rate. The unscaled sum is not
+    ///      enough: a failed prop leg's `amountIn` joins the same swap
+    ///      without contributing any floor, so requiring only `sum(minOut)`
+    ///      over `explicitIn + failedIn` demands a rate of
+    ///      `sum(minOut) / (explicitIn + failedIn)` — strictly looser than
+    ///      the `sum(minOut) / explicitIn` the caller asked for, leaving the
+    ///      failed slice unfloored AND diluting the explicit legs' own floor.
+    ///      Scaling is sound precisely because the caller priced `minOut`
+    ///      for Uniswap and the merged slice also executes on Uniswap, so
+    ///      the same per-unit rate is the right one to extend — unlike a
+    ///      failed PROP leg's `minOut`, which is priced off a better venue
+    ///      and is therefore still excluded (see `swapMultiLegV1`).
+    ///  (c) the caller's `fallbackMinOut` — the only term that is neither
+    ///      derived from this swap's own accounting nor inferable from an
+    ///      onchain quote, and so the only one that survives a sandwich.
+    /// Emits one `Swapped` per executed leg, naming `swapFor` so the events
+    /// attribute the swap to the user even when legs deliver to the router.
+    /// `tokenIn` is the caller-visible token (sentinel allowed, for events);
+    /// `tokenIn_` is the resolved ERC-20 being sold.
     function _executeLegs(IPropAMMRouter.Leg[] memory legs, LegRun memory r) internal returns (uint256 delivered) {
         address tokenOut_ = r.tokenOut;
         address recipient_ = r.payTo;
@@ -877,9 +943,15 @@ contract PropAMMRouter is
 
         uint256 fbAmount = 0;
         uint256 fbMinOut = 0;
+        // `fbAmount` restricted to the EXPLICIT fallback legs — the input the
+        // caller actually priced `fbMinOut` against. Failed prop legs swell
+        // `fbAmount` but not this, which is exactly the gap that would
+        // otherwise dilute floor (b).
+        uint256 fbExplicitIn = 0;
         for (uint256 i = 0; i < legs.length; i++) {
             if (legs[i].venue == fallbackSwapRouter) {
                 fbAmount += legs[i].amountIn;
+                fbExplicitIn += legs[i].amountIn;
                 fbMinOut += legs[i].minOut;
                 continue;
             }
@@ -897,14 +969,26 @@ contract PropAMMRouter is
         }
 
         if (fbAmount > 0) {
+            // (a) Best-effort: zero once the surviving prop legs clear the
+            // aggregate min. See this function's NatSpec.
             uint256 uniMin = delivered >= r.amountOutMin ? 0 : r.amountOutMin - delivered;
-            if (fbMinOut > uniMin) uniMin = fbMinOut;
-            // The caller's own floor on this slice. It is the only one that
-            // survives a sandwich: the two above are derived from the swap's
-            // own aggregate accounting, and any floor derived instead from an
-            // onchain quote would be read from the same pool in the same
-            // transaction, so an attacker moving that pool moves the floor
-            // with it.
+            // (b) The explicit legs' floor at their own per-unit rate, applied
+            // to the whole merged slice. `mulDiv` for a 512-bit intermediate:
+            // multileg leg amounts are not uint128-bounded, so
+            // `fbMinOut * fbAmount` can exceed 2^256. Flooring keeps the floor
+            // from tripping on its own rounding. Guarded on `fbExplicitIn > 0`
+            // because `fbMinOut > 0` implies it, and division by zero would
+            // otherwise revert a swap whose only fallback input came from
+            // failed prop legs.
+            if (fbExplicitIn > 0) {
+                uint256 scaledExplicitMin = Math.mulDiv(fbMinOut, fbAmount, fbExplicitIn);
+                if (scaledExplicitMin > uniMin) uniMin = scaledExplicitMin;
+            }
+            // (c) The caller's own floor on this slice — the only one that
+            // survives a sandwich. (a) and (b) are derived from the swap's own
+            // accounting, and any floor derived instead from an onchain quote
+            // would be read from the same pool in the same transaction, so an
+            // attacker moving that pool moves the floor with it.
             if (r.fallbackMinOut > uniMin) uniMin = r.fallbackMinOut;
             uint256 prevBal = IERC20(tokenOut_).balanceOf(recipient_);
             UniV3Router.swapExactIn(
@@ -1388,9 +1472,34 @@ contract PropAMMRouter is
     /// foot-gun: its `quote`/`swap` calls revert, so it is skipped by selection
     /// and, on an explicit swap, the reverting `_dispatchVenue` rolls back and the
     /// Uniswap fallback engages — no funds are stranded.
+    ///
+    /// IMPORTANT — interaction with `swapSplitV1`'s whitelist mode. Growing the
+    /// whitelist past `MAX_SPLIT_VENUES` makes `swapSplitV1` / `swapSplitWithFeeV1`
+    /// revert `TooManyVenues` for calls that pass an EMPTY `venues` array (the
+    /// "probe the whole whitelist" convenience). Callers naming venues explicitly
+    /// are unaffected, as is every other entrypoint — `swapV1` / `quoteV1` keep
+    /// iterating the full whitelist. The revert is deliberate: `EnumerableSet`
+    /// ordering is unstable across removals, so silently probing "the first eight"
+    /// would make the split's venue set nondeterministic. This function does NOT
+    /// cap the whitelist, because doing so would limit the protocol's venue roster
+    /// to eight for the benefit of one optional convenience path. Check
+    /// {isSplitWhitelistModeAvailable} before and after listing, and migrate
+    /// integrators to explicit `venues` lists before crossing the bound.
     /// @param venue The venue address to whitelist.
     function addVenue(address venue) external restricted {
         _addVenue(venue);
+    }
+
+    /// @notice Whether `swapSplitV1` / `swapSplitWithFeeV1` still accept an empty
+    /// `venues` array (the "probe the whole whitelist" convenience).
+    /// @dev False once `whitelistedVenueCount()` exceeds `MAX_SPLIT_VENUES`, at
+    /// which point those calls revert `TooManyVenues` and callers must name their
+    /// venues explicitly. Exposed so admins can check before {addVenue} and
+    /// integrators can detect the mode without simulating a swap. See {addVenue}
+    /// for why the whitelist itself is not capped.
+    /// @return available True while the empty-`venues` split path is usable.
+    function isSplitWhitelistModeAvailable() external view returns (bool available) {
+        return whitelistedVenueCount() <= MAX_SPLIT_VENUES;
     }
 
     /// @dev Whitelist-insertion core behind the public `addVenue`. Reverts
