@@ -630,6 +630,44 @@ contract PropAMMRouterSplitTest is Test {
         _assertRouterEmpty();
     }
 
+    /// @dev The reason `fallbackMinOut` is pro-rated rather than absolute: the
+    /// PLANNER decides how big the coalesced slice is, not the caller. Here a
+    /// caller simulates offchain while venue B is stale (per Phase 0, most
+    /// venues are stale at any given block), sees A take 300e18 with a 700e18
+    /// Uniswap remainder, and prices the floor for the full 1000e18 input. By
+    /// execution B has published, the planner uses it, and the remainder
+    /// shrinks to 400e18. An ABSOLUTE floor priced for 700e18 would revert
+    /// this — a strictly BETTER split than the one simulated. The pro-rated
+    /// floor scales with the slice, so it goes through.
+    function test_split_fallbackFloorSurvivesAShrinkingRemainder() public {
+        MockCappedPropAMM a = _newVenue(10, 12, 0, MockCappedPropAMM.CapMode.HardRevert);
+        MockCappedPropAMM b = _newVenue(10, 12, 0, MockCappedPropAMM.CapMode.HardRevert);
+
+        address[] memory venues = new address[](2);
+        venues[0] = address(a);
+        venues[1] = address(b);
+        uint256[] memory hints = new uint256[](2);
+        hints[0] = 300e18;
+        hints[1] = 300e18;
+
+        // Uniswap pays 1:1, so a full-order floor with 1% slack is 990e18.
+        uint256 fallbackMinOut = 1000e18 * 99 / 100;
+
+        // The caller's simulation: B stale, so the remainder is 700e18.
+        b.setActive(false);
+        _fundUser(1000e18);
+        uint256 simulated = _splitFb(venues, hints, 1000e18, 0, fallbackMinOut, 8);
+
+        // Execution: B is live, takes 300e18, and the remainder is now 400e18.
+        b.setActive(true);
+        _fundUser(1000e18);
+        uint256 executed = _splitFb(venues, hints, 1000e18, 0, fallbackMinOut, 8);
+
+        assertGt(executed, simulated, "the live-B split must be strictly better");
+        assertEq(executed, 720e18 + 400e18, "two 300e18 legs at 1.2 plus a 400e18 Uniswap remainder");
+        _assertRouterEmpty();
+    }
+
     /// forge-config: default.fuzz.runs = 256
     function testFuzz_split_alwaysMeetsMinOrReverts(uint96 rawAmount, uint64 capA, uint8 modeA, uint64 rateBpsA)
         public
@@ -982,11 +1020,22 @@ contract PropAMMRouterSplitTest is Test {
         venues[1] = address(b);
 
         // Uniswap pays 1:1, so the 50 coalesced from B's failure yields 50.
-        // A floor of 60 on that slice is unreachable and must revert.
+        // `fallbackMinOut` is priced for the FULL 100e18 input and pro-rated
+        // to the slice, so 120e18 becomes a 60e18 floor on the 50e18 slice —
+        // unreachable, and it must revert.
         vm.prank(user);
         vm.expectRevert(bytes("uni-slippage"));
         router.swapSplitV1(
-            venues, _noHints(), address(tokenIn), address(tokenOut), 100e18, 100e18, 60e18, 8, user, block.timestamp + 1
+            venues,
+            _noHints(),
+            address(tokenIn),
+            address(tokenOut),
+            100e18,
+            100e18,
+            120e18,
+            8,
+            user,
+            block.timestamp + 1
         );
     }
 

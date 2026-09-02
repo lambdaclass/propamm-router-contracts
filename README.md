@@ -22,7 +22,7 @@ Venues are identified **by address**: the proprietary AMM routers (FermiSwap, Ki
 - `swapViaVenueV1(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline)`: attempts the caller-specified `venue` first. A proprietary venue still falls back to Uniswap V3 if it fails to fill; naming the Uniswap V3 SwapRouter02 address routes directly to Uniswap V3 (it *is* the fallback, so there is nothing further to fall back to). Reverts `UnknownVenue` if `venue` is neither a whitelisted proprietary AMM nor the SwapRouter02 address.
 - `swapViaSelectedVenuesV1(venues, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline)`: like `swapV1`, but considers only the caller-supplied `venues` subset. An on-chain requote across them selects the best, which executes — with the Uniswap V3 fallback still applying as the transparent safety net if the chosen venue fails to fill. Reverts `NoQuotesAvailable` if none of the listed venues can be priced. Returns `(amountOut, executedVenue)`. List the SwapRouter02 address among `venues` to opt Uniswap V3 into the selection (it is not a selection candidate otherwise, only the execution-time safety net).
 - `swapMultiLegV1(legs, tokenIn, tokenOut, amountOutMin, fallbackMinOut, recipient, deadline)`: executes a caller-computed split — an array of `Leg { venue, amountIn, minOut }` — pulling the total once and enforcing the **aggregate** `amountOutMin`. Legs that fail (or explicitly name the SwapRouter02 address) are coalesced into a single Uniswap V3 swap, floored by `fallbackMinOut`. Emits one `Swapped` per executed leg. A `minOut` of 0 means that leg only falls back on a hard venue revert, not on under-delivery.
-- `swapSplitV1(venues, probeHints, tokenIn, tokenOut, amountIn, amountOutMin, fallbackMinOut, maxLegs, recipient, deadline)`: computes the split onchain — pulls funds, quotes each venue once (via the optional `IPropAMMPartialFill` extension, else a bounded two-point probe steered by the optional `probeHints`), ranks candidates by rate against a Uniswap V3 reference, and executes up to `maxLegs` propAMM legs plus one coalesced Uniswap remainder leg. Empty `venues` means the whole whitelist; an empty whitelist is not an error and simply routes everything through Uniswap V3. `fallbackMinOut` is an absolute floor on that coalesced Uniswap swap (see [Protecting the coalesced fallback](#protecting-the-coalesced-fallback)). A venue whose quote is flat across both probe points is declined rather than handed a leg it would not fill in full. Empty `venues` stops working once the whitelist grows past `MAX_SPLIT_VENUES` (8) — call `isSplitWhitelistModeAvailable()` to check, and name venues explicitly past that point. Fee variants `swapMultiLegWithFeeV1` / `swapSplitWithFeeV1` skim the aggregate output (implementation-only, like the other `*WithFeeV1` entrypoints).
+- `swapSplitV1(venues, probeHints, tokenIn, tokenOut, amountIn, amountOutMin, fallbackMinOut, maxLegs, recipient, deadline)`: computes the split onchain — pulls funds, quotes each venue once (via the optional `IPropAMMPartialFill` extension, else a bounded two-point probe steered by the optional `probeHints`), ranks candidates by rate against a Uniswap V3 reference, and executes up to `maxLegs` propAMM legs plus one coalesced Uniswap remainder leg. Empty `venues` means the whole whitelist; an empty whitelist is not an error and simply routes everything through Uniswap V3. `fallbackMinOut` floors that coalesced Uniswap swap; price it for the full `amountIn` and the router pro-rates it to the slice that forms (see [Protecting the coalesced fallback](#protecting-the-coalesced-fallback)). A venue whose quote is flat across both probe points is declined rather than handed a leg it would not fill in full. Empty `venues` stops working once the whitelist grows past `MAX_SPLIT_VENUES` (8) — call `isSplitWhitelistModeAvailable()` to check, and name venues explicitly past that point. Fee variants `swapMultiLegWithFeeV1` / `swapSplitWithFeeV1` skim the aggregate output (implementation-only, like the other `*WithFeeV1` entrypoints).
 - `quoteV1(tokenIn, tokenOut, amount)`: quotes every venue (the proprietary AMMs and the Uniswap V3 fallback) and returns the best `amountOut` along with the venue address that produced it. Reverts `NoQuotesAvailable` if every venue is skipped or reverts.
 - `quoteVenueV1(venue, tokenIn, tokenOut, amount)`: quotes a single venue by address. Reverts `UnknownVenue` for any address that is neither a proprietary AMM nor the SwapRouter02 fallback, and bubbles up any underlying venue revert.
 - `quoteSelectedVenuesV1(venues, tokenIn, tokenOut, amountIn)`: quotes only the caller-supplied `venues` subset and returns the best `(bestAmountOut, bestVenue)`. Venues that revert (including non-whitelisted addresses) are skipped; reverts `NoQuotesAvailable` if none of them can be priced.
@@ -63,7 +63,9 @@ Uniswap V3 swap at the end. That swap's slippage floor is the largest of three t
    yields ~500k.) Only term 3 covers the failed portion. A failed **propAMM** leg's
    `minOut` is excluded for a separate reason — priced off a better venue, applying it to
    Uniswap would revert the recovery exactly when it is needed.
-3. **`fallbackMinOut`** — the caller's absolute floor on that swap.
+3. **`fallbackMinOut`** — the caller's floor, priced as if the *entire* input routed
+   through Uniswap and pro-rated by the router to the slice that actually forms
+   (`fallbackMinOut * fbAmount / sum(legs.amountIn)`).
 
 **Pass a real `fallbackMinOut`.** It is the only term that survives a sandwich, and it
 must come from the caller for a structural reason: pricing that slice correctly needs the
@@ -73,8 +75,16 @@ No formula over the router's own state substitutes for it. Two tempting ones are
 for the same reason — each applies a rate measured at one size to a different size: a
 pro-rata share of `amountOutMin` demands the *blended* rate of the better-priced propAMM
 legs, and scaling the explicit legs' `minOut` over the merged slice demands the small-size
-Uniswap rate at large size. Derive `fallbackMinOut` from an **off-chain** Uniswap quote for
-the slice you expect, minus your slippage tolerance.
+Uniswap rate at large size.
+
+Derive `fallbackMinOut` from an **off-chain** Uniswap quote for the **full input**, minus
+your slippage tolerance — not for the slice you expect. The router pro-rates it, and that
+is what makes it robust: an *absolute* floor is priced against a slice size the **planner**
+chooses, so a venue publishing a price between your simulation and execution shrinks the
+slice, and an absolute floor priced for the larger predicted slice would revert a *better*
+split. Scaling down is sound because the full-order unit rate is the worst one a concave
+pool offers, so the pro-rated floor sits at or below the honest output for every smaller
+slice.
 
 Passing `0` disables term 3. That is supported and sometimes correct (e.g. when you have
 tightened `amountOutMin` so term 1 binds), but it leaves the coalesced slice MEV-exposed

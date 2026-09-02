@@ -81,17 +81,19 @@ contract PropAMMRouterMultiLegTest is Test {
         legs[1] = _leg(address(venueB), 100e18, 0); // fails -> 100e18 to Uniswap
 
         // venueA alone (400e18) clears the aggregate min, so the shortfall
-        // term is zero. Uniswap pays 1:1, so the honest slice yields 100e18.
-        // Demand 1 wei more than that and the swap must revert rather than
-        // silently execute unprotected.
+        // term is zero. Uniswap pays 1:1, so the honest 100e18 slice yields
+        // 100e18. `fallbackMinOut` is priced for the FULL 300e18 input and
+        // pro-rated by fbAmount/totalIn = 100/300, so 300e18 becomes exactly
+        // a 100e18 floor; nudging it up must revert rather than silently
+        // execute unprotected.
         vm.prank(user);
         vm.expectRevert(); // MockLinearSwapRouter's own "uni-slippage"
-        router.swapMultiLegV1(legs, address(tokenIn), address(tokenOut), 400e18, 100e18 + 1, user, block.timestamp + 1);
+        router.swapMultiLegV1(legs, address(tokenIn), address(tokenOut), 400e18, 300e18 + 3, user, block.timestamp + 1);
 
         // At exactly the honest output it goes through.
         vm.prank(user);
         uint256 amountOut =
-            router.swapMultiLegV1(legs, address(tokenIn), address(tokenOut), 400e18, 100e18, user, block.timestamp + 1);
+            router.swapMultiLegV1(legs, address(tokenIn), address(tokenOut), 400e18, 300e18, user, block.timestamp + 1);
         assertEq(amountOut, 500e18, "400 from venueA + 100 from the coalesced Uniswap swap");
     }
 
@@ -144,12 +146,13 @@ contract PropAMMRouterMultiLegTest is Test {
             router.swapMultiLegV1(legs, address(tokenIn), address(tokenOut), 200e18, 0, user, block.timestamp + 1);
         assertEq(amountOut, 200e18 + 100e18, "diluted floor (95e18 over 200e18 in) was met by 0.50");
 
-        // `fallbackMinOut` is the remedy: demand the merged slice actually
-        // deliver at 0.95 and the same swap must revert.
+        // `fallbackMinOut` is the remedy: 285e18 is 0.95 over the full 300e18
+        // input, which pro-rates to 190e18 on the 200e18 merged slice — the
+        // rate the caller actually wanted — and the swap must revert.
         _fundUser(300e18);
         vm.prank(user);
         vm.expectRevert();
-        router.swapMultiLegV1(legs, address(tokenIn), address(tokenOut), 200e18, 190e18, user, block.timestamp + 1);
+        router.swapMultiLegV1(legs, address(tokenIn), address(tokenOut), 200e18, 285e18, user, block.timestamp + 1);
     }
 
     /// @dev A failed PROP leg's own `minOut` still must NOT be carried into the
@@ -171,11 +174,12 @@ contract PropAMMRouterMultiLegTest is Test {
         assertEq(amountOut, 200e18 + 100e18, "fallback recovered the leg at Uniswap's rate");
     }
 
-    /// @dev `swapMultiLegWithFeeV1` treats BOTH minimums as net-of-fee, so
-    /// `fallbackMinOut` is grossed up like `amountOutMin`. At 50bps a net
-    /// floor of 100e18 needs a gross 100.502...e18 from the slice, which a
-    /// 1:1 Uniswap over 100e18 in cannot meet -> revert. A net floor of
-    /// 99e18 (gross 99.497...e18) passes.
+    /// @dev `swapMultiLegWithFeeV1` treats both AGGREGATE minimums as
+    /// net-of-fee, so `fallbackMinOut` is grossed up like `amountOutMin` and
+    /// then pro-rated. Full-order basis: 300e18 net grosses to ~301.507e18 and
+    /// pro-rates by 100/300 to ~100.502e18 on the slice, which a 1:1 Uniswap
+    /// over 100e18 in cannot meet -> revert. 297e18 net grosses to
+    /// ~298.492e18 and pro-rates to ~99.497e18, which it can.
     function test_swapMultiLegWithFee_fallbackMinOutIsNetBasis() public {
         _fundUser(600e18);
         venueB.setActive(false);
@@ -191,7 +195,7 @@ contract PropAMMRouterMultiLegTest is Test {
             address(tokenIn),
             address(tokenOut),
             0,
-            100e18,
+            300e18,
             user,
             block.timestamp + 1,
             IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
@@ -203,7 +207,7 @@ contract PropAMMRouterMultiLegTest is Test {
             address(tokenIn),
             address(tokenOut),
             0,
-            99e18,
+            297e18,
             user,
             block.timestamp + 1,
             IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})

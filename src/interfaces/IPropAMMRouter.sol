@@ -91,11 +91,15 @@ interface IPropAMMRouter {
     /// @param tokenIn The token being sold (or the ETH sentinel).
     /// @param tokenOut The token being bought (or the ETH sentinel).
     /// @param amountOutMin The minimum TOTAL `tokenOut` across all legs.
-    /// @param fallbackMinOut Absolute floor on the ONE coalesced Uniswap V3
-    /// swap that absorbs every leg naming the fallback venue plus every prop
-    /// leg that failed. Zero disables it and leaves that slice MEV-exposed
-    /// whenever the surviving prop legs already cover `amountOutMin`; pass a
-    /// real value derived from an OFFCHAIN Uniswap quote.
+    /// @param fallbackMinOut Floor on the ONE coalesced Uniswap V3 swap that
+    /// absorbs every leg naming the fallback venue plus every prop leg that
+    /// failed. Priced as if the ENTIRE input routed through Uniswap: the
+    /// router pro-rates it to the slice that actually forms
+    /// (`fallbackMinOut * fbAmount / sum(legs.amountIn)`), so it stays
+    /// satisfiable whichever legs fail. Derive it from an OFFCHAIN Uniswap
+    /// quote for the full input, minus your slippage tolerance. Zero disables
+    /// it and leaves that slice MEV-exposed whenever the surviving prop legs
+    /// already cover `amountOutMin`.
     /// @param recipient The address that receives `tokenOut`.
     /// @param deadline Unix timestamp after which the swap is no longer valid.
     /// @return amountOut The total `tokenOut` delivered to `recipient`.
@@ -129,8 +133,15 @@ interface IPropAMMRouter {
     /// @param amountIn The exact total input; must fit uint128.
     /// @param amountOutMin The minimum TOTAL `tokenOut` delivered.
     /// @param fallbackMinOut Floor for the COALESCED Uniswap V3 swap (the
-    /// planned remainder plus any legs that failed at execution time). Zero
-    /// disables it. This is the only per-portion protection available to a
+    /// planned remainder plus any legs that failed at execution time). Price
+    /// it as if the ENTIRE `amountIn` routed through Uniswap: the router
+    /// pro-rates it to the slice that actually forms
+    /// (`fallbackMinOut * fbAmount / amountIn`). That matters most here,
+    /// because the PLANNER decides how large the slice is — a venue
+    /// publishing a price between the caller's offchain simulation and
+    /// execution shrinks the remainder, and an absolute floor priced for the
+    /// larger predicted remainder would revert a BETTER split. Zero disables
+    /// it. This is the only per-portion protection available to a
     /// `swapSplitV1` caller: because the router plans the legs, the caller
     /// cannot supply explicit fallback legs the way `swapMultiLegV1` allows.
     /// It MUST be caller-supplied — a floor derived from an onchain quote

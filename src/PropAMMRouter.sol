@@ -6,6 +6,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {
@@ -313,11 +314,13 @@ contract PropAMMRouter is
     /// moment the prop legs that succeeded clear `amountOutMin`, which is the
     /// normal outcome of splitting into better-than-Uniswap venues, so a
     /// caller relying on it alone leaves the fallback slice MEV-exposed.
-    /// `fallbackMinOut` is the term that actually protects that slice, and it
-    /// is caller-supplied for an unavoidable reason: the fair Uniswap rate is
-    /// information the router can only obtain from an onchain quote against
-    /// the same pool in the same transaction, which a sandwich attacker moves
-    /// along with the floor. No formula over the router's own state can
+    /// `fallbackMinOut` is the term that actually protects that slice. It is
+    /// priced for the ENTIRE input going through Uniswap and pro-rated to the
+    /// slice that forms, so it survives the planner choosing a different split
+    /// than the caller predicted. It is caller-supplied for an unavoidable
+    /// reason: the fair Uniswap rate is information the router can only obtain
+    /// from an onchain quote against the same pool in the same transaction,
+    /// which a sandwich attacker moves along with the floor. No formula over the router's own state can
     /// substitute, and two tempting formulas are both unsound for the same
     /// reason — they apply a rate measured at one size to a different size.
     /// A pro-rata share of `amountOutMin` demands the Uniswap slice deliver
@@ -934,9 +937,13 @@ contract PropAMMRouter is
     ///      pool that honestly yields ~500k). Only (c) closes the failed
     ///      portion. A failed PROP leg's `minOut` is excluded for a separate
     ///      reason — priced off a better venue (see `swapMultiLegV1`).
-    ///  (c) the caller's `fallbackMinOut` — the only term that is neither
-    ///      derived from this swap's own accounting nor inferable from an
-    ///      onchain quote, and so the only one that survives a sandwich.
+    ///  (c) the caller's `fallbackMinOut`, PRO-RATED to `fbAmount / totalIn`.
+    ///      The caller prices it for the entire input going through Uniswap,
+    ///      so this is their own full-order unit rate applied to the slice
+    ///      the planner actually produced. It is the only term that is
+    ///      neither derived from this swap's own accounting nor inferable
+    ///      from an onchain quote, and so the only one that survives a
+    ///      sandwich.
     /// Emits one `Swapped` per executed leg, naming `swapFor` so the events
     /// attribute the swap to the user even when legs deliver to the router.
     /// `tokenIn` is the caller-visible token (sentinel allowed, for events);
@@ -952,7 +959,10 @@ contract PropAMMRouter is
 
         uint256 fbAmount = 0;
         uint256 fbMinOut = 0;
+        // Denominator for the pro-rata scaling of `fallbackMinOut` below.
+        uint256 totalIn = 0;
         for (uint256 i = 0; i < legs.length; i++) {
+            totalIn += legs[i].amountIn;
             if (legs[i].venue == fallbackSwapRouter) {
                 fbAmount += legs[i].amountIn;
                 fbMinOut += legs[i].minOut;
@@ -982,12 +992,27 @@ contract PropAMMRouter is
             // for a SMALLER size, and Uniswap's unit rate falls with size, so
             // the scaled floor over-demands and reverts honest swaps.
             if (fbMinOut > uniMin) uniMin = fbMinOut;
-            // (c) The caller's own floor on this slice — the only one that
-            // survives a sandwich. (a) and (b) are derived from the swap's own
-            // accounting, and any floor derived instead from an onchain quote
-            // would be read from the same pool in the same transaction, so an
-            // attacker moving that pool moves the floor with it.
-            if (r.fallbackMinOut > uniMin) uniMin = r.fallbackMinOut;
+            // (c) The caller's own floor, scaled to the slice the planner
+            // actually produced. `fallbackMinOut` is priced for the ENTIRE
+            // input routing through Uniswap, so the pro-rata share is the
+            // caller's own full-order unit rate applied to `fbAmount`.
+            //
+            // Scaling DOWN is what makes this sound, and it is the mirror of
+            // the unsound scale-up reverted earlier: the full-order unit rate
+            // is the WORST one a concave pool offers, so for any slice
+            // `fbAmount <= totalIn` the scaled floor sits at or below the
+            // honest output. An ABSOLUTE floor cannot do this — the slice size
+            // is chosen by the planner, not the caller, so a venue coming
+            // alive between the caller's offchain simulation and execution
+            // shrinks the slice and an absolute floor priced for the larger
+            // predicted slice would revert a BETTER split.
+            //
+            // `totalIn >= fbAmount > 0` here, so the division is safe, and
+            // `mulDiv` gives a 512-bit intermediate because multileg leg
+            // amounts are not uint128-bounded. Flooring keeps the floor from
+            // tripping on its own rounding.
+            uint256 callerMin = Math.mulDiv(r.fallbackMinOut, fbAmount, totalIn);
+            if (callerMin > uniMin) uniMin = callerMin;
             uint256 prevBal = IERC20(tokenOut_).balanceOf(recipient_);
             UniV3Router.swapExactIn(
                 r.tokenIn_,

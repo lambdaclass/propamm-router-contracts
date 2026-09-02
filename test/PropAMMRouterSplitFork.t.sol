@@ -106,11 +106,10 @@ contract PropAMMRouterSplitForkTest is Test {
         // transaction) and is used here only to exercise the parameter end to
         // end — see `swapSplitV1`'s NatSpec.
         //
-        // The floor is sized off Fermi's LIVE quote, never a pinned cap: this
-        // file discovers Fermi's state rather than pinning it, and an absolute
-        // floor priced for a remainder larger than the planner actually leaves
-        // is a false negative waiting to happen (see `swapSplitV1`'s note on
-        // `fallbackMinOut` and planner-chosen slice sizes).
+        // Priced for the FULL order, which the router pro-rates to whatever
+        // remainder the planner leaves. Nothing about Fermi's capacity is
+        // assumed, so this cannot become a false negative as its inventory
+        // moves (see `swapSplitV1`'s note on `fallbackMinOut`).
         uint256 fallbackMinOut = _remainderFloor();
 
         vm.prank(taker);
@@ -323,28 +322,17 @@ contract PropAMMRouterSplitForkTest is Test {
         }
     }
 
-    /// @dev A floor for the coalesced Uniswap remainder that cannot produce a
-    /// false negative, derived entirely from live state.
+    /// @dev The caller-side floor for the coalesced Uniswap remainder.
     ///
-    /// Fermi's quote at `SPLIT_AMOUNT` saturates at its inventory ceiling, so
-    /// `_usdcImpliedBy(ceiling)` converts that ceiling back into the USDC it
-    /// could actually fill, at Fermi's own unsaturated small-size rate. The
-    /// planner never hands a venue more than it fills — a saturated probe point
-    /// is declined and resolved downward — so the remainder it leaves is
-    /// `>= SPLIT_AMOUNT - impliedFill`. Uniswap's output is monotone in input,
-    /// so a floor priced for that LOWER bound is satisfiable for the actual,
-    /// possibly larger, remainder. Returns 0 when Fermi's live inventory
-    /// covers the whole order, in which case there is no remainder leg and the
-    /// floor is moot.
+    /// `fallbackMinOut` is priced for the FULL order routing through Uniswap
+    /// and pro-rated by the router to whatever slice actually forms, so this
+    /// needs no guess about Fermi's capacity and cannot bit-rot as its
+    /// inventory moves — which is the point, in a file that discovers Fermi's
+    /// state rather than pinning it. A real integrator quotes this offchain;
+    /// an onchain quote is used here only to exercise the parameter end to
+    /// end and is NOT sandwich-proof (same pool, same transaction).
     function _remainderFloor() internal returns (uint256) {
-        uint256 ceiling = _quoteFermiOrZero(SPLIT_AMOUNT);
-        if (ceiling == 0) return 0; // Fermi cannot price this size at all
-
-        uint256 impliedFill = _usdcImpliedBy(ceiling);
-        if (impliedFill >= SPLIT_AMOUNT) return 0; // absorbs the order; no remainder
-
-        uint256 minRemainder = SPLIT_AMOUNT - impliedFill;
-        (uint256 remainderQuote,) = router.quoteVenueV1(UNISWAP_ROUTER_02, USDC, WETH, minRemainder);
-        return remainderQuote * (BPS - FALLBACK_TOLERANCE_BPS) / BPS;
+        (uint256 fullOrderQuote,) = router.quoteVenueV1(UNISWAP_ROUTER_02, USDC, WETH, SPLIT_AMOUNT);
+        return fullOrderQuote * (BPS - FALLBACK_TOLERANCE_BPS) / BPS;
     }
 }
