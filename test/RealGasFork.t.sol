@@ -2,6 +2,7 @@
 pragma solidity ^0.8.35;
 
 import {console2} from "forge-std/console2.sol";
+import {Vm} from "forge-std/Vm.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -285,6 +286,217 @@ contract RealGasForkTest is ForkGate {
         for (uint256 n = 3; n <= 4; n++) {
             console2.log("  multileg  per added real leg  ", int256(ml[n]) - int256(ml[n - 1]));
             console2.log("  selected  per added real quote", int256(sel[n]) - int256(sel[n - 1]));
+        }
+    }
+
+    // ---- simulated future: several venues publishing in the same block ----
+    //
+    // Today at most one venue has a fresh PrioUpdateRegistry lane at any
+    // block, which caps a real split at one prop leg. The intended steady
+    // state is several venues publishing often enough to be simultaneously
+    // quotable. To measure THAT, patch each venue's lane timestamp forward to
+    // the current block instead of warping time back to the lane -- the exact
+    // inverse of `_candidates`.
+    //
+    // Why this keeps the gas honest: every contract involved is the real
+    // deployed bytecode and every code path is the production one. The only
+    // difference from a genuinely fresh lane is the value of one storage word,
+    // and a freshness comparison costs the same gas whichever way it resolves.
+    // What is NOT honest is the PRICE: each venue quotes off its last
+    // published lane, which may be hours stale, so the routing DECISION here
+    // is not economically meaningful. Gas is; price is not.
+
+    /// @dev Replace the 4-byte window at byte offset `off` of `word` with `val`.
+    function _patchWindow(bytes32 word, uint256 off, uint32 val) internal pure returns (bytes32) {
+        uint256 shift = (28 - off) * 8;
+        uint256 mask = uint256(0xFFFFFFFF) << shift;
+        return bytes32((uint256(word) & ~mask) | (uint256(val) << shift));
+    }
+
+    /// @dev Make `v` quotable AT THE CURRENT TIMESTAMP by ageing its lane
+    /// forward. Tries each plausible timestamp window in the registry slots the
+    /// venue's own quote reads, keeping the first patch that works and undoing
+    /// the ones that do not. Slots already locked in by an earlier venue are
+    /// never restored, so venues cannot clobber each other.
+    function _forceFresh(address v, bytes32[] memory locked, uint256 lockedN)
+        internal
+        returns (bool ok, bytes32 usedSlot)
+    {
+        if (_quotes(v)) return (true, bytes32(0));
+
+        vm.record();
+        _quotes(v);
+        (bytes32[] memory reads,) = vm.accesses(PRIO_UPDATE_REGISTRY);
+        uint32 now32 = uint32(block.timestamp);
+
+        for (uint256 i = 0; i < reads.length; i++) {
+            bytes32 orig = vm.load(PRIO_UPDATE_REGISTRY, reads[i]);
+            bool isLocked = false;
+            for (uint256 k = 0; k < lockedN; k++) {
+                if (locked[k] == reads[i]) isLocked = true;
+            }
+            for (uint256 off = 0; off <= 28; off++) {
+                uint32 c = uint32(bytes4(orig << (off * 8)));
+                if (c == 0 || c > block.timestamp) continue;
+                if (block.timestamp - c > ONE_YEAR) continue;
+                vm.store(PRIO_UPDATE_REGISTRY, reads[i], _patchWindow(orig, off, now32));
+                if (_quotes(v)) return (true, reads[i]);
+                if (!isLocked) vm.store(PRIO_UPDATE_REGISTRY, reads[i], orig);
+            }
+        }
+        return (false, bytes32(0));
+    }
+
+    /// @dev Force as many venues fresh as possible at the current timestamp.
+    function _forceAllFresh() internal returns (uint256 n, address[] memory fresh) {
+        bytes32[] memory locked = new bytes32[](6);
+        uint256 lockedN = 0;
+        address[] memory buf = new address[](6);
+        for (uint256 i = 0; i < 6; i++) {
+            (bool ok, bytes32 slot) = _forceFresh(VENUES[i], locked, lockedN);
+            if (ok) {
+                buf[n++] = VENUES[i];
+                if (slot != bytes32(0)) locked[lockedN++] = slot;
+            }
+        }
+        fresh = new address[](n);
+        for (uint256 i = 0; i < n; i++) {
+            fresh[i] = buf[i];
+        }
+    }
+
+    function _quoteOrZero(address v, uint256 amt) internal returns (uint256 out) {
+        try router.quoteVenueV1(v, USDC, WETH, amt) returns (uint256 o, address) {
+            out = o;
+        } catch {
+            out = 0;
+        }
+    }
+
+    function test_simulateMultiVenueQuotable() public {
+        console2.log("fork block", block.number);
+        console2.log("venues quotable before patching:", _liveCount());
+        (uint256 n, address[] memory fresh) = _forceAllFresh();
+        console2.log("venues quotable AFTER patching: ", n);
+        console2.log("");
+
+        uint256[5] memory ladder = [uint256(1_000e6), 2_500e6, 5_000e6, 10_000e6, 25_000e6];
+        console2.log("=== WETH out per venue, by order size (0 = cannot price) ===");
+        for (uint256 i = 0; i < n; i++) {
+            console2.log("venue", fresh[i]);
+            for (uint256 j = 0; j < 5; j++) {
+                console2.log("   size / out", ladder[j], _quoteOrZero(fresh[i], ladder[j]));
+            }
+        }
+        console2.log("=== Uniswap V3 reference ===");
+        for (uint256 j = 0; j < 5; j++) {
+            console2.log("   size / out", ladder[j], _quoteOrZero(UNISWAP_ROUTER_02, ladder[j]));
+        }
+        console2.log("");
+        console2.log("=== how many venues can price each size ===");
+        for (uint256 j = 0; j < 5; j++) {
+            uint256 c = 0;
+            for (uint256 i = 0; i < n; i++) {
+                if (_quoteOrZero(fresh[i], ladder[j]) > 0) c++;
+            }
+            console2.log("   size / venues", ladder[j], c);
+        }
+    }
+
+    uint256 constant MLEG = 2_500e6; // every fresh venue can price this size
+
+    function _mlMulti(address[] memory vs, uint256 n) internal returns (uint256 g) {
+        IPropAMMRouter.Leg[] memory legs = new IPropAMMRouter.Leg[](n);
+        for (uint256 i = 0; i < n; i++) {
+            legs[i] = IPropAMMRouter.Leg({venue: vs[i], amountIn: MLEG, minOut: 0});
+        }
+        vm.startPrank(taker);
+        uint256 st = gasleft();
+        router.swapMultiLegV1(legs, USDC, WETH, 0, 0, taker, block.timestamp + 300);
+        g = st - gasleft();
+        vm.stopPrank();
+    }
+
+    function _selMulti(address[] memory vs, uint256 n) internal returns (uint256 g) {
+        address[] memory sub = new address[](n);
+        for (uint256 i = 0; i < n; i++) {
+            sub[i] = vs[i];
+        }
+        vm.startPrank(taker);
+        uint256 st = gasleft();
+        router.swapViaSelectedVenuesV1(sub, USDC, WETH, MLEG, 0, taker, block.timestamp + 300);
+        g = st - gasleft();
+        vm.stopPrank();
+    }
+
+    /// @dev Returns gas and the number of Swapped events, which is the number
+    /// of legs that actually executed -- the split's rate cutoff decides that,
+    /// not the caller.
+    function _splitMulti(address[] memory vs, uint256 n) internal returns (uint256 g, uint256 legs) {
+        address[] memory sub = new address[](n);
+        uint256[] memory h = new uint256[](n);
+        for (uint256 i = 0; i < n; i++) {
+            sub[i] = vs[i];
+            h[i] = MLEG;
+        }
+        vm.recordLogs();
+        vm.startPrank(taker);
+        uint256 st = gasleft();
+        router.swapSplitV1(sub, h, USDC, WETH, MLEG * n, 0, 0, 8, taker, block.timestamp + 300);
+        g = st - gasleft();
+        vm.stopPrank();
+        Vm.Log[] memory lg = vm.getRecordedLogs();
+        bytes32 topic = keccak256("Swapped(address,address,address,uint256,uint256,address,address)");
+        for (uint256 i = 0; i < lg.length; i++) {
+            if (lg[i].emitter == address(router) && lg[i].topics[0] == topic) legs++;
+        }
+    }
+
+    function test_realMultiVenueGas() public {
+        (uint256 nf, address[] memory fresh) = _forceAllFresh();
+        console2.log("fork block", block.number);
+        console2.log("venues forced fresh:", nf);
+        console2.log("leg size (USDC 6dp)", MLEG);
+        require(nf >= 4, "need 4 fresh venues");
+        console2.log("");
+
+        // warm every shape at every count
+        for (uint256 n = 2; n <= 4; n++) {
+            _forceAllFresh();
+            _mlMulti(fresh, n);
+            _forceAllFresh();
+            _selMulti(fresh, n);
+            _forceAllFresh();
+            _splitMulti(fresh, n);
+        }
+
+        uint256[5] memory ml;
+        uint256[5] memory sel;
+        uint256[5] memory sp;
+        uint256[5] memory spLegs;
+        for (uint256 n = 2; n <= 4; n++) {
+            _forceAllFresh();
+            ml[n] = _mlMulti(fresh, n);
+            _forceAllFresh();
+            sel[n] = _selMulti(fresh, n);
+            _forceAllFresh();
+            (sp[n], spLegs[n]) = _splitMulti(fresh, n);
+        }
+
+        console2.log("=== REAL, DISTINCT VENUES ===");
+        for (uint256 n = 2; n <= 4; n++) {
+            console2.log("--- venues:", n);
+            console2.log("  swapMultiLegV1 (n real legs) ", ml[n]);
+            console2.log("  swapViaSelectedVenuesV1      ", sel[n]);
+            console2.log("  swapSplitV1                  ", sp[n]);
+            console2.log("     ^ legs actually executed  ", spLegs[n]);
+        }
+        console2.log("");
+        console2.log("=== MARGINALS ===");
+        for (uint256 n = 3; n <= 4; n++) {
+            console2.log("  multileg per real leg  ", int256(ml[n]) - int256(ml[n - 1]));
+            console2.log("  selected per real quote", int256(sel[n]) - int256(sel[n - 1]));
+            console2.log("  split    per real venue", int256(sp[n]) - int256(sp[n - 1]));
         }
     }
 }
