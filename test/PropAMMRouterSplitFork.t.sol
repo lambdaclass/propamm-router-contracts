@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.35;
 
-import {Test} from "forge-std/Test.sol";
+import {ForkGate} from "./helpers/ForkGate.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -37,7 +37,7 @@ import {PRIO_UPDATE_REGISTRY, IPrioUpdateRegistry} from "../test/interfaces/IPri
 /// published recently (not guaranteed even with a live RPC — see above).
 /// Run locally:
 ///   RPC_URL=<mainnet rpc> forge test --match-contract PropAMMRouterSplitForkTest -vv
-contract PropAMMRouterSplitForkTest is Test {
+contract PropAMMRouterSplitForkTest is ForkGate {
     address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
     address constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
     address constant UNISWAP_ROUTER_02 = 0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45;
@@ -65,8 +65,11 @@ contract PropAMMRouterSplitForkTest is Test {
     address taker = makeAddr("taker");
 
     function setUp() public {
-        vm.skip(true); // CI: no RPC / no guarantee a lane is quotable. Delete this line to run locally.
-        vm.createSelectFork(vm.envOr("RPC_URL", string("https://ethereum-rpc.publicnode.com")));
+        // Skips without RPC_URL; no file edit needed to run locally. A lane
+        // that is not currently quotable is handled downstream by
+        // `_ensureFermiQuotable` and the discovery helpers, which skip rather
+        // than fail on market conditions.
+        if (!_selectForkOrSkip()) return;
 
         AccessManager manager = new AccessManager(address(this));
         PropAMMRouter impl = new PropAMMRouter();
