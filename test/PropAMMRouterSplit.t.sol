@@ -4,14 +4,19 @@ pragma solidity ^0.8.35;
 import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
+import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IPropAMMRouter} from "../src/interfaces/IPropAMMRouter.sol";
 import {PropAMMRouter} from "../src/PropAMMRouter.sol";
+import {IWETH} from "../src/interfaces/IWETH.sol";
+import {ETH_SENTINEL, WETH} from "../src/libraries/Constants.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockOperatorERC20} from "./mocks/MockOperatorERC20.sol";
 import {MockCappedPropAMM} from "./mocks/MockCappedPropAMM.sol";
 import {MockPartialFillPropAMM} from "./mocks/MockPartialFillPropAMM.sol";
 import {MockThievingQuoteVenue} from "./mocks/MockThievingQuoteVenue.sol";
 import {MockLinearSwapRouter, MockLinearQuoterV2} from "./mocks/MockLinearUniswap.sol";
+import {MockWETH} from "./mocks/MockWETH.sol";
 import {FrontendFees} from "../src/libraries/FrontendFees.sol";
 import "../src/libraries/Errors.sol";
 
@@ -539,5 +544,128 @@ contract PropAMMRouterSplitTest is Test {
         if (cap == 0 && rate > 10_000) {
             assertEq(amountOut, amountIn * rate / 10_000, "uncapped above-market venue must capture the whole order");
         }
+    }
+
+    //-----------------//
+    // ETH sentinel    //
+    //-----------------//
+
+    /// @dev Etches MockWETH's code at the hardcoded mainnet WETH address and
+    /// deals it ETH to service withdrawals. Mirrors
+    /// `PropAMMRouterMultiLegTest._etchWETH`. `vm.etch` copies code only
+    /// (not storage), so the etched account's ERC20 metadata is empty —
+    /// harmless, since the tests below never read name/symbol/decimals.
+    function _etchWETH() internal {
+        MockWETH impl = new MockWETH();
+        vm.etch(WETH, address(impl).code);
+        vm.deal(WETH, 100 ether);
+    }
+
+    function test_split_ethIn_wrapsAndVenueTakesWholeOrder() public {
+        // Uncapped x1.2 venue: exactly like the fuzz capability case, it
+        // beats the 1:1 fallback outright and takes the whole order as one
+        // leg. `_pullFunds` wraps the incoming ETH to WETH before any
+        // quoting happens, so this also exercises the `tokenOut_ = ...`
+        // resolution feeding every quote in the split.
+        _etchWETH();
+        MockCappedPropAMM a = _newVenue(10, 12, 0, MockCappedPropAMM.CapMode.HardRevert);
+        vm.deal(user, 100e18);
+
+        address[] memory venues = new address[](1);
+        venues[0] = address(a);
+
+        vm.prank(user);
+        uint256 amountOut = router.swapSplitV1{value: 100e18}(
+            venues, _noHints(), ETH_SENTINEL, address(tokenOut), 100e18, 0, 8, user, block.timestamp + 1
+        );
+
+        assertEq(amountOut, 120e18);
+        assertEq(IERC20(WETH).balanceOf(address(a)), 100e18, "venue did not receive the wrapped ETH");
+        assertEq(tokenOut.balanceOf(user), 120e18);
+        assertEq(address(router).balance, 0, "router retained ETH");
+        assertEq(IERC20(WETH).balanceOf(address(router)), 0, "router retained WETH");
+        _assertRouterEmpty();
+    }
+
+    function test_split_ethIn_wrongValueReverts() public {
+        _etchWETH();
+        MockCappedPropAMM a = _newVenue(10, 12, 0, MockCappedPropAMM.CapMode.HardRevert);
+        vm.deal(user, 10 ether);
+
+        address[] memory venues = new address[](1);
+        venues[0] = address(a);
+
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(InvalidValue.selector, 5 ether, 3 ether));
+        router.swapSplitV1{value: 3 ether}(
+            venues, _noHints(), ETH_SENTINEL, address(tokenOut), 5 ether, 0, 8, user, block.timestamp + 1
+        );
+    }
+
+    function test_split_ethOut_unwrapsAndSendsRawETH() public {
+        // The venue must deliver WETH (the resolved tokenOut_), so it is
+        // funded with WETH directly rather than through `_newVenue` (which
+        // mints the ERC20 mock `tokenOut`). Asserts the user's NATIVE
+        // balance increases by the full amount, not a WETH balance standing
+        // in for it, and that the router ends up holding neither.
+        _etchWETH();
+        MockCappedPropAMM a = new MockCappedPropAMM(10, 12);
+        vm.deal(address(this), 1_000e18);
+        IWETH(WETH).deposit{value: 1_000e18}();
+        IERC20(WETH).transfer(address(a), 1_000e18);
+        vm.prank(owner);
+        router.addVenue(address(a));
+        _fundUser(100e18);
+
+        address[] memory venues = new address[](1);
+        venues[0] = address(a);
+
+        uint256 balBefore = user.balance;
+        vm.prank(user);
+        uint256 amountOut = router.swapSplitV1(
+            venues, _noHints(), address(tokenIn), ETH_SENTINEL, 100e18, 0, 8, user, block.timestamp + 1
+        );
+
+        assertEq(amountOut, 120e18);
+        assertEq(user.balance - balBefore, 120e18, "user did not receive the full native ETH amount");
+        assertEq(address(router).balance, 0, "router retained ETH");
+        assertEq(IERC20(WETH).balanceOf(address(router)), 0, "router retained WETH");
+        _assertRouterEmpty();
+    }
+
+    //------------------//
+    // Validation gaps  //
+    //------------------//
+
+    function test_split_revertsPastDeadline() public {
+        MockCappedPropAMM a = _newVenue(10, 12, 0, MockCappedPropAMM.CapMode.HardRevert);
+        _fundUser(100e18);
+        address[] memory venues = new address[](1);
+        venues[0] = address(a);
+
+        vm.prank(user);
+        vm.expectRevert(Expired.selector);
+        router.swapSplitV1(
+            venues, _noHints(), address(tokenIn), address(tokenOut), 100e18, 0, 8, user, block.timestamp - 1
+        );
+    }
+
+    function test_split_revertsWhenPaused() public {
+        // Fund the user BEFORE pausing so the pause check is the only
+        // reachable revert — an unfunded account would satisfy a bare
+        // `expectRevert()` via a plain ERC20 allowance failure instead.
+        MockCappedPropAMM a = _newVenue(10, 12, 0, MockCappedPropAMM.CapMode.HardRevert);
+        _fundUser(100e18);
+        vm.prank(owner);
+        router.pause();
+
+        address[] memory venues = new address[](1);
+        venues[0] = address(a);
+
+        vm.prank(user);
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        router.swapSplitV1(
+            venues, _noHints(), address(tokenIn), address(tokenOut), 100e18, 0, 8, user, block.timestamp + 1
+        );
     }
 }
