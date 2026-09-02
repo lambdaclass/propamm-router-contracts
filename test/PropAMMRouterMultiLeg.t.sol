@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.35;
 
-import {Test} from "forge-std/Test.sol";
+import {Test, Vm} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
@@ -465,5 +465,48 @@ contract PropAMMRouterMultiLegTest is Test {
         assertEq(tokenIn.balanceOf(user), 0);
         assertEq(tokenIn.balanceOf(address(router)), 0); // input fully routed
         assertEq(tokenOut.balanceOf(user), expected);
+    }
+
+    //--------------------------------------//
+    // Event attribution (review finding)   //
+    //--------------------------------------//
+
+    /// @dev keccak256("Swapped(address,address,address,uint256,uint256,address,address)")
+    function _swappedTopic() internal pure returns (bytes32) {
+        return keccak256("Swapped(address,address,address,uint256,uint256,address,address)");
+    }
+
+    function test_swapMultiLegWithFee_swappedEventsNameTheRealRecipient() public {
+        // The fee variants route legs to the ROUTER so the fee can be skimmed
+        // from the aggregate before forwarding. That is an execution detail:
+        // the `Swapped` events must still name the user, or every indexer
+        // attributing volume by `recipient` books these swaps to the router.
+        _fundUser(100e18);
+
+        IPropAMMRouter.Leg[] memory legs = new IPropAMMRouter.Leg[](2);
+        legs[0] = _leg(address(venueA), 60e18, 0);
+        legs[1] = _leg(address(venueB), 40e18, 0);
+
+        vm.recordLogs();
+        vm.prank(user);
+        router.swapMultiLegWithFeeV1(
+            legs,
+            address(tokenIn),
+            address(tokenOut),
+            0,
+            user,
+            block.timestamp + 1,
+            IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
+        );
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        uint256 seen = 0;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].emitter != address(router) || logs[i].topics[0] != _swappedTopic()) continue;
+            (,, address recipient,) = abi.decode(logs[i].data, (uint256, uint256, address, address));
+            assertEq(recipient, user, "Swapped.recipient must be the user, not the router");
+            seen++;
+        }
+        assertEq(seen, 2, "one Swapped per executed leg");
     }
 }

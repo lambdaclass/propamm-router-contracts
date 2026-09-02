@@ -65,3 +65,7 @@ error TooManyVenues(uint256 count);
 /// phase differs from the post-pull snapshot — some venue's quote consumed
 /// in-flight user funds (R1 invariant, see the design spec).
 error QuoteBalanceInvariantViolated();
+/// @notice Thrown when a split's `maxLegs` bound is zero. Distinct from
+/// `InvalidLegCount`, which bounds the number of legs actually supplied to a
+/// multileg call.
+error InvalidMaxLegs(uint256 maxLegs);

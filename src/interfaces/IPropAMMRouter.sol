@@ -97,6 +97,9 @@ interface IPropAMMRouter {
     /// plus any failed legs through one coalesced Uniswap V3 swap.
     /// @param venues Venues to consider; empty means the whole whitelist
     /// (reverts `TooManyVenues` if the whitelist exceeds MAX_SPLIT_VENUES).
+    /// An EMPTY whitelist is not an error: like a list whose every entry is
+    /// dead or non-whitelisted, it yields no candidates and routes the whole
+    /// order through the coalesced Uniswap swap.
     /// @param probeHints Optional per-venue probe sizes; length MUST be 0 or
     /// `venues.length` (and 0 when `venues` is empty). A zero entry means no
     /// hint. Hints are advisory: each is validated by the same-transaction
@@ -105,6 +108,14 @@ interface IPropAMMRouter {
     /// @param tokenOut The token being bought (or the ETH sentinel).
     /// @param amountIn The exact total input; must fit uint128.
     /// @param amountOutMin The minimum TOTAL `tokenOut` delivered.
+    /// @param fallbackMinOut Floor for the COALESCED Uniswap V3 swap (the
+    /// planned remainder plus any legs that failed at execution time). Zero
+    /// disables it. This is the only per-portion protection available to a
+    /// `swapSplitV1` caller: because the router plans the legs, the caller
+    /// cannot supply explicit fallback legs the way `swapMultiLegV1` allows.
+    /// It MUST be caller-supplied — a floor derived from an onchain quote
+    /// would be quoted against the same pool in the same transaction, so a
+    /// sandwich attacker moving that pool moves the floor with it.
     /// @param maxLegs Maximum number of propAMM legs (≥ 1). Only the
     /// automatically-appended coalesced remainder leg is exempt from it — a
     /// `fallbackSwapRouter` address the caller lists explicitly in `venues`
@@ -119,6 +130,7 @@ interface IPropAMMRouter {
         address tokenOut,
         uint256 amountIn,
         uint256 amountOutMin,
+        uint256 fallbackMinOut,
         uint256 maxLegs,
         address recipient,
         uint256 deadline

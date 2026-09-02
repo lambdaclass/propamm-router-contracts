@@ -80,8 +80,9 @@ contract PropAMMRouterSplitForkTest is Test {
         uint256[] memory noHints = new uint256[](0);
 
         vm.prank(taker);
-        uint256 amountOut =
-            router.swapSplitV1(venues, noHints, USDC, WETH, SPLIT_AMOUNT, allUniQuote, 8, taker, block.timestamp + 120);
+        uint256 amountOut = router.swapSplitV1(
+            venues, noHints, USDC, WETH, SPLIT_AMOUNT, allUniQuote, 0, 8, taker, block.timestamp + 120
+        );
 
         assertGe(amountOut, allUniQuote, "split should beat or match all-uniswap");
         assertEq(IERC20(WETH).balanceOf(taker), amountOut);

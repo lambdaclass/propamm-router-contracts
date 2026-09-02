@@ -22,8 +22,23 @@ library SplitPlanner {
     uint256 internal constant SATURATION_TOLERANCE_BPS = 100;
     uint256 internal constant BPS = 10_000;
 
+    /// @notice How many extra halvings the router may spend looking for a
+    /// probe size a saturated venue actually fills. Two equal probe points
+    /// mean the venue is saturated at BOTH, so its capacity is somewhere
+    /// below the half point and neither point can be used as a leg size.
+    /// Halving starts at the half point, so four steps reach p/32 of the
+    /// probe size; past that the router declines the venue rather than spend
+    /// more gas or hand it input it will not fill. Worst case for a whole
+    /// split is MAX_SPLIT_VENUES * (2 + MAX_SATURATION_STEPS) quotes, and
+    /// only when every venue is saturated at both of its first two points.
+    uint256 internal constant MAX_SATURATION_STEPS = 4;
+
     /// @notice True when a full-size quote is sublinear vs the half-size
     /// quote beyond τ — the venue's output has hit its inventory ceiling.
+    /// @dev Equality (`outFull == outHalf`) satisfies this, but says something
+    /// stronger: the venue is saturated at the HALF point too, so the half
+    /// point is not a usable leg size either. The router separates that case
+    /// out and probes further down — see `_probeDownToFillable`.
     function isSaturated(uint256 outFull, uint256 outHalf) internal pure returns (bool) {
         return outFull * BPS < 2 * outHalf * (BPS - SATURATION_TOLERANCE_BPS);
     }

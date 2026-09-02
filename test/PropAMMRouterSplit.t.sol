@@ -15,6 +15,7 @@ import {MockOperatorERC20} from "./mocks/MockOperatorERC20.sol";
 import {MockCappedPropAMM} from "./mocks/MockCappedPropAMM.sol";
 import {MockPartialFillPropAMM} from "./mocks/MockPartialFillPropAMM.sol";
 import {MockThievingQuoteVenue} from "./mocks/MockThievingQuoteVenue.sol";
+import {MockThievingQuoterV2} from "./mocks/MockThievingQuoterV2.sol";
 import {MockLinearSwapRouter, MockLinearQuoterV2} from "./mocks/MockLinearUniswap.sol";
 import {MockWETH} from "./mocks/MockWETH.sol";
 import {FrontendFees} from "../src/libraries/FrontendFees.sol";
@@ -71,6 +72,18 @@ contract PropAMMRouterSplitTest is Test {
         uint256 amountOutMin,
         uint256 maxLegs
     ) internal returns (uint256) {
+        return _splitFb(venues, hints, amountIn, amountOutMin, 0, maxLegs);
+    }
+
+    /// @dev `_split` plus an explicit floor on the coalesced Uniswap leg.
+    function _splitFb(
+        address[] memory venues,
+        uint256[] memory hints,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        uint256 fallbackMinOut,
+        uint256 maxLegs
+    ) internal returns (uint256) {
         vm.prank(user);
         return router.swapSplitV1(
             venues,
@@ -79,6 +92,7 @@ contract PropAMMRouterSplitTest is Test {
             address(tokenOut),
             amountIn,
             amountOutMin,
+            fallbackMinOut,
             maxLegs,
             user,
             block.timestamp + 1
@@ -145,14 +159,42 @@ contract PropAMMRouterSplitTest is Test {
         _assertRouterEmpty();
     }
 
-    function test_split_saturatedVenueLosingToUniswapIsCutOff() public {
-        // A saturates so far below the order size that even its half point is
-        // above the cap, so BOTH probe points return the same saturated
-        // output and the surviving candidate's rate (0.96) is worse than
-        // Uniswap's 1.0. This pins the reference-rate CUTOFF: a candidate that
-        // loses to Uniswap gets no leg at all. (It does not pin saturation
-        // detection itself — see
-        // test_split_saturationDetectionKeepsHalfPointLeg for that.)
+    function test_split_belowMarketVenueIsCutOff() public {
+        // A is uncapped and quotes linearly at 0.9 — strictly worse than
+        // Uniswap's 1.0 at every size. This pins the reference-rate CUTOFF on
+        // its own: a candidate that loses to Uniswap gets no leg at all, and
+        // the whole order routes through the fallback.
+        //
+        // Deliberately built WITHOUT a cap: a saturated venue's surviving
+        // candidate is resolved by the downward probe first, which would
+        // entangle two mechanisms in one assertion. Saturation is pinned
+        // separately by test_split_saturationDetectionKeepsHalfPointLeg and
+        // the _probeDownToFillable tests below.
+        MockCappedPropAMM a = _newVenue(10, 9, 0, MockCappedPropAMM.CapMode.HardRevert);
+        _fundUser(250e18);
+
+        address[] memory venues = new address[](1);
+        venues[0] = address(a);
+
+        uint256 amountOut = _split(venues, _noHints(), 250e18, 0, 8);
+
+        assertEq(amountOut, 250e18);
+        assertEq(tokenIn.balanceOf(address(a)), 0, "a below-market venue must get no leg");
+        assertEq(tokenOut.balanceOf(user), 250e18);
+        _assertRouterEmpty();
+    }
+
+    function test_split_downwardProbeRecoversLiquidityFromASaturatedVenue() public {
+        // The scenario the cutoff test used to carry: A pays 1.2 but fills
+        // only 100 of a 250 order, so both probe points (250 and 125) return
+        // its 120 ceiling. Read at the saturated half point its rate is
+        // 120/125 = 0.96, which LOSES the Uniswap cutoff and earns A nothing
+        // — the venue's real 1.2 liquidity is discarded entirely.
+        //
+        // Probing down to 62.5 (under the cap) quotes 75, a true 1.2 rate
+        // that clears the cutoff and wins a leg. The mechanism that stops the
+        // router overpaying a saturated venue also stops it from throwing
+        // that venue's usable liquidity away.
         MockCappedPropAMM a = _newVenue(10, 12, 100e18, MockCappedPropAMM.CapMode.Saturate);
         _fundUser(250e18);
 
@@ -160,13 +202,10 @@ contract PropAMMRouterSplitTest is Test {
         venues[0] = address(a);
 
         uint256 amountOut = _split(venues, _noHints(), 250e18, 0, 8);
-        // quote(250) = cap*1.2 = 120; quote(125) = 120 too (125 > cap ->
-        // saturate). Both points saturated: out(250)=120 == out(125)=120 ->
-        // isSaturated(120, 120) = true -> fill = 125 at out 120 (rate 0.96
-        // < uni 1.0) -> A LOSES to uniswap. Everything routes via uniswap.
-        assertEq(amountOut, 250e18);
-        assertEq(tokenIn.balanceOf(address(a)), 0);
-        assertEq(tokenOut.balanceOf(user), 250e18);
+
+        // A: 62.5 -> 75. Remainder 187.5 -> Uniswap 1:1. Total 262.5.
+        assertEq(tokenIn.balanceOf(address(a)), 62.5e18);
+        assertEq(amountOut, 262.5e18);
         _assertRouterEmpty();
     }
 
@@ -250,7 +289,7 @@ contract PropAMMRouterSplitTest is Test {
         vm.prank(user);
         vm.expectRevert(QuoteBalanceInvariantViolated.selector);
         router.swapSplitV1(
-            venues, _noHints(), address(opIn), address(tokenOut), 100e18, 0, 8, user, block.timestamp + 1
+            venues, _noHints(), address(opIn), address(tokenOut), 100e18, 0, 0, 8, user, block.timestamp + 1
         );
 
         // The whole call rolled back: the user still holds every wei.
@@ -378,7 +417,7 @@ contract PropAMMRouterSplitTest is Test {
         vm.prank(user);
         vm.expectRevert(abi.encodeWithSelector(InsufficientOutput.selector, 121e18, 120e18));
         router.swapSplitV1(
-            venues, _noHints(), address(tokenIn), address(tokenOut), 100e18, 121e18, 8, user, block.timestamp + 1
+            venues, _noHints(), address(tokenIn), address(tokenOut), 100e18, 121e18, 0, 8, user, block.timestamp + 1
         );
         // The whole call rolled back: the user still holds every wei, and the
         // reverted quote/probe phase left no dust in the router.
@@ -404,7 +443,9 @@ contract PropAMMRouterSplitTest is Test {
         address[] memory none = new address[](0);
         vm.prank(user);
         vm.expectRevert(abi.encodeWithSelector(TooManyVenues.selector, 9));
-        router.swapSplitV1(none, _noHints(), address(tokenIn), address(tokenOut), 1e18, 0, 8, user, block.timestamp + 1);
+        router.swapSplitV1(
+            none, _noHints(), address(tokenIn), address(tokenOut), 1e18, 0, 0, 8, user, block.timestamp + 1
+        );
         // Reverted before any fund pull: the user's balance is untouched.
         assertEq(tokenIn.balanceOf(user), 1e18);
         _assertRouterEmpty();
@@ -418,7 +459,7 @@ contract PropAMMRouterSplitTest is Test {
         hints[0] = 1;
         vm.prank(user);
         vm.expectRevert(ArrayLengthMismatch.selector);
-        router.swapSplitV1(none, hints, address(tokenIn), address(tokenOut), 1e18, 0, 8, user, block.timestamp + 1);
+        router.swapSplitV1(none, hints, address(tokenIn), address(tokenOut), 1e18, 0, 0, 8, user, block.timestamp + 1);
         assertEq(tokenIn.balanceOf(user), 1e18);
         _assertRouterEmpty();
     }
@@ -431,7 +472,7 @@ contract PropAMMRouterSplitTest is Test {
         uint256[] memory hints = new uint256[](2);
         vm.prank(user);
         vm.expectRevert(ArrayLengthMismatch.selector);
-        router.swapSplitV1(venues, hints, address(tokenIn), address(tokenOut), 1e18, 0, 8, user, block.timestamp + 1);
+        router.swapSplitV1(venues, hints, address(tokenIn), address(tokenOut), 1e18, 0, 0, 8, user, block.timestamp + 1);
         assertEq(tokenIn.balanceOf(user), 1e18);
         _assertRouterEmpty();
     }
@@ -442,15 +483,19 @@ contract PropAMMRouterSplitTest is Test {
         address[] memory none = new address[](0);
         vm.prank(user);
         vm.expectRevert(abi.encodeWithSelector(AmountTooLarge.selector, huge));
-        router.swapSplitV1(none, _noHints(), address(tokenIn), address(tokenOut), huge, 0, 8, user, block.timestamp + 1);
+        router.swapSplitV1(
+            none, _noHints(), address(tokenIn), address(tokenOut), huge, 0, 0, 8, user, block.timestamp + 1
+        );
     }
 
     function test_split_zeroMaxLegsReverts() public {
         _newVenue(10, 12, 0, MockCappedPropAMM.CapMode.HardRevert);
         address[] memory none = new address[](0);
         vm.prank(user);
-        vm.expectRevert(abi.encodeWithSelector(InvalidLegCount.selector, 0));
-        router.swapSplitV1(none, _noHints(), address(tokenIn), address(tokenOut), 1e18, 0, 0, user, block.timestamp + 1);
+        vm.expectRevert(abi.encodeWithSelector(InvalidMaxLegs.selector, 0));
+        router.swapSplitV1(
+            none, _noHints(), address(tokenIn), address(tokenOut), 1e18, 0, 0, 0, user, block.timestamp + 1
+        );
     }
 
     function test_split_duplicateVenuesDeduped() public {
@@ -493,6 +538,7 @@ contract PropAMMRouterSplitTest is Test {
             address(tokenOut),
             100e18,
             net,
+            0,
             8,
             user,
             block.timestamp + 1,
@@ -528,7 +574,7 @@ contract PropAMMRouterSplitTest is Test {
         // deliver >= amountIn via the fallback, so demand exactly that.
         vm.prank(user);
         uint256 amountOut = router.swapSplitV1(
-            venues, _noHints(), address(tokenIn), address(tokenOut), amountIn, amountIn, 8, user, block.timestamp + 1
+            venues, _noHints(), address(tokenIn), address(tokenOut), amountIn, amountIn, 0, 8, user, block.timestamp + 1
         );
         assertGe(amountOut, amountIn);
         assertEq(tokenIn.balanceOf(address(router)), 0); // nothing stranded
@@ -576,7 +622,7 @@ contract PropAMMRouterSplitTest is Test {
 
         vm.prank(user);
         uint256 amountOut = router.swapSplitV1{value: 100e18}(
-            venues, _noHints(), ETH_SENTINEL, address(tokenOut), 100e18, 0, 8, user, block.timestamp + 1
+            venues, _noHints(), ETH_SENTINEL, address(tokenOut), 100e18, 0, 0, 8, user, block.timestamp + 1
         );
 
         assertEq(amountOut, 120e18);
@@ -598,7 +644,7 @@ contract PropAMMRouterSplitTest is Test {
         vm.prank(user);
         vm.expectRevert(abi.encodeWithSelector(InvalidValue.selector, 5 ether, 3 ether));
         router.swapSplitV1{value: 3 ether}(
-            venues, _noHints(), ETH_SENTINEL, address(tokenOut), 5 ether, 0, 8, user, block.timestamp + 1
+            venues, _noHints(), ETH_SENTINEL, address(tokenOut), 5 ether, 0, 0, 8, user, block.timestamp + 1
         );
     }
 
@@ -623,7 +669,7 @@ contract PropAMMRouterSplitTest is Test {
         uint256 balBefore = user.balance;
         vm.prank(user);
         uint256 amountOut = router.swapSplitV1(
-            venues, _noHints(), address(tokenIn), ETH_SENTINEL, 100e18, 0, 8, user, block.timestamp + 1
+            venues, _noHints(), address(tokenIn), ETH_SENTINEL, 100e18, 0, 0, 8, user, block.timestamp + 1
         );
 
         assertEq(amountOut, 120e18);
@@ -646,7 +692,7 @@ contract PropAMMRouterSplitTest is Test {
         vm.prank(user);
         vm.expectRevert(Expired.selector);
         router.swapSplitV1(
-            venues, _noHints(), address(tokenIn), address(tokenOut), 100e18, 0, 8, user, block.timestamp - 1
+            venues, _noHints(), address(tokenIn), address(tokenOut), 100e18, 0, 0, 8, user, block.timestamp - 1
         );
     }
 
@@ -665,7 +711,221 @@ contract PropAMMRouterSplitTest is Test {
         vm.prank(user);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         router.swapSplitV1(
-            venues, _noHints(), address(tokenIn), address(tokenOut), 100e18, 0, 8, user, block.timestamp + 1
+            venues, _noHints(), address(tokenIn), address(tokenOut), 100e18, 0, 0, 8, user, block.timestamp + 1
         );
+    }
+
+    //--------------------------------------//
+    // Quote integrity (review findings)    //
+    //--------------------------------------//
+
+    function test_split_partialFillOverReportingVenueIsRejected() public {
+        // A implements IPropAMMPartialFill but violates its "fillableAmountIn
+        // MUST be <= amountIn" requirement, reporting DOUBLE the order with
+        // the amountOut for that doubled fill. Clamping the fill without
+        // rescaling the output would read A's rate as 2.4 (vs its real 1.2),
+        // rank it first, hand it the whole order at an unmeetable minOut, and
+        // starve B — whose 1.5 is the best real rate available.
+        MockPartialFillPropAMM a = new MockPartialFillPropAMM(10, 12);
+        a.setOverReportFactor(2);
+        tokenOut.mint(address(a), 1_000_000e18);
+        vm.prank(owner);
+        router.addVenue(address(a));
+        MockCappedPropAMM b = _newVenue(10, 15, 0, MockCappedPropAMM.CapMode.HardRevert);
+        _fundUser(100e18);
+
+        address[] memory venues = new address[](2);
+        venues[0] = address(a);
+        venues[1] = address(b);
+
+        uint256 amountOut = _split(venues, _noHints(), 100e18, 0, 8);
+
+        // A's quote is discarded outright, so B takes the whole order at 1.5.
+        assertEq(amountOut, 150e18);
+        assertEq(tokenIn.balanceOf(address(b)), 100e18, "B must not be starved by an over-reported quote");
+        assertEq(tokenIn.balanceOf(address(a)), 0, "over-reporting venue must get no leg");
+        _assertRouterEmpty();
+    }
+
+    function test_split_partialFillExtensionHonorsProbeHint() public {
+        // A is uncapped, so left to itself it reports the whole order as
+        // fillable and takes it. The caller's hint bounds its exposure to 25:
+        // the hint must reach `quotePartialFill`, not just the two-point
+        // probe. Total output is LOWER than the unhinted plan on purpose —
+        // the hint is the caller's instruction, not an optimization.
+        MockPartialFillPropAMM a = new MockPartialFillPropAMM(10, 12);
+        tokenOut.mint(address(a), 1_000_000e18);
+        vm.prank(owner);
+        router.addVenue(address(a));
+        MockCappedPropAMM b = _newVenue(10, 11, 0, MockCappedPropAMM.CapMode.HardRevert);
+        _fundUser(100e18);
+
+        address[] memory venues = new address[](2);
+        venues[0] = address(a);
+        venues[1] = address(b);
+        uint256[] memory hints = new uint256[](2);
+        hints[0] = 25e18;
+
+        uint256 amountOut = _split(venues, hints, 100e18, 0, 8);
+
+        // A: 25 -> 30 (x1.2). B: 75 -> 82.5 (x1.1). Total 112.5.
+        assertEq(tokenIn.balanceOf(address(a)), 25e18, "hint must bound the partial-fill venue's leg");
+        assertEq(tokenIn.balanceOf(address(b)), 75e18);
+        assertEq(amountOut, 112.5e18);
+        _assertRouterEmpty();
+    }
+
+    function test_split_bothProbePointsSaturatedProbesDownForFillableSize() public {
+        // A pays x3 but fills only 40, saturating above it. Order = 100, so
+        // BOTH the full (100) and half (50) probes return the same ceiling
+        // output of 120 — the half point is saturated too. Stepping down once
+        // more finds 25, which is under the cap and quotes strictly below the
+        // ceiling, so 25 is a size A demonstrably fills.
+        //
+        // Decisive by construction: sizing A at the saturated half point
+        // hands it 50 while it only fills 40, and A KEEPS the unfilled 10
+        // (see MockCappedPropAMM.swap in Saturate mode). That plan delivers
+        // 120 + 50*2 = 220; sizing A at a fillable 25 delivers 75 + 75*2 =
+        // 225, because the 25 that A cannot fill earns B's rate instead.
+        MockCappedPropAMM a = _newVenue(10, 30, 40e18, MockCappedPropAMM.CapMode.Saturate);
+        MockCappedPropAMM b = _newVenue(10, 20, 0, MockCappedPropAMM.CapMode.HardRevert);
+        _fundUser(100e18);
+
+        address[] memory venues = new address[](2);
+        venues[0] = address(a);
+        venues[1] = address(b);
+
+        uint256 amountOut = _split(venues, _noHints(), 100e18, 0, 8);
+
+        assertEq(tokenIn.balanceOf(address(a)), 25e18, "A must only be handed a size it fills");
+        assertEq(tokenIn.balanceOf(address(b)), 75e18);
+        assertEq(amountOut, 225e18);
+        _assertRouterEmpty();
+    }
+
+    function test_split_unsizeableSaturatedVenueGetsNoLeg() public {
+        // A's cap (1) is so far below the order (100) that every probe in the
+        // downward budget still returns its ceiling output: the router can
+        // never establish a size A actually fills. It must then decline A
+        // rather than hand it a leg whose unfilled excess A would keep.
+        //
+        // This is the conservative branch of the policy: A's saturated quote
+        // looks attractive (its ceiling beats Uniswap outright, which is the
+        // only reason it survives the reference cutoff at all), and declining
+        // it costs output. The router still declines, because the alternative
+        // is paying a venue for input it will not fill.
+        MockCappedPropAMM a = _newVenue(1, 1000, 1e18, MockCappedPropAMM.CapMode.Saturate);
+        _fundUser(100e18);
+
+        address[] memory venues = new address[](1);
+        venues[0] = address(a);
+
+        uint256 amountOut = _split(venues, _noHints(), 100e18, 0, 8);
+
+        assertEq(tokenIn.balanceOf(address(a)), 0, "unsizeable venue must be handed nothing");
+        assertEq(amountOut, 100e18, "whole order routes through the fallback at 1:1");
+        _assertRouterEmpty();
+    }
+
+    function test_split_r1InvariantBracketsWaterfallReferenceQuotes() public {
+        // The R1 invariant must cover EVERY quote taken while the router
+        // holds the pulled funds, including `_waterfall`'s Uniswap reference
+        // quotes. The candidate probes here go to a propAMM, so the thieving
+        // quoter is reached only from `_waterfall`.
+        MockOperatorERC20 opIn = new MockOperatorERC20("OpIn", "OPIN");
+        MockThievingQuoterV2 thief = new MockThievingQuoterV2(address(opIn));
+        opIn.setOperator(address(thief));
+
+        PropAMMRouter impl = new PropAMMRouter();
+        bytes memory data = abi.encodeCall(PropAMMRouter.initialize, (address(uni), address(thief), address(manager)));
+        PropAMMRouter r = PropAMMRouter(payable(address(new ERC1967Proxy(address(impl), data))));
+
+        MockCappedPropAMM a = new MockCappedPropAMM(10, 12);
+        tokenOut.mint(address(a), 1_000_000e18);
+        vm.prank(owner);
+        r.addVenue(address(a));
+
+        opIn.mint(user, 100e18);
+        vm.prank(user);
+        opIn.approve(address(r), 100e18);
+
+        address[] memory venues = new address[](1);
+        venues[0] = address(a);
+
+        vm.prank(user);
+        vm.expectRevert(QuoteBalanceInvariantViolated.selector);
+        r.swapSplitV1(venues, _noHints(), address(opIn), address(tokenOut), 100e18, 0, 0, 8, user, block.timestamp + 1);
+
+        assertEq(opIn.balanceOf(user), 100e18);
+        assertEq(opIn.balanceOf(address(r)), 0);
+    }
+
+    function test_split_emptyWhitelistRoutesToFallback() public {
+        // No venues whitelisted and none named: economically identical to
+        // naming a list whose every entry is dead, which routes the whole
+        // order through Uniswap. Both must behave the same way.
+        _fundUser(100e18);
+        address[] memory none = new address[](0);
+
+        uint256 amountOut = _split(none, _noHints(), 100e18, 0, 8);
+
+        assertEq(amountOut, 100e18);
+        assertEq(tokenOut.balanceOf(user), 100e18);
+        _assertRouterEmpty();
+    }
+
+    function test_split_deadVenueListMatchesEmptyWhitelist() public {
+        // The comparison arm of the test above: a named-but-unusable venue.
+        MockCappedPropAMM dead = _newVenue(10, 12, 0, MockCappedPropAMM.CapMode.HardRevert);
+        dead.setActive(false);
+        _fundUser(100e18);
+
+        address[] memory venues = new address[](1);
+        venues[0] = address(dead);
+
+        assertEq(_split(venues, _noHints(), 100e18, 0, 8), 100e18);
+        _assertRouterEmpty();
+    }
+
+    function test_split_callerFallbackFloorGatesTheCoalescedSwap() public {
+        // A (x2, cap 60) wins a 50 leg and alone covers `amountOutMin`, so
+        // the aggregate shortfall collapses to zero. B then under-delivers
+        // its own quote, fails its per-leg min, and its 50 coalesces into a
+        // Uniswap swap that would otherwise carry NO floor at all. The
+        // caller's `fallbackMinOut` is the only thing gating that slice.
+        MockCappedPropAMM a = _newVenue(10, 20, 60e18, MockCappedPropAMM.CapMode.HardRevert);
+        MockCappedPropAMM b = _newVenue(10, 15, 0, MockCappedPropAMM.CapMode.HardRevert);
+        b.setShortChangeBps(5000); // delivers half its quote -> trips its per-leg min
+        _fundUser(100e18);
+
+        address[] memory venues = new address[](2);
+        venues[0] = address(a);
+        venues[1] = address(b);
+
+        // Uniswap pays 1:1, so the 50 coalesced from B's failure yields 50.
+        // A floor of 60 on that slice is unreachable and must revert.
+        vm.prank(user);
+        vm.expectRevert(bytes("uni-slippage"));
+        router.swapSplitV1(
+            venues, _noHints(), address(tokenIn), address(tokenOut), 100e18, 100e18, 60e18, 8, user, block.timestamp + 1
+        );
+    }
+
+    function test_split_callerFallbackFloorAllowsReachableFloor() public {
+        // Same plan, with a floor the coalesced swap can actually clear.
+        MockCappedPropAMM a = _newVenue(10, 20, 60e18, MockCappedPropAMM.CapMode.HardRevert);
+        MockCappedPropAMM b = _newVenue(10, 15, 0, MockCappedPropAMM.CapMode.HardRevert);
+        b.setShortChangeBps(5000);
+        _fundUser(100e18);
+
+        address[] memory venues = new address[](2);
+        venues[0] = address(a);
+        venues[1] = address(b);
+
+        uint256 amountOut = _splitFb(venues, _noHints(), 100e18, 100e18, 50e18, 8);
+
+        // A: 50 -> 100. B fails, its 50 coalesces to Uniswap 1:1 -> 50.
+        assertEq(amountOut, 150e18);
+        _assertRouterEmpty();
     }
 }
