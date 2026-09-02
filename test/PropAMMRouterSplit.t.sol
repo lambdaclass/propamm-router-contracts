@@ -506,7 +506,14 @@ contract PropAMMRouterSplitTest is Test {
     {
         uint256 amountIn = bound(uint256(rawAmount), 1e6, 1_000_000e18);
         uint256 rate = bound(uint256(rateBpsA), 5_000, 20_000); // 0.5x .. 2.0x
-        MockCappedPropAMM a = _newVenue(10_000, rate, uint256(capA), MockCappedPropAMM.CapMode(modeA % 3));
+        // `capA` fuzzed raw as a uint64 makes the uncapped case (cap == 0)
+        // vanishingly unlikely to ever be sampled. Force it to occur on
+        // roughly a quarter of runs (the rest keep a bounded non-zero cap),
+        // since cap == 0 combined with rate > 1.0 is the one sub-case below
+        // where the planner's output is fully determined and worth pinning
+        // exactly, rather than only checking the safety floor.
+        uint256 cap = capA % 4 == 0 ? 0 : bound(uint256(capA), 1, 1_000_000e18);
+        MockCappedPropAMM a = _newVenue(10_000, rate, cap, MockCappedPropAMM.CapMode(modeA % 3));
         _fundUser(amountIn);
 
         address[] memory venues = new address[](1);
@@ -521,5 +528,16 @@ contract PropAMMRouterSplitTest is Test {
         assertGe(amountOut, amountIn);
         assertEq(tokenIn.balanceOf(address(router)), 0); // nothing stranded
         assertEq(tokenIn.balanceOf(user), 0);
+
+        // CAPABILITY: an uncapped venue priced strictly above 1.0 quotes
+        // exactly linearly at both probe points, so it never saturates, wins
+        // the reference cutoff outright, and takes ONE leg for the entire
+        // amountIn with no remainder leg. The total is then pinned exactly —
+        // this is the sub-case that collapses to `amountIn` (the safety
+        // floor above, satisfied vacuously) if the prop-venue planning path
+        // were deleted, so it is the one worth asserting precisely.
+        if (cap == 0 && rate > 10_000) {
+            assertEq(amountOut, amountIn * rate / 10_000, "uncapped above-market venue must capture the whole order");
+        }
     }
 }
