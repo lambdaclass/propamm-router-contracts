@@ -77,13 +77,19 @@ contract MockCappedPropAMM is IPropAMM {
         return amountIn * priceDen / priceNum;
     }
 
+    /// @dev `swap` mirrors `quote` per `capMode`. In `Saturate` mode the venue
+    /// ACCEPTS an above-cap input and delivers only its ceiling output,
+    /// keeping the unfilled excess — the behavior that makes an oversized leg
+    /// a silent transfer to the venue rather than a revert. `HardRevert` and
+    /// `ZeroQuote` still reject above-cap input.
     function swap(address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut, address recipient, uint256)
         external
         returns (uint256 amountOut)
     {
         require(active, "inactive");
-        require(cap == 0 || amountIn <= cap, "cap");
-        amountOut = amountIn * priceDen / priceNum;
+        require(cap == 0 || amountIn <= cap || capMode == CapMode.Saturate, "cap");
+        uint256 filled = (cap != 0 && amountIn > cap) ? cap : amountIn;
+        amountOut = filled * priceDen / priceNum;
         amountOut = amountOut * (10_000 - shortChangeBps) / 10_000;
         if (honorMinOut) require(amountOut >= minAmountOut, "slippage");
         IERC20(tokenOut).safeTransfer(recipient, amountOut);

@@ -14,6 +14,16 @@ contract MockPartialFillPropAMM is MockCappedPropAMM {
             || interfaceId == type(IPropAMMPartialFill).interfaceId;
     }
 
+    /// @notice When set, the venue reports `fillableAmountIn` inflated by this
+    /// factor — violating the interface's "MUST be <= amountIn" requirement.
+    /// The quoted `amountOut` matches the INFLATED fill, so a router that
+    /// clamps the fill without rescaling the output reads a doubled rate.
+    uint256 public overReportFactor;
+
+    function setOverReportFactor(uint256 factor) external {
+        overReportFactor = factor;
+    }
+
     function quotePartialFill(address, address, uint256 amountIn)
         external
         view
@@ -21,6 +31,7 @@ contract MockPartialFillPropAMM is MockCappedPropAMM {
     {
         require(active, "inactive");
         fillableAmountIn = (cap != 0 && amountIn > cap) ? cap : amountIn;
+        if (overReportFactor > 1) fillableAmountIn = fillableAmountIn * overReportFactor;
         amountOut = fillableAmountIn * priceDen / priceNum;
     }
 }

@@ -108,4 +108,28 @@ contract MockVenueSanityTest is Test {
         thief.quote(address(opToken), address(tokenOut), 5);
         assertEq(opToken.balanceOf(address(this)), 9); // one wei stolen from caller
     }
+
+    function test_swap_saturateModeAcceptsOversizedInputAndKeepsExcess() public {
+        // The behavior that makes an oversized leg a silent transfer rather
+        // than a revert, and so the reason the router must never hand a
+        // saturating venue more than it demonstrably fills: `swap` mirrors
+        // `quote`, delivering only the ceiling output while keeping the whole
+        // input it was pushed.
+        venue.setCap(100e18);
+        venue.setCapMode(MockCappedPropAMM.CapMode.Saturate);
+        tokenIn.mint(address(venue), 250e18); // push-payment: input already at venue
+
+        uint256 out = venue.swap(address(tokenIn), address(tokenOut), 250e18, 0, address(this), 0);
+
+        assertEq(out, 200e18, "delivers only the cap's worth (100 * 2)");
+        assertEq(tokenIn.balanceOf(address(venue)), 250e18, "keeps the 150 it did not fill");
+    }
+
+    function test_swap_hardRevertModeStillRejectsOversizedInput() public {
+        venue.setCap(100e18);
+        venue.setCapMode(MockCappedPropAMM.CapMode.HardRevert);
+        tokenIn.mint(address(venue), 250e18);
+        vm.expectRevert(bytes("cap"));
+        venue.swap(address(tokenIn), address(tokenOut), 250e18, 0, address(this), 0);
+    }
 }
