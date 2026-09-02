@@ -59,8 +59,8 @@ interface IPropAMMRouter {
     /// rate, so applying it to Uniswap would revert the fallback exactly when
     /// it is needed. Only a leg that names the fallback venue directly
     /// contributes its `minOut` to the coalesced fallback's floor, and that
-    /// contribution is scaled up over any failed prop legs merged into the
-    /// same swap so it is not diluted by them.
+    /// contribution is diluted if failed prop legs merge into the same swap
+    /// (`fallbackMinOut` is the floor that covers them).
     struct Leg {
         address venue;
         uint256 amountIn;
@@ -79,11 +79,14 @@ interface IPropAMMRouter {
     /// quote would be read from the same pool in the same transaction, so a
     /// sandwich attacker moving that pool moves the floor with it.
     ///
-    /// Explicit fallback legs are a second, partial lever: their `minOut`
-    /// contributes to the slice's floor, and because the caller priced it for
-    /// Uniswap the router extends that same per-unit rate over any failed prop
-    /// legs merged into the same swap. It is only partial because the rate is
-    /// inferred from the explicit legs alone. Prefer `fallbackMinOut`.
+    /// Explicit fallback legs are a weaker, partial lever: their `minOut`
+    /// contributes to the slice's floor, but it is DILUTED when failed prop
+    /// legs merge into the same swap, because their input joins the slice
+    /// contributing no floor of its own. The router does not scale that floor
+    /// up to compensate — `minOut` states a rate priced at the explicit legs'
+    /// size, and Uniswap's unit rate falls with size, so a scaled floor would
+    /// exceed what an honest pool returns for the larger slice. Use
+    /// `fallbackMinOut`.
     /// @param legs The legs to execute (1..MAX_SPLIT_VENUES entries).
     /// @param tokenIn The token being sold (or the ETH sentinel).
     /// @param tokenOut The token being bought (or the ETH sentinel).

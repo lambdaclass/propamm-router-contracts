@@ -117,37 +117,39 @@ contract PropAMMRouterMultiLegTest is Test {
         assertEq(amountOut, 400e18 + 0.1e18, "unfloored slice executed at the terrible rate");
     }
 
-    /// @dev The dilution fix. An EXPLICIT fallback leg of 100e18 with
-    /// `minOut = 95e18` states a Uniswap rate of 0.95. venueB then fails,
-    /// merging another 100e18 into the same swap. The unscaled sum would
-    /// require only 95e18 out of 200e18 in — a rate of 0.475, half what the
-    /// caller asked for, leaving the failed slice unfloored AND diluting the
-    /// explicit leg's own floor. The floor must instead scale to
-    /// 95e18 * 200e18 / 100e18 = 190e18.
-    function test_swapMultiLeg_explicitFallbackMinNotDilutedByFailedPropLeg() public {
+    /// @dev The explicit fallback leg's floor IS diluted when a failed prop
+    /// leg merges into the same swap, and that is deliberate. An explicit leg
+    /// of 100e18 with `minOut = 95e18` states a rate of 0.95; venueB then
+    /// fails, adding 100e18 to the same swap. The floor stays 95e18 over
+    /// 200e18 of input — an effective rate of 0.475 — so a Uniswap paying
+    /// only 0.50 still clears it.
+    ///
+    /// Scaling the floor to 190e18 to "undo" the dilution is UNSOUND: `minOut`
+    /// is a rate priced at the explicit leg's size, and Uniswap's unit rate
+    /// falls with size (see
+    /// `test_split_scaledExplicitFloorWouldRevertHonestSwaps`). `fallbackMinOut`
+    /// is the term that actually covers the merged portion, asserted below.
+    function test_swapMultiLeg_explicitFallbackMinIsDilutedByFailedPropLeg() public {
         _fundUser(300e18);
         venueB.setActive(false);
-        uni.setPrice(100, 95); // Uniswap pays 0.95
+        uni.setPrice(100, 50); // Uniswap pays 0.50 — below the stated 0.95
 
         IPropAMMRouter.Leg[] memory legs = new IPropAMMRouter.Leg[](3);
-        legs[0] = _leg(address(venueA), 100e18, 200e18); // 200e18, clears aggregate alone
-        legs[1] = _leg(address(router.fallbackSwapRouter()), 100e18, 95e18); // explicit, rate 0.95
-        legs[2] = _leg(address(venueB), 100e18, 0); // fails -> merges into the same swap
+        legs[0] = _leg(address(venueA), 100e18, 200e18); // clears the aggregate alone
+        legs[1] = _leg(address(router.fallbackSwapRouter()), 100e18, 95e18); // rate 0.95
+        legs[2] = _leg(address(venueB), 100e18, 0); // fails -> merges in
 
-        // Honest Uniswap at 0.95 over the merged 200e18 delivers 190e18, which
-        // meets the scaled floor exactly.
         vm.prank(user);
         uint256 amountOut =
             router.swapMultiLegV1(legs, address(tokenIn), address(tokenOut), 200e18, 0, user, block.timestamp + 1);
-        assertEq(amountOut, 200e18 + 190e18, "venueA + merged Uniswap slice at the caller's own rate");
+        assertEq(amountOut, 200e18 + 100e18, "diluted floor (95e18 over 200e18 in) was met by 0.50");
 
-        // Now let Uniswap pay only 0.90. The unscaled floor (95e18) would
-        // still pass on 180e18 out; the scaled floor (190e18) must reject it.
+        // `fallbackMinOut` is the remedy: demand the merged slice actually
+        // deliver at 0.95 and the same swap must revert.
         _fundUser(300e18);
-        uni.setPrice(100, 90);
         vm.prank(user);
         vm.expectRevert();
-        router.swapMultiLegV1(legs, address(tokenIn), address(tokenOut), 200e18, 0, user, block.timestamp + 1);
+        router.swapMultiLegV1(legs, address(tokenIn), address(tokenOut), 200e18, 190e18, user, block.timestamp + 1);
     }
 
     /// @dev A failed PROP leg's own `minOut` still must NOT be carried into the

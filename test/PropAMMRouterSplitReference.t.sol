@@ -116,6 +116,48 @@ contract PropAMMRouterSplitReferenceTest is Test {
         assertGt(out, amountIn * 50 / 100, "and Uniswap must have beaten the venue");
     }
 
+    /// @dev Guards against "un-diluting" the explicit-fallback floor by
+    /// scaling it over the merged slice. A 1_000e18 explicit Uniswap leg
+    /// priced at its own honest rate (~0.999 against 1e24 reserves) plus a
+    /// failed 1_000_000e18 prop leg merge into one swap. The scaled floor
+    /// would be 0.999 * 1_001_000e18 ≈ 999_999e18, but the honest pool
+    /// returns only ~500_250e18 for that size — the scaled floor exceeds it
+    /// by ~2x and would revert a perfectly good swap. Only the UNSCALED floor
+    /// is sound. A linear Uniswap mock cannot show this (its unit rate is
+    /// size-independent, so scaling is exactly right there), which is why the
+    /// test lives in the concave suite.
+    function test_split_scaledExplicitFloorWouldRevertHonestSwaps() public {
+        uni.setReserves(1e24, 1e24);
+        quoter.setReserves(1e24, 1e24);
+
+        uint256 smallIn = 1_000e18;
+        uint256 bigIn = 1_000_000e18;
+        uint256 honestSmall = uni.quote(smallIn);
+        uint256 honestMerged = uni.quote(smallIn + bigIn);
+
+        // The arithmetic that makes scaling unsound, pinned explicitly.
+        uint256 scaled = honestSmall * (smallIn + bigIn) / smallIn;
+        assertGt(scaled, honestMerged, "scaled floor must exceed the honest merged output");
+        assertGt(scaled, honestMerged * 19 / 10, "and by a wide margin, not a rounding edge");
+
+        // The unscaled floor is met by the same honest swap.
+        assertGe(honestMerged, honestSmall, "unscaled floor is sound for a concave pool");
+
+        // End to end: a prop leg that fails merges into the explicit leg's
+        // swap, and the swap succeeds against the unscaled floor.
+        MockCappedPropAMM prop = _venue(1, 1, 0);
+        prop.setActive(false);
+        _fundUser(smallIn + bigIn);
+
+        IPropAMMRouter.Leg[] memory legs = new IPropAMMRouter.Leg[](2);
+        legs[0] = IPropAMMRouter.Leg({venue: router.fallbackSwapRouter(), amountIn: smallIn, minOut: honestSmall});
+        legs[1] = IPropAMMRouter.Leg({venue: address(prop), amountIn: bigIn, minOut: 0});
+
+        vm.prank(user);
+        uint256 out = router.swapMultiLegV1(legs, address(tokenIn), address(tokenOut), 0, 0, user, block.timestamp + 1);
+        assertEq(out, honestMerged, "honest merged swap must not be blocked");
+    }
+
     /// @dev With no live candidates `_waterfall` short-circuits to a single
     /// remainder leg, so it must not spend a `quoteExactInputSingle` (a full
     /// pool simulation) on a reference nothing will compare against.

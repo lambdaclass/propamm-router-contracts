@@ -6,7 +6,6 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
-import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {
@@ -303,12 +302,12 @@ contract PropAMMRouter is
 
     /// @inheritdoc IPropAMMRouter
     /// @dev The coalesced fallback swap's floor is the largest of the
-    /// aggregate shortfall against `amountOutMin`, the EXPLICIT fallback
-    /// legs' `minOut` extended over the whole slice at their own per-unit
-    /// rate, and `fallbackMinOut` — see `_executeLegs`. A failed prop leg's
-    /// own `minOut` is deliberately not carried in: it was priced off that
-    /// venue's (typically better) rate, so applying it to Uniswap would
-    /// revert the fallback exactly when it is needed to recover the leg.
+    /// aggregate shortfall against `amountOutMin`, the sum of the EXPLICIT
+    /// fallback legs' `minOut`, and `fallbackMinOut` — see `_executeLegs`. A
+    /// failed prop leg's own `minOut` is deliberately not carried in: it was
+    /// priced off that venue's (typically better) rate, so applying it to
+    /// Uniswap would revert the fallback exactly when it is needed to recover
+    /// the leg.
     ///
     /// The shortfall term is best-effort ONLY. It collapses to zero the
     /// moment the prop legs that succeeded clear `amountOutMin`, which is the
@@ -319,9 +318,12 @@ contract PropAMMRouter is
     /// information the router can only obtain from an onchain quote against
     /// the same pool in the same transaction, which a sandwich attacker moves
     /// along with the floor. No formula over the router's own state can
-    /// substitute — a pro-rata share of `amountOutMin` would demand the
-    /// Uniswap slice deliver at the BLENDED rate of the better-priced prop
-    /// legs, reverting sound swaps.
+    /// substitute, and two tempting formulas are both unsound for the same
+    /// reason — they apply a rate measured at one size to a different size.
+    /// A pro-rata share of `amountOutMin` demands the Uniswap slice deliver
+    /// at the BLENDED rate of the better-priced prop legs; scaling the
+    /// explicit fallback legs' `minOut` up over the merged slice demands the
+    /// small-size Uniswap rate at large size. Both revert sound swaps.
     function swapMultiLegV1(
         IPropAMMRouter.Leg[] calldata legs,
         address tokenIn,
@@ -912,19 +914,21 @@ contract PropAMMRouter is
     ///      it is zero whenever the prop legs that succeeded already clear
     ///      `amountOutMin`, which is the normal outcome of splitting into
     ///      better-than-Uniswap venues.
-    ///  (b) the explicit fallback legs' `minOut`, extended over the WHOLE
-    ///      slice at those legs' own per-unit rate. The unscaled sum is not
-    ///      enough: a failed prop leg's `amountIn` joins the same swap
-    ///      without contributing any floor, so requiring only `sum(minOut)`
-    ///      over `explicitIn + failedIn` demands a rate of
-    ///      `sum(minOut) / (explicitIn + failedIn)` — strictly looser than
-    ///      the `sum(minOut) / explicitIn` the caller asked for, leaving the
-    ///      failed slice unfloored AND diluting the explicit legs' own floor.
-    ///      Scaling is sound precisely because the caller priced `minOut`
-    ///      for Uniswap and the merged slice also executes on Uniswap, so
-    ///      the same per-unit rate is the right one to extend — unlike a
-    ///      failed PROP leg's `minOut`, which is priced off a better venue
-    ///      and is therefore still excluded (see `swapMultiLegV1`).
+    ///  (b) the sum of the explicit fallback legs' `minOut`. DILUTED when
+    ///      failed prop legs merge into the same swap: their `amountIn`
+    ///      joins the slice contributing no floor, so requiring only
+    ///      `sum(minOut)` over `explicitIn + failedIn` amounts to a rate of
+    ///      `sum(minOut) / (explicitIn + failedIn)` — looser than the
+    ///      `sum(minOut) / explicitIn` the caller asked for. This is left
+    ///      unscaled on purpose. Scaling the floor up over the merged slice
+    ///      is UNSOUND: `minOut` states a rate the caller priced at the
+    ///      explicit legs' size, Uniswap's unit rate falls with size, and so
+    ///      the scaled floor exceeds what an honest pool returns for the
+    ///      larger slice and reverts good swaps (a 1k leg priced at its own
+    ///      ~0.999 rate, scaled over a 1M merged slice, demands ~999k from a
+    ///      pool that honestly yields ~500k). Only (c) closes the failed
+    ///      portion. A failed PROP leg's `minOut` is excluded for a separate
+    ///      reason — priced off a better venue (see `swapMultiLegV1`).
     ///  (c) the caller's `fallbackMinOut` — the only term that is neither
     ///      derived from this swap's own accounting nor inferable from an
     ///      onchain quote, and so the only one that survives a sandwich.
@@ -943,15 +947,9 @@ contract PropAMMRouter is
 
         uint256 fbAmount = 0;
         uint256 fbMinOut = 0;
-        // `fbAmount` restricted to the EXPLICIT fallback legs — the input the
-        // caller actually priced `fbMinOut` against. Failed prop legs swell
-        // `fbAmount` but not this, which is exactly the gap that would
-        // otherwise dilute floor (b).
-        uint256 fbExplicitIn = 0;
         for (uint256 i = 0; i < legs.length; i++) {
             if (legs[i].venue == fallbackSwapRouter) {
                 fbAmount += legs[i].amountIn;
-                fbExplicitIn += legs[i].amountIn;
                 fbMinOut += legs[i].minOut;
                 continue;
             }
@@ -972,18 +970,13 @@ contract PropAMMRouter is
             // (a) Best-effort: zero once the surviving prop legs clear the
             // aggregate min. See this function's NatSpec.
             uint256 uniMin = delivered >= r.amountOutMin ? 0 : r.amountOutMin - delivered;
-            // (b) The explicit legs' floor at their own per-unit rate, applied
-            // to the whole merged slice. `mulDiv` for a 512-bit intermediate:
-            // multileg leg amounts are not uint128-bounded, so
-            // `fbMinOut * fbAmount` can exceed 2^256. Flooring keeps the floor
-            // from tripping on its own rounding. Guarded on `fbExplicitIn > 0`
-            // because `fbMinOut > 0` implies it, and division by zero would
-            // otherwise revert a swap whose only fallback input came from
-            // failed prop legs.
-            if (fbExplicitIn > 0) {
-                uint256 scaledExplicitMin = Math.mulDiv(fbMinOut, fbAmount, fbExplicitIn);
-                if (scaledExplicitMin > uniMin) uniMin = scaledExplicitMin;
-            }
+            // (b) The explicit fallback legs' floor, unscaled. It is DILUTED
+            // when failed prop legs merge into the same swap — see this
+            // function's NatSpec — and deliberately left that way: scaling it
+            // up over the merged slice would extend a rate the caller stated
+            // for a SMALLER size, and Uniswap's unit rate falls with size, so
+            // the scaled floor over-demands and reverts honest swaps.
+            if (fbMinOut > uniMin) uniMin = fbMinOut;
             // (c) The caller's own floor on this slice — the only one that
             // survives a sandwich. (a) and (b) are derived from the swap's own
             // accounting, and any floor derived instead from an onchain quote

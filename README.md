@@ -53,24 +53,28 @@ Uniswap V3 swap at the end. That swap's slippage floor is the largest of three t
 1. **The aggregate shortfall** against `amountOutMin`. Best-effort only — it is *zero*
    whenever the propAMM legs that succeeded already cover `amountOutMin`, which is the
    normal outcome of splitting into better-than-Uniswap venues.
-2. **The explicit fallback legs' `minOut`**, extended over the whole coalesced slice at
-   those legs' own per-unit rate. The scaling matters: a failed propAMM leg joins the same
-   swap contributing no floor of its own, so an unscaled `sum(minOut)` would silently
-   become a looser rate over a larger input, leaving the failed slice unprotected *and*
-   diluting the explicit legs' floor. Extending the caller's own rate is sound because
-   both slices execute on Uniswap. A failed **propAMM** leg's `minOut` is deliberately
-   *not* inherited — it was priced off a better venue, so applying it to Uniswap would
-   revert the recovery exactly when it is needed.
+2. **The sum of the explicit fallback legs' `minOut`** — and note this is *diluted* when
+   a failed propAMM leg merges into the same swap, since its input joins the slice
+   contributing no floor of its own. The router deliberately does **not** scale the floor
+   up to compensate: `minOut` states a rate the caller priced at the explicit legs' size,
+   Uniswap's unit rate falls with size, so a scaled floor exceeds what an honest pool
+   returns for the larger slice and reverts good swaps. (A 1k leg priced at its own ~0.999
+   rate, scaled over a 1M merged slice, would demand ~999k from a pool that honestly
+   yields ~500k.) Only term 3 covers the failed portion. A failed **propAMM** leg's
+   `minOut` is excluded for a separate reason — priced off a better venue, applying it to
+   Uniswap would revert the recovery exactly when it is needed.
 3. **`fallbackMinOut`** — the caller's absolute floor on that swap.
 
 **Pass a real `fallbackMinOut`.** It is the only term that survives a sandwich, and it
 must come from the caller for a structural reason: pricing that slice correctly needs the
 fair Uniswap rate, and the router can only learn that from a quote against the same pool
 in the same transaction — which an attacker moving the pool moves along with the floor.
-No formula over the router's own state substitutes for it. In particular a pro-rata share
-of `amountOutMin` would demand the Uniswap slice deliver at the *blended* rate of the
-better-priced propAMM legs, reverting sound swaps. Derive `fallbackMinOut` from an
-**off-chain** Uniswap quote for the slice you expect, minus your slippage tolerance.
+No formula over the router's own state substitutes for it. Two tempting ones are unsound
+for the same reason — each applies a rate measured at one size to a different size: a
+pro-rata share of `amountOutMin` demands the *blended* rate of the better-priced propAMM
+legs, and scaling the explicit legs' `minOut` over the merged slice demands the small-size
+Uniswap rate at large size. Derive `fallbackMinOut` from an **off-chain** Uniswap quote for
+the slice you expect, minus your slippage tolerance.
 
 Passing `0` disables term 3. That is supported and sometimes correct (e.g. when you have
 tightened `amountOutMin` so term 1 binds), but it leaves the coalesced slice MEV-exposed
