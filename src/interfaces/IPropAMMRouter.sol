@@ -105,8 +105,10 @@ interface IPropAMMRouter {
     /// @param tokenOut The token being bought (or the ETH sentinel).
     /// @param amountIn The exact total input; must fit uint128.
     /// @param amountOutMin The minimum TOTAL `tokenOut` delivered.
-    /// @param maxLegs Maximum number of propAMM legs (≥ 1); the coalesced
-    /// Uniswap leg never counts against it.
+    /// @param maxLegs Maximum number of propAMM legs (≥ 1). Only the
+    /// automatically-appended coalesced remainder leg is exempt from it — a
+    /// `fallbackSwapRouter` address the caller lists explicitly in `venues`
+    /// is ranked like any other candidate and DOES consume a `maxLegs` slot.
     /// @param recipient The address that receives `tokenOut`.
     /// @param deadline Unix timestamp after which the swap is no longer valid.
     /// @return amountOut The total `tokenOut` delivered to `recipient`.
