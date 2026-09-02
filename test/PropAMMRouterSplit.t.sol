@@ -254,6 +254,51 @@ contract PropAMMRouterSplitTest is Test {
         assertEq(opIn.balanceOf(address(thief)), 0);
     }
 
+    function test_split_nonWhitelistedVenueNeverProbedAndCannotStarveRealVenues() public {
+        // `_probeVenue` gates on `_isVenue` BEFORE the ERC165 branch, which
+        // calls `quotePartialFill` directly rather than through
+        // `quoteVenueV1`'s membership check. Without that gate a caller could
+        // name any address that answers `supportsInterface`, have the router
+        // execute its code while holding the pulled funds, and let it return
+        // a maximal quote to sweep the ranking and starve the real venues.
+        //
+        // X is NOT whitelisted and advertises the partial-fill extension at a
+        // fantastic x10 with unlimited capacity; B is whitelisted at x1.1.
+        // Order = 250.
+        MockPartialFillPropAMM x = new MockPartialFillPropAMM(1, 10);
+        tokenOut.mint(address(x), 1_000_000e18);
+        MockCappedPropAMM b = _newVenue(10, 11, 0, MockCappedPropAMM.CapMode.HardRevert);
+        _fundUser(250e18);
+        assertFalse(router.isWhitelistedVenue(address(x)), "premise: X is not whitelisted");
+
+        address[] memory venues = new address[](2);
+        venues[0] = address(x);
+        venues[1] = address(b);
+
+        // The gate short-circuits ahead of the extension call, so the router
+        // never executes X's code at all.
+        vm.expectCall(
+            address(x),
+            abi.encodeCall(MockPartialFillPropAMM.quotePartialFill, (address(tokenIn), address(tokenOut), 250e18)),
+            0
+        );
+
+        uint256 amountOut = _split(venues, _noHints(), 250e18, 0, 8);
+
+        // X skipped entirely; B takes the whole order: 250 * 1.1 = 275.
+        //
+        // Decisive by construction: without the gate X would rank first at
+        // x10, take the entire 250e18 leg, leave B nothing, then fail
+        // `_dispatchVenue`'s whitelist check and coalesce into Uniswap for a
+        // total of 250e18 with B paid nothing. Both assertions separate the
+        // two outcomes.
+        assertEq(amountOut, 275e18);
+        assertEq(tokenIn.balanceOf(address(b)), 250e18);
+        assertEq(tokenIn.balanceOf(address(x)), 0);
+        assertEq(tokenOut.balanceOf(user), 275e18);
+        _assertRouterEmpty();
+    }
+
     function test_split_venueWorseThanUniswapIsCutOff() public {
         // A pays x0.9 (worse than uni 1:1): must get NO leg.
         MockCappedPropAMM a = _newVenue(10, 9, 0, MockCappedPropAMM.CapMode.HardRevert);
