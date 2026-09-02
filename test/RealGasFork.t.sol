@@ -1,0 +1,290 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.35;
+
+import {console2} from "forge-std/console2.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IPropAMMRouter} from "../src/interfaces/IPropAMMRouter.sol";
+import {PropAMMRouter} from "../src/PropAMMRouter.sol";
+import {PRIO_UPDATE_REGISTRY} from "../test/interfaces/IPrioUpdateRegistry.sol";
+import {ForkGate} from "./helpers/ForkGate.sol";
+
+/// @notice Real-venue execution gas on a mainnet fork, for the entrypoints the
+/// mock benchmark (`GasBench.t.sol`) can only approximate.
+///
+/// The obstacle this has to solve first: registry-priced venues publish pricing
+/// lanes just-in-time, so at any given block most of them revert `0x666a2814`.
+/// Discovery recovers each venue's last published lane timestamp from the
+/// storage its own quote reads, then warps there. Because a warp is global, two
+/// venues are only simultaneously quotable if their lanes overlap in time --
+/// which is what caps the reachable leg count.
+contract RealGasForkTest is ForkGate {
+    address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
+    address constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+    address constant UNISWAP_ROUTER_02 = 0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45;
+    address constant UNISWAP_QUOTER_V2 = 0x61fFE014bA17989E743c5F6cB21bF9697530B21e;
+    uint256 constant USDC_BALANCES_SLOT = 9;
+    uint256 constant ONE_YEAR = 365 days;
+    uint256 constant PROBE = 1_000e6;
+
+    address[6] VENUES = [
+        0x5979458912F80B96d30D4220af8E2e4925A33320, // Fermi
+        0x71e790dd841c8A9061487cb3E78C288E75cE0B3d, // Kipseli
+        0xB09AaA5614916d7AEb59C295C52c92ca82aDdD76,
+        0x00000003f1ec2379e79F58E12EC6C4F51Ee92149,
+        0xE715Dc29d2c273D0FC5A03e5Cca9CcB0Abb1dCDB,
+        0x217d58931A8549ca539426AA8152E33dAfc3d95A
+    ];
+
+    PropAMMRouter router;
+    address taker = makeAddr("taker");
+
+    function setUp() public {
+        if (!_selectForkOrSkip()) return;
+        AccessManager m = new AccessManager(address(this));
+        PropAMMRouter impl = new PropAMMRouter();
+        router = PropAMMRouter(
+            payable(address(
+                    new ERC1967Proxy(
+                        address(impl),
+                        abi.encodeCall(PropAMMRouter.initialize, (UNISWAP_ROUTER_02, UNISWAP_QUOTER_V2, address(m)))
+                    )
+                ))
+        );
+        for (uint256 i = 0; i < 6; i++) {
+            router.addVenue(VENUES[i]);
+        }
+        _fund(taker, 20_000_000e6);
+        vm.prank(taker);
+        IERC20(USDC).approve(address(router), type(uint256).max);
+        vm.deal(taker, 10 ether);
+    }
+
+    function _fund(address who, uint256 amt) internal {
+        vm.store(USDC, keccak256(abi.encode(who, USDC_BALANCES_SLOT)), bytes32(amt));
+    }
+
+    function _quotes(address v) internal returns (bool ok) {
+        try router.quoteVenueV1(v, USDC, WETH, PROBE) returns (uint256 out, address) {
+            ok = out > 0;
+        } catch {
+            ok = false;
+        }
+    }
+
+    /// @dev How many of the six quote at the CURRENT timestamp.
+    function _liveCount() internal returns (uint256 n) {
+        for (uint256 i = 0; i < 6; i++) {
+            if (_quotes(VENUES[i])) n++;
+        }
+    }
+
+    /// @dev Candidate lane timestamps recovered from the registry storage that
+    /// venue `v`'s own quote touches.
+    function _candidates(address v) internal returns (uint256[] memory out) {
+        vm.record();
+        _quotes(v);
+        (bytes32[] memory reads,) = vm.accesses(PRIO_UPDATE_REGISTRY);
+        uint256[] memory buf = new uint256[](reads.length * 29);
+        uint256 n = 0;
+        for (uint256 i = 0; i < reads.length; i++) {
+            bytes32 word = vm.load(PRIO_UPDATE_REGISTRY, reads[i]);
+            for (uint256 off = 0; off <= 28; off++) {
+                uint32 c = uint32(bytes4(word << (off * 8)));
+                if (c == 0 || c > block.timestamp) continue;
+                if (block.timestamp - c > ONE_YEAR) continue;
+                buf[n++] = c;
+            }
+        }
+        out = new uint256[](n);
+        for (uint256 i = 0; i < n; i++) {
+            out[i] = buf[i];
+        }
+    }
+
+    function test_discoverQuotableVenueSets() public {
+        uint256 t0 = block.timestamp;
+        console2.log("fork block", block.number);
+        console2.log("fork timestamp", t0);
+        console2.log("venues quotable at head:", _liveCount());
+        console2.log("");
+
+        // Gather every plausible lane timestamp any venue's quote reads.
+        uint256[] memory all = new uint256[](0);
+        for (uint256 i = 0; i < 6; i++) {
+            vm.warp(t0);
+            uint256[] memory c = _candidates(VENUES[i]);
+            console2.log("venue", i, "lane candidates:", c.length);
+            uint256[] memory merged = new uint256[](all.length + c.length);
+            for (uint256 j = 0; j < all.length; j++) {
+                merged[j] = all[j];
+            }
+            for (uint256 j = 0; j < c.length; j++) {
+                merged[all.length + j] = c[j];
+            }
+            all = merged;
+        }
+        console2.log("total candidate timestamps:", all.length);
+        console2.log("");
+
+        // For each candidate, how many venues quote simultaneously?
+        uint256 best = 0;
+        uint256 bestTs = 0;
+        for (uint256 i = 0; i < all.length; i++) {
+            vm.warp(all[i]);
+            uint256 n = _liveCount();
+            if (n > best) {
+                best = n;
+                bestTs = all[i];
+                console2.log("  new best: venues", n, "at ts", all[i]);
+            }
+        }
+        console2.log("");
+        console2.log("MAX SIMULTANEOUSLY QUOTABLE VENUES:", best);
+        console2.log("at timestamp:", bestTs);
+        if (bestTs != 0) {
+            vm.warp(bestTs);
+            for (uint256 i = 0; i < 6; i++) {
+                if (_quotes(VENUES[i])) console2.log("   quotable:", VENUES[i]);
+            }
+        }
+    }
+
+    // ---- real-venue gas report -------------------------------------------
+
+    uint256 constant LEG = 5_000e6; // per-leg USDC; small enough that 4 legs
+    // plus warm-up runs stay well inside Fermi's inventory
+
+    address constant FERMI = 0x5979458912F80B96d30D4220af8E2e4925A33320;
+
+    /// @dev Warp to Fermi's recoverable lane. Returns false (and skips) if it
+    /// cannot be recovered at this fork block.
+    function _makeFermiQuotable() internal returns (bool) {
+        if (_quotes(FERMI)) return true;
+        uint256[] memory c = _candidates(FERMI);
+        for (uint256 i = 0; i < c.length; i++) {
+            vm.warp(c[i]);
+            if (_quotes(FERMI)) return true;
+        }
+        vm.skip(true, "Fermi's lane not recoverable at this fork block -- market staleness, not a router bug");
+        return false;
+    }
+
+    function _dupVenues(uint256 n) internal pure returns (address[] memory v) {
+        v = new address[](n);
+        for (uint256 i = 0; i < n; i++) {
+            v[i] = FERMI;
+        }
+    }
+
+    /// @dev n legs of LEG each, all on Fermi. `swapMultiLegV1` permits
+    /// duplicate venues, which is what makes a real multi-leg measurement
+    /// possible when only one venue on mainnet is ever quotable at a time.
+    function _dupLegs(uint256 n) internal pure returns (IPropAMMRouter.Leg[] memory legs) {
+        legs = new IPropAMMRouter.Leg[](n);
+        for (uint256 i = 0; i < n; i++) {
+            legs[i] = IPropAMMRouter.Leg({venue: FERMI, amountIn: LEG, minOut: 0});
+        }
+    }
+
+    function _mlReal(uint256 n) internal returns (uint256 g) {
+        IPropAMMRouter.Leg[] memory legs = _dupLegs(n);
+        vm.startPrank(taker);
+        uint256 s = gasleft();
+        router.swapMultiLegV1(legs, USDC, WETH, 0, 0, taker, block.timestamp + 300);
+        g = s - gasleft();
+        vm.stopPrank();
+    }
+
+    function _mlFeeReal(uint256 n) internal returns (uint256 g) {
+        IPropAMMRouter.Leg[] memory legs = _dupLegs(n);
+        IPropAMMRouter.FrontendFee memory fee = IPropAMMRouter.FrontendFee({bps: 50, recipient: address(0xFEE)});
+        vm.startPrank(taker);
+        uint256 s = gasleft();
+        router.swapMultiLegWithFeeV1(legs, USDC, WETH, 0, 0, taker, block.timestamp + 300, fee);
+        g = s - gasleft();
+        vm.stopPrank();
+    }
+
+    /// @dev n venues QUOTED (all Fermi), one executed. Isolates real quote cost.
+    function _selReal(uint256 n) internal returns (uint256 g) {
+        address[] memory v = _dupVenues(n);
+        vm.startPrank(taker);
+        uint256 s = gasleft();
+        router.swapViaSelectedVenuesV1(v, USDC, WETH, LEG, 0, taker, block.timestamp + 300);
+        g = s - gasleft();
+        vm.stopPrank();
+    }
+
+    /// @dev swapSplitV1 dedupes its venue set, so only ONE real prop leg is
+    /// reachable; the rest of the order becomes the coalesced Uniswap leg.
+    function _splitReal(uint256 amountIn) internal returns (uint256 g) {
+        address[] memory v = _dupVenues(1);
+        uint256[] memory h = new uint256[](1);
+        h[0] = LEG;
+        vm.startPrank(taker);
+        uint256 s = gasleft();
+        router.swapSplitV1(v, h, USDC, WETH, amountIn, 0, 0, 8, taker, block.timestamp + 300);
+        g = s - gasleft();
+        vm.stopPrank();
+    }
+
+    function _quoteGas(address venue, uint256 amt) internal returns (uint256 g) {
+        uint256 s = gasleft();
+        try router.quoteVenueV1(venue, USDC, WETH, amt) returns (uint256, address) {} catch {}
+        g = s - gasleft();
+    }
+
+    function test_realVenueGasReport() public {
+        if (!_makeFermiQuotable()) return;
+        console2.log("fork block", block.number);
+        console2.log("warped to Fermi lane ts", block.timestamp);
+        console2.log("per-leg size (USDC 6dp)", LEG);
+        console2.log("");
+
+        // --- real component costs -----------------------------------------
+        console2.log("=== REAL COMPONENT QUOTE GAS ===");
+        _quoteGas(FERMI, LEG);
+        console2.log("Fermi quote (warm)          ", _quoteGas(FERMI, LEG));
+        _quoteGas(UNISWAP_ROUTER_02, LEG);
+        console2.log("Uniswap QuoterV2 @5k USDC   ", _quoteGas(UNISWAP_ROUTER_02, LEG));
+        console2.log("Uniswap QuoterV2 @100k USDC ", _quoteGas(UNISWAP_ROUTER_02, 100_000e6));
+        console2.log("Uniswap QuoterV2 @1M USDC   ", _quoteGas(UNISWAP_ROUTER_02, 1_000_000e6));
+        console2.log("");
+
+        // --- warm every shape ---------------------------------------------
+        for (uint256 n = 2; n <= 4; n++) {
+            _mlReal(n);
+            _mlFeeReal(n);
+            _selReal(n);
+        }
+        _splitReal(LEG * 2);
+
+        uint256[5] memory ml;
+        uint256[5] memory mlf;
+        uint256[5] memory sel;
+        for (uint256 n = 2; n <= 4; n++) {
+            ml[n] = _mlReal(n);
+            mlf[n] = _mlFeeReal(n);
+            sel[n] = _selReal(n);
+        }
+        uint256 sp1 = _splitReal(LEG * 2);
+
+        console2.log("=== MEASURED, REAL VENUE (Fermi) ===");
+        for (uint256 n = 2; n <= 4; n++) {
+            console2.log("--- legs:", n);
+            console2.log("  swapMultiLegV1        ", ml[n]);
+            console2.log("  swapMultiLegWithFeeV1 ", mlf[n]);
+            console2.log("  selectedVenues (quoted)", sel[n]);
+        }
+        console2.log("");
+        console2.log("swapSplitV1, 1 real prop leg + Uniswap remainder", sp1);
+        console2.log("");
+        console2.log("=== REAL MARGINALS ===");
+        for (uint256 n = 3; n <= 4; n++) {
+            console2.log("  multileg  per added real leg  ", int256(ml[n]) - int256(ml[n - 1]));
+            console2.log("  selected  per added real quote", int256(sel[n]) - int256(sel[n - 1]));
+        }
+    }
+}
