@@ -80,8 +80,11 @@ Passing `0` disables term 3. That is supported and sometimes correct (e.g. when 
 tightened `amountOutMin` so term 1 binds), but it leaves the coalesced slice MEV-exposed
 whenever the surviving propAMM legs already cover the aggregate minimum.
 
-In the `*WithFeeV1` variants both `amountOutMin` and `fallbackMinOut` are **net** minimums
-— what the user is left with after the fee — and each is grossed up by `fee.bps` internally.
+In the `*WithFeeV1` variants the two aggregate floors, `amountOutMin` and
+`fallbackMinOut`, are **net** minimums — what the user is left with after the fee — and
+each is grossed up by `fee.bps` internally. `Leg.minOut` is the exception: it stays on a
+**gross** basis, gating a leg's own pre-fee delivery, so compute per-leg floors from what
+the venue must hand the router rather than from what the user ends up with.
 
 ### Split planning and the venue whitelist
 

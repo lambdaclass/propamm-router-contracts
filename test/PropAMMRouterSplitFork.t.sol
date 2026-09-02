@@ -46,7 +46,6 @@ contract PropAMMRouterSplitForkTest is Test {
     uint256 constant USDC_BALANCES_SLOT = 9;
 
     uint256 constant SPLIT_AMOUNT = 1_000_000e6; // above Fermi's ~500k measured cap
-    uint256 constant FERMI_MEASURED_CAP = 500_000e6; // Phase 0 measurement; sizes the remainder floor
     uint256 constant FALLBACK_TOLERANCE_BPS = 100; // 1% slack on the remainder floor
     uint256 constant BPS = 10_000;
     uint256 constant PROBE_AMOUNT = 1_000e6; // small size, only used to test quotability
@@ -100,16 +99,19 @@ contract PropAMMRouterSplitForkTest is Test {
 
         // `fallbackMinOut` matters here and must not be 0. Fermi beats Uniswap,
         // so its leg alone clears `amountOutMin` and the aggregate shortfall
-        // term collapses to zero — leaving the ~500k USDC Uniswap remainder
-        // unfloored if the caller passes nothing. A real integrator derives
-        // this from an OFFCHAIN quote; the closest stand-in available inside a
-        // fork test is the onchain quote for the prospective remainder size,
-        // discounted for tolerance. That is NOT sandwich-proof (it reads the
-        // same pool in the same transaction) and is used here only to exercise
-        // the parameter end to end — see `swapSplitV1`'s NatSpec.
-        uint256 remainderSize = SPLIT_AMOUNT - FERMI_MEASURED_CAP;
-        (uint256 remainderQuote,) = router.quoteVenueV1(UNISWAP_ROUTER_02, USDC, WETH, remainderSize);
-        uint256 fallbackMinOut = remainderQuote * (BPS - FALLBACK_TOLERANCE_BPS) / BPS;
+        // term collapses to zero — leaving the Uniswap remainder unfloored if
+        // the caller passes nothing. A real integrator derives this from an
+        // OFFCHAIN quote; the closest stand-in inside a fork test is an
+        // onchain quote, which is NOT sandwich-proof (same pool, same
+        // transaction) and is used here only to exercise the parameter end to
+        // end — see `swapSplitV1`'s NatSpec.
+        //
+        // The floor is sized off Fermi's LIVE quote, never a pinned cap: this
+        // file discovers Fermi's state rather than pinning it, and an absolute
+        // floor priced for a remainder larger than the planner actually leaves
+        // is a false negative waiting to happen (see `swapSplitV1`'s note on
+        // `fallbackMinOut` and planner-chosen slice sizes).
+        uint256 fallbackMinOut = _remainderFloor();
 
         vm.prank(taker);
         uint256 amountOut = router.swapSplitV1(
@@ -319,5 +321,30 @@ contract PropAMMRouterSplitForkTest is Test {
         } catch {
             out = 0;
         }
+    }
+
+    /// @dev A floor for the coalesced Uniswap remainder that cannot produce a
+    /// false negative, derived entirely from live state.
+    ///
+    /// Fermi's quote at `SPLIT_AMOUNT` saturates at its inventory ceiling, so
+    /// `_usdcImpliedBy(ceiling)` converts that ceiling back into the USDC it
+    /// could actually fill, at Fermi's own unsaturated small-size rate. The
+    /// planner never hands a venue more than it fills — a saturated probe point
+    /// is declined and resolved downward — so the remainder it leaves is
+    /// `>= SPLIT_AMOUNT - impliedFill`. Uniswap's output is monotone in input,
+    /// so a floor priced for that LOWER bound is satisfiable for the actual,
+    /// possibly larger, remainder. Returns 0 when Fermi's live inventory
+    /// covers the whole order, in which case there is no remainder leg and the
+    /// floor is moot.
+    function _remainderFloor() internal returns (uint256) {
+        uint256 ceiling = _quoteFermiOrZero(SPLIT_AMOUNT);
+        if (ceiling == 0) return 0; // Fermi cannot price this size at all
+
+        uint256 impliedFill = _usdcImpliedBy(ceiling);
+        if (impliedFill >= SPLIT_AMOUNT) return 0; // absorbs the order; no remainder
+
+        uint256 minRemainder = SPLIT_AMOUNT - impliedFill;
+        (uint256 remainderQuote,) = router.quoteVenueV1(UNISWAP_ROUTER_02, USDC, WETH, minRemainder);
+        return remainderQuote * (BPS - FALLBACK_TOLERANCE_BPS) / BPS;
     }
 }

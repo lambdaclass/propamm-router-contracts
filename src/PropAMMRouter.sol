@@ -355,14 +355,18 @@ contract PropAMMRouter is
     /// aggregate output. Implementation-only, like the other `*WithFeeV1`
     /// entrypoints. Legs deliver to this contract; the fee and the net are
     /// then forwarded.
-    /// @dev BOTH `amountOutMin` and `fallbackMinOut` are NET minimums — what
-    /// the user must be left with after the fee. Each is grossed up by
-    /// `fee.bps` before it reaches `_executeLegs`, which applies its floors
-    /// to the pre-fee amounts the legs actually deliver. Grossing up both
-    /// keeps one basis across the whole signature; forwarding
-    /// `fallbackMinOut` raw would silently give the caller up to `fee.bps`
-    /// less protection on that slice than the same number buys them via
-    /// `amountOutMin`.
+    /// @dev The two AGGREGATE floors, `amountOutMin` and `fallbackMinOut`, are
+    /// NET minimums — what the user must be left with after the fee — and each
+    /// is grossed up by `fee.bps` before it reaches `_executeLegs`, which
+    /// applies its floors to the pre-fee amounts the legs actually deliver.
+    /// Grossing up both keeps them on one basis; forwarding `fallbackMinOut`
+    /// raw would silently give the caller up to `fee.bps` less protection on
+    /// that slice than the same number buys them via `amountOutMin`.
+    ///
+    /// `Leg.minOut` is the exception and stays on a GROSS basis: it gates a
+    /// leg's own pre-fee delivery and is never grossed up. Compute per-leg
+    /// floors from what the venue must hand the router, not from what the user
+    /// ends up with.
     function swapMultiLegWithFeeV1(
         IPropAMMRouter.Leg[] calldata legs,
         address tokenIn,
@@ -462,13 +466,14 @@ contract PropAMMRouter is
 
     /// @notice `swapSplitV1` plus a frontend fee skimmed from the aggregate
     /// output. Implementation-only.
-    /// @dev BOTH `amountOutMin` and `fallbackMinOut` are NET minimums — what
-    /// the user must be left with after the fee — and each is grossed up by
-    /// `fee.bps` before reaching `_executeLegs`, which applies its floors to
-    /// the pre-fee amounts the legs deliver. Grossing up both keeps one basis
-    /// across the whole signature; forwarding `fallbackMinOut` raw would
-    /// silently give the caller up to `fee.bps` less protection on that slice
-    /// than the same number buys them via `amountOutMin`.
+    /// @dev The two AGGREGATE floors, `amountOutMin` and `fallbackMinOut`, are
+    /// NET minimums — what the user must be left with after the fee — and each
+    /// is grossed up by `fee.bps` before reaching `_executeLegs`, which applies
+    /// its floors to the pre-fee amounts the legs deliver. Grossing up both
+    /// keeps them on one basis; forwarding `fallbackMinOut` raw would silently
+    /// give the caller up to `fee.bps` less protection on that slice than the
+    /// same number buys them via `amountOutMin`. This entrypoint plans its own
+    /// legs, so there is no caller-supplied per-leg `minOut` to reconcile.
     function swapSplitWithFeeV1(
         address[] calldata venues,
         uint256[] calldata probeHints,
