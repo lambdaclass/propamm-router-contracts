@@ -705,4 +705,115 @@ contract RealGasForkTest is ForkGate {
             console2.log("     Swapped events        ", ev);
         }
     }
+
+    // ---- 1,000,000 USDC: where QuoterV2 and venue capacity both bite ------
+
+    uint256 constant BIG = 1_000_000e6;
+
+    /// @dev Split with no hints: each venue is probed at the FULL order size,
+    /// which is what a caller who supplies no capacity picture gets. Above a
+    /// venue's cap the quote saturates, and `_probeDownToFillable` then spends
+    /// up to MAX_SATURATION_STEPS extra quotes hunting a fillable size.
+    function _spNoHints(address[] memory vs, uint256 n, uint256 amt) internal returns (uint256 g, uint256 ev) {
+        address[] memory sub = new address[](n);
+        uint256[] memory noh = new uint256[](0);
+        for (uint256 i = 0; i < n; i++) {
+            sub[i] = vs[i];
+        }
+        vm.recordLogs();
+        vm.startPrank(taker);
+        uint256 st = gasleft();
+        router.swapSplitV1(sub, noh, USDC, WETH, amt, 0, 0, 8, taker, block.timestamp + 300);
+        g = st - gasleft();
+        vm.stopPrank();
+        Vm.Log[] memory lg = vm.getRecordedLogs();
+        bytes32 t = keccak256("Swapped(address,address,address,uint256,uint256,address,address)");
+        for (uint256 i = 0; i < lg.length; i++) {
+            if (lg[i].emitter == address(router) && lg[i].topics[0] == t) ev++;
+        }
+    }
+
+    function _refund() internal {
+        _fund(taker, 30_000_000e6);
+    }
+
+    function test_splitAtOneMillion() public {
+        (uint256 nf, address[] memory fresh) = _forceAllFresh();
+        require(nf >= 4, "need 4 fresh venues");
+        console2.log("=== 1,000,000 USDC -> WETH ===");
+        console2.log("");
+
+        console2.log("--- how many venues can price each size ---");
+        uint256[4] memory sizes = [uint256(250_000e6), 333_333e6, 500_000e6, BIG];
+        for (uint256 j = 0; j < 4; j++) {
+            uint256 c = 0;
+            for (uint256 i = 0; i < nf; i++) {
+                if (_quoteOrZero(fresh[i], sizes[j]) > 0) c++;
+            }
+            console2.log("   size / venues able to price", sizes[j], c);
+        }
+        console2.log("");
+        console2.log("QuoterV2 @1M USDC", _quoteGas(UNISWAP_ROUTER_02, BIG));
+        console2.log("");
+
+        uint256 snap = vm.snapshotState();
+
+        _refund();
+        _forceAllFresh();
+        _viaVenue(UNISWAP_ROUTER_02, BIG);
+        _refund();
+        _forceAllFresh();
+        console2.log("swapViaVenueV1 -> Uniswap (floor)", _viaVenue(UNISWAP_ROUTER_02, BIG));
+        vm.revertToState(snap);
+
+        _refund();
+        _forceAllFresh();
+        _swapV1(BIG);
+        _refund();
+        _forceAllFresh();
+        console2.log("swapV1 (quotes all 6)            ", _swapV1(BIG));
+        vm.revertToState(snap);
+
+        for (uint256 n = 2; n <= 4; n++) {
+            _refund();
+            _forceAllFresh();
+            _mlSplitEven(fresh, n, BIG);
+            _refund();
+            _forceAllFresh();
+            uint256 a = _mlSplitEven(fresh, n, BIG);
+            console2.log("swapMultiLegV1 n legs", n);
+            console2.log("   gas", a);
+            vm.revertToState(snap);
+        }
+        console2.log("");
+
+        console2.log("--- swapSplitV1, HINTED (legs pre-sized to 1M/n) ---");
+        for (uint256 n = 1; n <= 4; n++) {
+            _refund();
+            _forceAllFresh();
+            _spEven(fresh, n, BIG);
+            _refund();
+            _forceAllFresh();
+            (uint256 g, uint256 ev) = _spEven(fresh, n, BIG);
+            console2.log("   venues", n);
+            console2.log("     gas           ", g);
+            console2.log("     Swapped events", ev);
+            vm.revertToState(snap);
+        }
+        console2.log("");
+
+        console2.log("--- swapSplitV1, NO HINTS (probes at full 1M) ---");
+        for (uint256 n = 1; n <= 4; n++) {
+            _refund();
+            _forceAllFresh();
+            _spNoHints(fresh, n, BIG);
+            _refund();
+            _forceAllFresh();
+            (uint256 g, uint256 ev) = _spNoHints(fresh, n, BIG);
+            console2.log("   venues", n);
+            console2.log("     gas           ", g);
+            console2.log("     Swapped events", ev);
+            vm.revertToState(snap);
+        }
+    }
 }
