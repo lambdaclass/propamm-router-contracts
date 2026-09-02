@@ -499,4 +499,113 @@ contract RealGasForkTest is ForkGate {
             console2.log("  split    per real venue", int256(sp[n]) - int256(sp[n - 1]));
         }
     }
+
+    // ---- single-venue cost, and an ISOLATED per-venue probe cost ----------
+    //
+    // The earlier multi-venue run varied `amountIn` with the venue count, so
+    // its "per venue" marginal also contained the Uniswap reference quote
+    // growing with order size. Here `amountIn` is held CONSTANT and only the
+    // number of probed venues varies, so the marginal is the probe alone.
+
+    uint256 constant FIXED_IN = 10_000e6; // constant: keeps the reference quote fixed
+    uint256 constant HINT = 2_500e6; // constant per-venue probe size
+
+    function _viaVenue(address v, uint256 amt) internal returns (uint256 g) {
+        vm.startPrank(taker);
+        uint256 st = gasleft();
+        router.swapViaVenueV1(v, USDC, WETH, amt, 0, taker, block.timestamp + 300);
+        g = st - gasleft();
+        vm.stopPrank();
+    }
+
+    function _ml1(address v, uint256 amt) internal returns (uint256 g) {
+        IPropAMMRouter.Leg[] memory legs = new IPropAMMRouter.Leg[](1);
+        legs[0] = IPropAMMRouter.Leg({venue: v, amountIn: amt, minOut: 0});
+        vm.startPrank(taker);
+        uint256 st = gasleft();
+        router.swapMultiLegV1(legs, USDC, WETH, 0, 0, taker, block.timestamp + 300);
+        g = st - gasleft();
+        vm.stopPrank();
+    }
+
+    /// @dev n venues probed, CONSTANT amountIn and constant per-venue hint.
+    function _splitFixed(address[] memory vs, uint256 n) internal returns (uint256 g, uint256 legs) {
+        address[] memory sub = new address[](n);
+        uint256[] memory h = new uint256[](n);
+        for (uint256 i = 0; i < n; i++) {
+            sub[i] = vs[i];
+            h[i] = HINT;
+        }
+        vm.recordLogs();
+        vm.startPrank(taker);
+        uint256 st = gasleft();
+        router.swapSplitV1(sub, h, USDC, WETH, FIXED_IN, 0, 0, 8, taker, block.timestamp + 300);
+        g = st - gasleft();
+        vm.stopPrank();
+        Vm.Log[] memory lg = vm.getRecordedLogs();
+        bytes32 topic = keccak256("Swapped(address,address,address,uint256,uint256,address,address)");
+        for (uint256 i = 0; i < lg.length; i++) {
+            if (lg[i].emitter == address(router) && lg[i].topics[0] == topic) legs++;
+        }
+    }
+
+    function test_singleVenueAndIsolatedProbeCost() public {
+        (uint256 nf, address[] memory fresh) = _forceAllFresh();
+        require(nf >= 4, "need 4 fresh venues");
+        console2.log("fork block", block.number);
+        console2.log("");
+
+        console2.log("=== SINGLE-VENUE SWAP, 2,500 USDC -> WETH ===");
+        for (uint256 i = 0; i < nf; i++) {
+            _forceAllFresh();
+            _viaVenue(fresh[i], HINT); // warm
+            _forceAllFresh();
+            uint256 g = _viaVenue(fresh[i], HINT);
+            _forceAllFresh();
+            uint256 q = _quoteGas(fresh[i], HINT);
+            // `swapViaVenueV1` does NOT quote -- it goes straight to
+            // `_coreSwap`/`_dispatchVenue` -- so `g` is already pull + execute
+            // + event with no quote in it. The quote is reported separately
+            // because it is what the QUOTING entrypoints add on top.
+            console2.log("venue", fresh[i]);
+            console2.log("   swapViaVenueV1 (no quote)", g);
+            console2.log("   one quote, separately    ", q);
+            console2.log("   quote+execute would be   ", g + q);
+        }
+        _forceAllFresh();
+        _viaVenue(UNISWAP_ROUTER_02, HINT);
+        _forceAllFresh();
+        console2.log("Uniswap V3 via swapViaVenueV1", _viaVenue(UNISWAP_ROUTER_02, HINT));
+        console2.log("");
+
+        console2.log("=== FERMI: three ways to route ONE leg, 2,500 USDC ===");
+        _forceAllFresh();
+        _viaVenue(FERMI, HINT);
+        _forceAllFresh();
+        console2.log("swapViaVenueV1 (caller names it)", _viaVenue(FERMI, HINT));
+        _forceAllFresh();
+        _ml1(FERMI, HINT);
+        _forceAllFresh();
+        console2.log("swapMultiLegV1 1 leg            ", _ml1(FERMI, HINT));
+        console2.log("");
+
+        console2.log("=== ISOLATED PROBE COST: constant amountIn 10k, constant hint 2.5k ===");
+        uint256[6] memory sp;
+        uint256[6] memory lg2;
+        for (uint256 n = 1; n <= 4; n++) {
+            _forceAllFresh();
+            _splitFixed(fresh, n); // warm
+            _forceAllFresh();
+            (sp[n], lg2[n]) = _splitFixed(fresh, n);
+            console2.log("  venues probed", n);
+            console2.log("     gas          ", sp[n]);
+            console2.log("     Swapped events (prop legs + coalesced)", lg2[n]);
+        }
+        console2.log("");
+        console2.log("=== TRUE per-probed-venue marginal (constant order size) ===");
+        for (uint256 n = 2; n <= 4; n++) {
+            console2.log("   adding venue #", n);
+            console2.log("     marginal     ", int256(sp[n]) - int256(sp[n - 1]));
+        }
+    }
 }
