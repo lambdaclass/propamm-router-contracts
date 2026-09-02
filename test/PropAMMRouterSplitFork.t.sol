@@ -49,6 +49,16 @@ contract PropAMMRouterSplitForkTest is Test {
     uint256 constant PROBE_AMOUNT = 1_000e6; // small size, only used to test quotability
     uint256 constant ONE_YEAR = 365 days;
 
+    // Above-cap search: double from CAP_SEARCH_START until the quote goes
+    // flat, giving up at CAP_SEARCH_MAX. Flat means "saturated": the venue
+    // returns the same output for twice the input.
+    uint256 constant CAP_SEARCH_START = 100_000e6;
+    uint256 constant CAP_SEARCH_MAX = 12_800_000e6;
+    // Slack allowed when converting delivered WETH back into the USDC the
+    // venue must have filled. Covers price curvature between the small
+    // reference probe and the real fill size, plus rounding.
+    uint256 constant FILL_SLACK_BPS = 200;
+
     PropAMMRouter router;
     address taker = makeAddr("taker");
 
@@ -64,10 +74,16 @@ contract PropAMMRouterSplitForkTest is Test {
         router.addVenue(FERMI);
 
         // Fund the taker with 1M USDC directly in storage (blacklist bit clear).
-        vm.store(USDC, keccak256(abi.encode(taker, USDC_BALANCES_SLOT)), bytes32(SPLIT_AMOUNT));
+        _fundTaker(SPLIT_AMOUNT);
         vm.prank(taker);
         IERC20(USDC).approve(address(router), type(uint256).max);
         vm.deal(taker, 1 ether);
+    }
+
+    /// @dev Sets the taker's USDC balance directly, bypassing the blacklist
+    /// bit and any minting authority.
+    function _fundTaker(uint256 amount) internal {
+        vm.store(USDC, keccak256(abi.encode(taker, USDC_BALANCES_SLOT)), bytes32(amount));
     }
 
     function test_split_fermiPlusUniswap_executes() public {
@@ -135,6 +151,157 @@ contract PropAMMRouterSplitForkTest is Test {
             ok = amountOut > 0;
         } catch {
             ok = false;
+        }
+    }
+
+    //-------------------------------------------------//
+    // Above-cap swap behaviour (Phase 0 open question) //
+    //-------------------------------------------------//
+
+    /// @notice Answers the question the mocks had to guess at: when a real
+    /// propAMM is handed MORE input than it can fill, does it revert, or does
+    /// it accept the transfer, deliver only its ceiling output, and keep the
+    /// difference?
+    ///
+    /// This matters because the router pays venues push-first
+    /// (`_dispatchVenue` `safeTransfer`s `tokenIn`, then calls `swap`). If the
+    /// venue reverts, the `try`/`catch` self-call rolls the transfer back and
+    /// the Uniswap fallback runs — no harm. If instead it fills part and keeps
+    /// the rest, the unfilled input is simply gone, and a per-leg `minOut`
+    /// derived from that venue's own saturated quote cannot detect it (the
+    /// quote is flat, so the floor is met trivially). That is the case
+    /// `_probeDownToFillable` exists for, and whether it is load-bearing on
+    /// mainnet or merely defensive depends entirely on this answer.
+    ///
+    /// Routed through `swapViaVenueV1` rather than a raw venue call on
+    /// purpose: a bare `try FERMI.swap(...)` in the test frame would not roll
+    /// back the test's own preceding `transfer`, so it could not distinguish
+    /// the two branches at all. The router reproduces the exact production
+    /// framing.
+    function test_fermi_aboveCapSwap_retainsNoUnfilledInput() public {
+        _ensureFermiQuotable();
+        (uint256 aboveCap, uint256 ceilingOut) = _findAboveCapSize();
+
+        _fundTaker(aboveCap);
+        uint256 fermiUsdcBefore = IERC20(USDC).balanceOf(FERMI);
+        uint256 takerWethBefore = IERC20(WETH).balanceOf(taker);
+
+        // amountOutMin 0: this measures the VENUE, so the router must not be
+        // the thing that rejects the oversized fill.
+        vm.prank(taker);
+        router.swapViaVenueV1(FERMI, USDC, WETH, aboveCap, 0, taker, block.timestamp + 120);
+
+        uint256 fermiKept = IERC20(USDC).balanceOf(FERMI) - fermiUsdcBefore;
+        uint256 wethOut = IERC20(WETH).balanceOf(taker) - takerWethBefore;
+        assertGt(wethOut, 0, "swap delivered nothing through either venue");
+
+        if (fermiKept == 0) {
+            // Fermi rejected the oversized order and the Uniswap fallback ran.
+            // `_probeDownToFillable` is then belt-and-braces on this venue.
+            emit log("Fermi REVERTS above cap: oversized legs roll back, fallback covers them");
+            return;
+        }
+
+        // Fermi took the input. Convert the WETH it delivered back into the
+        // USDC it must have filled, priced off a small unsaturated quote, and
+        // require that it kept no more than that.
+        uint256 impliedFilled = _usdcImpliedBy(wethOut);
+        emit log_named_uint("Fermi kept (USDC)", fermiKept);
+        emit log_named_uint("Fermi filled (USDC, implied)", impliedFilled);
+        // Fermi filled this itself, so it cannot have beaten the ceiling it
+        // quoted for the same size.
+        assertLe(wethOut, ceilingOut * (10_000 + FILL_SLACK_BPS) / 10_000, "delivery exceeded the quoted ceiling");
+        assertLe(
+            fermiKept,
+            impliedFilled * (10_000 + FILL_SLACK_BPS) / 10_000,
+            "Fermi ACCEPTED an above-cap order and kept input it did not fill -- _probeDownToFillable is load-bearing, not defensive"
+        );
+    }
+
+    /// @notice The router-level consequence: planning an above-cap order must
+    /// never size a Fermi leg past what Fermi will actually fill, whichever
+    /// branch the test above lands in.
+    function test_fermi_aboveCapSplit_sizesLegWithinFillableCapacity() public {
+        _ensureFermiQuotable();
+        (uint256 aboveCap,) = _findAboveCapSize();
+
+        _fundTaker(aboveCap);
+        uint256 fermiUsdcBefore = IERC20(USDC).balanceOf(FERMI);
+        uint256 takerWethBefore = IERC20(WETH).balanceOf(taker);
+
+        address[] memory venues = new address[](1);
+        venues[0] = FERMI;
+        uint256[] memory noHints = new uint256[](0);
+
+        vm.prank(taker);
+        uint256 amountOut =
+            router.swapSplitV1(venues, noHints, USDC, WETH, aboveCap, 0, 0, 8, taker, block.timestamp + 120);
+
+        uint256 fermiKept = IERC20(USDC).balanceOf(FERMI) - fermiUsdcBefore;
+        assertEq(IERC20(WETH).balanceOf(taker) - takerWethBefore, amountOut, "reported output must match delivery");
+        assertEq(IERC20(USDC).balanceOf(address(router)), 0, "router stranded input");
+
+        if (fermiKept > 0) {
+            assertLe(
+                fermiKept,
+                _usdcImpliedBy(amountOut) * (10_000 + FILL_SLACK_BPS) / 10_000,
+                "planner handed Fermi more than it filled"
+            );
+        }
+    }
+
+    /// @dev Doubles the order size until Fermi's quote goes FLAT — the same
+    /// output for twice the input, which is saturation — and returns that
+    /// oversized size with the ceiling output it quoted. Skips rather than
+    /// fails if no saturation shows up below `CAP_SEARCH_MAX`: a venue with
+    /// deep inventory today is a market condition, not a router bug.
+    /// @return aboveCap A size Fermi quotes but provably cannot fill entirely.
+    /// @return ceilingOut The flat output Fermi quoted at that size.
+    function _findAboveCapSize() internal returns (uint256 aboveCap, uint256 ceilingOut) {
+        uint256 size = CAP_SEARCH_START;
+        uint256 prevOut = _quoteFermiOrZero(size);
+
+        while (size * 2 <= CAP_SEARCH_MAX) {
+            uint256 next = size * 2;
+            uint256 nextOut = _quoteFermiOrZero(next);
+
+            // A quote that dies at the larger size is a hard cap: the venue
+            // refuses to price it, so the router never builds a leg that big
+            // and there is nothing to characterise here.
+            if (nextOut == 0) {
+                vm.skip(
+                    true,
+                    "Fermi stops quoting above its cap rather than saturating, so an above-cap FILL cannot be reached on this fork block."
+                );
+                return (0, 0);
+            }
+            if (prevOut > 0 && nextOut <= prevOut) return (next, nextOut);
+
+            size = next;
+            prevOut = nextOut;
+        }
+
+        vm.skip(
+            true,
+            "Fermi's quote never went flat below CAP_SEARCH_MAX at this fork block -- its inventory currently exceeds the search range."
+        );
+        return (0, 0);
+    }
+
+    /// @dev The USDC that `wethAmount` corresponds to at Fermi's small-size
+    /// (unsaturated) rate. Used to turn "what was delivered" into "what must
+    /// have been filled" without trusting a saturated quote.
+    function _usdcImpliedBy(uint256 wethAmount) internal returns (uint256) {
+        uint256 refOut = _quoteFermiOrZero(PROBE_AMOUNT);
+        require(refOut > 0, "no unsaturated reference quote");
+        return wethAmount * PROBE_AMOUNT / refOut;
+    }
+
+    function _quoteFermiOrZero(uint256 amountIn) internal returns (uint256 out) {
+        try router.quoteVenueV1(FERMI, USDC, WETH, amountIn) returns (uint256 amountOut, address) {
+            out = amountOut;
+        } catch {
+            out = 0;
         }
     }
 }
