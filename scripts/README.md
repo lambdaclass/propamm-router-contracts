@@ -280,9 +280,6 @@ Every metric is tagged with its durability in the CSV. An unrecognised metric is
 tagged `unknown` rather than assumed stable.
 
 ```bash
-# offline sanity check, no RPC: the deterministic router-overhead benchmark
-python3 scripts/gas/split_economics.py --mock-only
-
 # full run: anvil fork at head + a 10-block depth sweep (the sweep is the slow part)
 ETH_RPC_URL=… python3 scripts/gas/split_economics.py
 
@@ -298,11 +295,16 @@ stopped by the script; it is killed even if a stage fails.
 
 **Output:** `scripts/gas/split_economics_<runId>.csv` (`run_id,metric,value,
 durability,label`) plus a grouped summary. The underlying measurements live in
-`test/GasBench.t.sol` (mock, offline), `test/RealGasFork.t.sol` (real venues on a
-fork) and `test/DepthSampler.t.sol` (multi-block sweep); each emits
-`RESULT|<key>|<value>` lines that this script harvests, so the parsing does not
-depend on log prose. All three skip cleanly without an RPC, so a bare
-`forge test` stays green.
+`test/RealGasFork.t.sol` (real venues on a fork) and `test/DepthSampler.t.sol`
+(multi-block sweep); both emit `RESULT|<key>|<value>` lines that this script
+harvests, so the parsing does not depend on log prose. Both skip cleanly without
+an RPC, so a bare `forge test` stays green.
+
+Everything here measures **real venues**. A mock-venue gas benchmark used to sit
+alongside it and was removed: mocks understated real costs 3.2–8.1×, distorted the
+quote term far more than the swap term, and had already produced two wrong
+published figures. Mock contracts are still used by the correctness tests, where
+determinism is the point and gas is not.
 
 > **One caveat the numbers cannot settle.** The sweep reports how often a venue is
 > *naturally* quotable — quotable at a block's own timestamp, with no time-warping

@@ -12,7 +12,7 @@ import {PRIO_UPDATE_REGISTRY} from "../test/interfaces/IPrioUpdateRegistry.sol";
 import {ForkGate} from "./helpers/ForkGate.sol";
 
 /// @notice Real-venue execution gas on a mainnet fork, for the entrypoints the
-/// mock benchmark (`GasBench.t.sol`) can only approximate.
+/// mock venues could only ever approximate.
 ///
 /// The obstacle this has to solve first: registry-priced venues publish pricing
 /// lanes just-in-time, so at any given block most of them revert `0x666a2814`.

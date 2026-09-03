@@ -9,15 +9,14 @@ Two kinds of number come out of this, and they age very differently:
                  Fermi's usable depth moved ~3.6x in 17 hours, so a single
                  reading is not evidence; these need re-running and trending.
 
-Modes
-  --mock-only   offline, no RPC: the deterministic router-overhead benchmark.
-  (default)     anvil fork at head (or --block) for the real-venue gas, plus
-                a multi-block sweep for depth/edge straight against the RPC.
+What it runs
+  An anvil fork at head (or --block) for the real-venue gas, plus a
+  multi-block sweep for depth/edge straight against the RPC.
 
 Output: scripts/gas/split_economics_<runId>.csv, one row per metric, plus a
 printed summary. Re-run it and diff the CSVs to see what moved.
 
-Env: ETH_RPC_URL (or RPC_URL) - archive node. Not needed for --mock-only.
+Env: ETH_RPC_URL (or RPC_URL) - an archive node. Required.
 Stdlib only, per this directory's convention.
 """
 import argparse
@@ -49,9 +48,6 @@ META = {
     "gas_viaVenue_fermi": ("durable", "swapViaVenueV1 -> Fermi"),
     "gas_viaVenue_uniswap": ("durable", "swapViaVenueV1 -> Uniswap V3"),
     "gas_swapV1": ("durable", "swapV1 (quotes whole whitelist)"),
-    "mock_multiLeg_per_leg": ("durable", "mock: swapMultiLegV1 per added leg"),
-    "mock_split_per_leg": ("durable", "mock: swapSplitV1 per added leg"),
-    "mock_selected_per_venue": ("durable", "mock: selectedVenues per added venue"),
 }
 
 
@@ -132,7 +128,6 @@ def main():
     ap.add_argument("--samples", type=int, default=10, help="blocks in the depth sweep (default 10)")
     ap.add_argument("--step", type=int, default=720, help="blocks between samples (default 720, ~2.4h)")
     ap.add_argument("--port", type=int, default=8545, help="anvil port (default 8545)")
-    ap.add_argument("--mock-only", action="store_true", help="offline: router-overhead benchmark only")
     ap.add_argument("--no-sweep", action="store_true", help="skip the slow multi-block depth sweep")
     ap.add_argument("--out", help="output CSV (default: scripts/gas/split_economics_<runId>.csv)")
     args = ap.parse_args()
@@ -142,59 +137,40 @@ def main():
     out = Path(args.out) if args.out else OUT_DIR / ("split_economics_%s.csv" % run_id)
     results = {}
 
-    print("\n[1/3] router-overhead benchmark (mock venues, offline)")
-    r = sh(["forge", "test", "--match-path", "test/GasBench.t.sol", "-vv"], timeout=900)
-    if r.returncode != 0:
-        print((r.stdout or r.stderr)[-2500:])
-        sys.exit("error: mock benchmark failed")
-    for label, pat in (
-        ("mock_multiLeg_per_leg", r"swapMultiLegV1 delta\s+(\d+)"),
-        ("mock_split_per_leg", r"swapSplitV1 delta\s+(\d+)"),
-        ("mock_selected_per_venue", r"selectedVenues delta\s+(\d+)"),
-    ):
-        m = re.findall(pat, r.stdout)
-        if m:
-            results[label] = int(m[-1])
-    print("  ok - %d metrics" % len(results))
+    rpc = os.environ.get("ETH_RPC_URL") or os.environ.get("RPC_URL")
+    if not rpc:
+        sys.exit("error: set ETH_RPC_URL (or RPC_URL) to an archive node")
 
-    if args.mock_only:
-        print("\n[2/3] skipped (--mock-only)")
-        print("[3/3] skipped (--mock-only)")
-    else:
-        rpc = os.environ.get("ETH_RPC_URL") or os.environ.get("RPC_URL")
-        if not rpc:
-            sys.exit("error: set ETH_RPC_URL (or RPC_URL) to an archive node, or pass --mock-only")
-
-        print("\n[2/3] real-venue gas on an anvil fork")
-        proc, local = start_anvil(rpc, args.block, args.port)
-        try:
-            for name in ("test_allMethodsSameOrder", "test_capacityRecheck"):
-                rr = sh(["forge", "test", "--match-test", name, "-vv"],
-                        env={"RPC_URL": local}, timeout=1800)
-                got = harvest(rr.stdout)
-                if not got:
-                    why = "failed" if rr.returncode else "no venue quotable?"
-                    print("  warning: %s produced no RESULT lines (%s)" % (name, why))
-                results.update(got)
-                print("  %s: %d metrics" % (name, len(got)))
-        finally:
-            stop_anvil(proc)
-            print("  anvil stopped")
-
-        if args.no_sweep:
-            print("\n[3/3] skipped (--no-sweep)")
-        else:
-            print("\n[3/3] depth/edge sweep: %d blocks, step %d (direct RPC, slow)"
-                  % (args.samples, args.step))
-            rr = sh(["forge", "test", "--match-path", "test/DepthSampler.t.sol", "-vv"],
-                    env={"RPC_URL": rpc, "SAMPLES": str(args.samples), "STEP": str(args.step)},
-                    timeout=5400)
+    print("\n[1/2] real-venue gas on an anvil fork")
+    proc, local = start_anvil(rpc, args.block, args.port)
+    try:
+        for name in ("test_allMethodsSameOrder", "test_capacityRecheck"):
+            rr = sh(["forge", "test", "--match-test", name, "-vv"],
+                    env={"RPC_URL": local}, timeout=1800)
             got = harvest(rr.stdout)
             if not got:
-                why = "failed" if rr.returncode else "unexpected"
-                print("  warning: sweep produced no RESULT lines (%s)" % why)
+                why = "failed" if rr.returncode else "no venue quotable?"
+                print("  warning: %s produced no RESULT lines (%s)" % (name, why))
             results.update(got)
-            print("  ok - %d metrics" % len(got))
+            print("  %s: %d metrics" % (name, len(got)))
+    finally:
+        stop_anvil(proc)
+        print("  anvil stopped")
+
+    if args.no_sweep:
+        print("\n[2/2] skipped (--no-sweep)")
+    else:
+        print("\n[2/2] depth/edge sweep: %d blocks, step %d (direct RPC, slow)"
+              % (args.samples, args.step))
+        rr = sh(["forge", "test", "--match-path", "test/DepthSampler.t.sol", "-vv"],
+                env={"RPC_URL": rpc, "SAMPLES": str(args.samples), "STEP": str(args.step)},
+                timeout=5400)
+        got = harvest(rr.stdout)
+        if not got:
+            why = "failed" if rr.returncode else "unexpected"
+            print("  warning: sweep produced no RESULT lines (%s)" % why)
+        results.update(got)
+        print("  ok - %d metrics" % len(got))
 
     rows = []
     for k, v in results.items():
