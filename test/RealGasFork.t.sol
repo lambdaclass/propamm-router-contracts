@@ -816,4 +816,187 @@ contract RealGasForkTest is ForkGate {
             vm.revertToState(snap);
         }
     }
+
+    // ---- capacity re-check: has any venue gained depth? -------------------
+
+    uint256[9] LADDER = [
+        uint256(100_000e6),
+        250_000e6,
+        500_000e6,
+        750_000e6,
+        1_000_000e6,
+        1_500_000e6,
+        2_000_000e6,
+        3_000_000e6,
+        5_000_000e6
+    ];
+
+    function test_capacityRecheck() public {
+        uint256 t0 = block.timestamp;
+        console2.log("fork block", block.number);
+        console2.log("timestamp ", t0);
+        console2.log("quotable BEFORE any patching:", _liveCount());
+        console2.log("");
+
+        // Uniswap first: always live, and it is the benchmark every venue is
+        // judged against.
+        console2.log("=== Uniswap V3 reference ladder ===");
+        uint256[9] memory uni;
+        for (uint256 j = 0; j < 9; j++) {
+            uni[j] = _quoteOrZero(UNISWAP_ROUTER_02, LADDER[j]);
+            console2.log("   size / WETH out", LADDER[j], uni[j]);
+        }
+        console2.log("");
+
+        for (uint256 i = 0; i < 6; i++) {
+            vm.warp(t0);
+            uint256[] memory c = _candidates(VENUES[i]);
+            bool ok = false;
+            uint256 usedTs = 0;
+            for (uint256 j = 0; j < c.length && !ok; j++) {
+                vm.warp(c[j]);
+                if (_quotes(VENUES[i])) {
+                    ok = true;
+                    usedTs = c[j];
+                }
+            }
+            console2.log("--- venue", VENUES[i]);
+            if (!ok) {
+                console2.log("      lane NOT recoverable at this block");
+                continue;
+            }
+            uint256 age = t0 > usedTs ? t0 - usedTs : 0;
+            console2.log("      lane age, seconds", age);
+            uint256 cap = 0;
+            for (uint256 j = 0; j < 9; j++) {
+                uint256 o = _quoteOrZero(VENUES[i], LADDER[j]);
+                if (o == 0) {
+                    console2.log("      cannot price", LADDER[j]);
+                    break;
+                }
+                // bp advantage over Uniswap at this size (0 if worse)
+                int256 bp = uni[j] == 0 ? int256(0) : (int256(o) - int256(uni[j])) * 10_000 / int256(uni[j]);
+                console2.log("      size", LADDER[j]);
+                console2.log("        WETH out", o);
+                console2.log("        vs Uniswap, bp", bp);
+                cap = LADDER[j];
+                if (j > 0) {
+                    // saturation: output did not grow with a bigger order
+                    uint256 oPrev = _quoteOrZero(VENUES[i], LADDER[j - 1]);
+                    if (o <= oPrev) {
+                        console2.log("        SATURATED -- flat vs previous size");
+                        cap = LADDER[j - 1];
+                        break;
+                    }
+                }
+            }
+            console2.log("      usable depth at least, USDC", cap);
+        }
+    }
+
+    // ---- with Fermi deep, which route actually wins? ----------------------
+    //
+    // METHODOLOGY LIMIT: real venues have finite inventory, and a warm-up run
+    // CONSUMES it. So the warm-then-measure discipline used everywhere else in
+    // this file cannot be applied at order sizes near a venue's capacity --
+    // the measured call would hit a drained venue. Delivery and routing are
+    // therefore measured with single clean calls (correct amounts, cold gas),
+    // and warm gas at these sizes is simply not obtainable this way.
+
+    address constant FERMI2 = 0x5979458912F80B96d30D4220af8E2e4925A33320;
+
+    function _fermiLane() internal returns (bool) {
+        if (_quotes(FERMI2)) return true;
+        uint256[] memory c = _candidates(FERMI2);
+        for (uint256 i = 0; i < c.length; i++) {
+            vm.warp(c[i]);
+            if (_quotes(FERMI2)) return true;
+        }
+        return false;
+    }
+
+    function _splitOne(uint256 amt) internal returns (uint256 g, uint256 ev, uint256 out) {
+        address[] memory v = new address[](1);
+        v[0] = FERMI2;
+        uint256[] memory noh = new uint256[](0);
+        vm.recordLogs();
+        vm.startPrank(taker);
+        uint256 st = gasleft();
+        out = router.swapSplitV1(v, noh, USDC, WETH, amt, 0, 0, 8, taker, block.timestamp + 300);
+        g = st - gasleft();
+        vm.stopPrank();
+        Vm.Log[] memory lg = vm.getRecordedLogs();
+        bytes32 t = keccak256("Swapped(address,address,address,uint256,uint256,address,address)");
+        for (uint256 i = 0; i < lg.length; i++) {
+            if (lg[i].emitter == address(router) && lg[i].topics[0] == t) ev++;
+        }
+    }
+
+    function _twoLeg(uint256 fermiPart, uint256 uniPart) internal returns (uint256 g, uint256 out) {
+        IPropAMMRouter.Leg[] memory legs = new IPropAMMRouter.Leg[](2);
+        legs[0] = IPropAMMRouter.Leg({venue: FERMI2, amountIn: fermiPart, minOut: 0});
+        legs[1] = IPropAMMRouter.Leg({venue: router.fallbackSwapRouter(), amountIn: uniPart, minOut: 0});
+        vm.startPrank(taker);
+        uint256 st = gasleft();
+        out = router.swapMultiLegV1(legs, USDC, WETH, 0, 0, taker, block.timestamp + 300);
+        g = st - gasleft();
+        vm.stopPrank();
+    }
+
+    function _countSwapped() internal returns (uint256 n) {
+        Vm.Log[] memory lg = vm.getRecordedLogs();
+        bytes32 t = keccak256("Swapped(address,address,address,uint256,uint256,address,address)");
+        for (uint256 i = 0; i < lg.length; i++) {
+            if (lg[i].emitter == address(router) && lg[i].topics[0] == t) n++;
+        }
+    }
+
+    /// @dev Which venue each Swapped event names, so a silent fallback is visible.
+    function test_diagnoseRoutes() public {
+        require(_fermiLane(), "lane");
+        uint256 snap = vm.snapshotState();
+        address fb = router.fallbackSwapRouter();
+        console2.log("fallbackSwapRouter", fb);
+        console2.log("FERMI             ", FERMI2);
+        console2.log("");
+
+        uint256[2] memory sizes = [uint256(1_000_000e6), 2_000_000e6];
+        for (uint256 i = 0; i < 2; i++) {
+            uint256 amt = sizes[i];
+            console2.log("=== order ===", amt);
+            console2.log("  Fermi quote at this size ", _quoteOrZero(FERMI2, amt));
+            console2.log("  Uniswap quote at this size", _quoteOrZero(UNISWAP_ROUTER_02, amt));
+
+            // Fermi only
+            _fund(taker, 60_000_000e6);
+            vm.recordLogs();
+            vm.startPrank(taker);
+            (uint256 o1,) = router.swapViaVenueV1(FERMI2, USDC, WETH, amt, 0, taker, block.timestamp + 300);
+            vm.stopPrank();
+            uint256 n1 = _countSwapped();
+            console2.log("  swapViaVenueV1 -> Fermi delivered", o1);
+            console2.log("     events", n1);
+            vm.revertToState(snap);
+            require(_fermiLane(), "lane");
+
+            // two-leg: Fermi 1.5M cap + Uniswap remainder (only when it splits)
+            if (amt > 1_500_000e6) {
+                _fund(taker, 60_000_000e6);
+                IPropAMMRouter.Leg[] memory legs = new IPropAMMRouter.Leg[](2);
+                legs[0] = IPropAMMRouter.Leg({venue: FERMI2, amountIn: 1_500_000e6, minOut: 0});
+                legs[1] = IPropAMMRouter.Leg({venue: fb, amountIn: amt - 1_500_000e6, minOut: 0});
+                vm.recordLogs();
+                vm.startPrank(taker);
+                uint256 o2 = router.swapMultiLegV1(legs, USDC, WETH, 0, 0, taker, block.timestamp + 300);
+                vm.stopPrank();
+                uint256 n2 = _countSwapped();
+                console2.log("  multileg Fermi1.5M+Uni delivered", o2);
+                console2.log("     events", n2);
+                console2.log("     (Fermi alone at 1.5M would be", _quoteOrZero(FERMI2, 1_500_000e6));
+                vm.revertToState(snap);
+                require(_fermiLane(), "lane");
+            }
+            console2.log("");
+        }
+    }
 }
