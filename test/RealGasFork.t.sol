@@ -62,6 +62,11 @@ contract RealGasForkTest is ForkGate {
         vm.deal(taker, 10 ether);
     }
 
+    /// @dev Machine-readable line for `scripts/gas/split_economics.py`.
+    function _emit(string memory key, uint256 v) internal pure {
+        console2.log(string.concat("RESULT|", key, "|", vm.toString(v)));
+    }
+
     function _fund(address who, uint256 amt) internal {
         vm.store(USDC, keccak256(abi.encode(who, USDC_BALANCES_SLOT)), bytes32(amt));
     }
@@ -674,15 +679,21 @@ contract RealGasForkTest is ForkGate {
         _forceAllFresh();
         _viaVenue(FERMI, ORDER);
         _forceAllFresh();
-        console2.log("swapViaVenueV1 -> Fermi        ", _viaVenue(FERMI, ORDER));
+        uint256 gFermi = _viaVenue(FERMI, ORDER);
+        console2.log("swapViaVenueV1 -> Fermi        ", gFermi);
+        _emit("gas_viaVenue_fermi", gFermi);
         _forceAllFresh();
         _viaVenue(UNISWAP_ROUTER_02, ORDER);
         _forceAllFresh();
-        console2.log("swapViaVenueV1 -> Uniswap V3   ", _viaVenue(UNISWAP_ROUTER_02, ORDER));
+        uint256 gUni = _viaVenue(UNISWAP_ROUTER_02, ORDER);
+        console2.log("swapViaVenueV1 -> Uniswap V3   ", gUni);
+        _emit("gas_viaVenue_uniswap", gUni);
         _forceAllFresh();
         _swapV1(ORDER);
         _forceAllFresh();
-        console2.log("swapV1 (quotes all 6)          ", _swapV1(ORDER));
+        uint256 gSwapV1 = _swapV1(ORDER);
+        console2.log("swapV1 (quotes all 6)          ", gSwapV1);
+        _emit("gas_swapV1", gSwapV1);
         console2.log("");
 
         for (uint256 n = 2; n <= 4; n++) {
@@ -703,6 +714,10 @@ contract RealGasForkTest is ForkGate {
             console2.log("  swapMultiLegV1           ", b);
             console2.log("  swapSplitV1              ", c);
             console2.log("     Swapped events        ", ev);
+            _emit(string.concat("gas_selectedVenues_n", vm.toString(n)), a);
+            _emit(string.concat("gas_multiLeg_n", vm.toString(n)), b);
+            _emit(string.concat("gas_split_n", vm.toString(n)), c);
+            _emit(string.concat("split_events_n", vm.toString(n)), ev);
         }
     }
 
@@ -891,6 +906,7 @@ contract RealGasForkTest is ForkGate {
                 }
             }
             console2.log("      usable depth at least, USDC", cap);
+            _emit(string.concat("depth_usdc6_venue", vm.toString(i)), cap);
         }
     }
 

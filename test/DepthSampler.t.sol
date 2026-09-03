@@ -44,6 +44,12 @@ contract DepthSamplerTest is Test {
 
     IPropAMMRouter router = IPropAMMRouter(LIVE_ROUTER);
 
+    /// @dev Machine-readable line for `scripts/gas/split_economics.py` to harvest.
+    /// Human logs stay as they are; this is a stable parallel channel.
+    function _emit(string memory key, uint256 v) internal pure {
+        console2.log(string.concat("RESULT|", key, "|", vm.toString(v)));
+    }
+
     function _q(address v, uint256 amt) internal returns (uint256 out) {
         try router.quoteVenueV1(v, USDC, WETH, amt) returns (uint256 o, address) {
             out = o;
@@ -160,5 +166,14 @@ contract DepthSamplerTest is Test {
         console2.log("TWO OR MORE naturally fresh in", multiFresh);
         console2.log("median Fermi depth", _median(depths));
         console2.log("median Fermi edge @1M, bp", _median(bp1m));
+
+        _emit("samples", samples);
+        _emit("span_blocks", samples * step);
+        _emit("head_block", head);
+        _emit("fermi_lane_recoverable", fermiOk);
+        _emit("natural_fresh_ge1", anyFresh);
+        _emit("natural_fresh_ge2", multiFresh);
+        _emit("fermi_depth_median_usdc6", _median(depths));
+        _emit("fermi_edge_1m_bp_median", _median(bp1m));
     }
 }
