@@ -27,6 +27,14 @@ contract PropAMMRouterForkTests is Test {
     /// @dev The Kipseli PAMM whitelisted (via `addVenue`) on the live demo router.
     address constant NEW_KIPSELI_PAMM = 0x71e790dd841c8A9061487cb3E78C288E75cE0B3d;
     address constant NEW_FERMI_ROUTER = 0x5979458912F80B96d30D4220af8E2e4925A33320;
+    /// @dev Fermi's live pricing contract: the account that calls `getState`
+    /// while quoting, which is what scopes the registry lane. Fermi rotates
+    /// it when it redeploys; see `_updateFermiPrice` for how to refresh it.
+    address constant FERMI_PRICER = 0x5B56042558012d21Fd3578C8b1d4519196517241;
+    /// @dev The inventory account `NEW_FERMI_ROUTER` pays tokenOut from, via
+    /// `transferFrom`. Found as the `from` of that call inside Fermi's `swap`
+    /// in `forge test -vvvv`.
+    address constant FERMI_VAULT = 0x585d44727129B9C69791B10238Ca605932938B4F;
 
     /// @dev Block of mainnet tx
     /// 0x7c3cb5e32867d724a51cbaede51c165454cbc59324511ff3470b983acaa705f0, a
@@ -86,6 +94,7 @@ contract PropAMMRouterForkTests is Test {
     /// It updates the price before sending the swap transaction.
     function test_swapViaVenueV1Fermi() public {
         _updateFermiPrice();
+        _approveFermiVault();
         _runSwapViaVenueV1(NEW_FERMI_ROUTER);
     }
 
@@ -138,7 +147,7 @@ contract PropAMMRouterForkTests is Test {
         // venue actually reads empty, so `getState` reverts with `0x666a2814`
         // and the whole quote fails. When that happens, refresh this address
         // from the `getState` caller in `forge test -vvvv`.
-        address priceTarget = 0x5B56042558012d21Fd3578C8b1d4519196517241;
+        address priceTarget = FERMI_PRICER;
         uint256 laneIndex = 0x2eec03b8999af9793df60f1395a1b41c29e22b324ea3200ca21bc692979b9d46;
         // Single packed price slot; replayed verbatim, the timestamp is
         // restamped to fork time in `_updateRegistryState`.
@@ -147,6 +156,22 @@ contract PropAMMRouterForkTests is Test {
         uint256[] memory slots = new uint256[](1);
         slots[0] = priceSlot0;
         _updateRegistryState(priceTarget, laneIndex, slots);
+    }
+
+    /// @dev Grants `NEW_FERMI_ROUTER` a max WETH allowance from `FERMI_VAULT`.
+    ///
+    /// Fermi settles a swap by `transferFrom`-ing tokenOut out of the vault to
+    /// the recipient, so its router needs the vault's allowance. On
+    /// mainnet the vault currently has it at zero (Fermi is not publishing
+    /// prices either, so the venue is idle), which makes Fermi's `swap`
+    /// revert; the router then falls back to Uniswap V3, whose output is below
+    /// the replayed Fermi quote, and the swap dies with "Too little received".
+    /// The test wants to exercise the router's propAMM dispatch, not Fermi's
+    /// operational state, so the allowance is restored in the fork the same
+    /// way the price lane is republished above. The vault does hold the WETH.
+    function _approveFermiVault() internal {
+        vm.prank(FERMI_VAULT);
+        IERC20(WETH).approve(NEW_FERMI_ROUTER, type(uint256).max);
     }
 
     function _updateRegistryState(address target, uint256 laneIndex, uint256[] memory slots) internal {

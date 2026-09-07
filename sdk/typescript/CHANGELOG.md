@@ -2,6 +2,13 @@
 
 All notable changes to the TypeScript SDK (`propamm`) are documented here.
 
+## [Unreleased]
+
+### Added
+
+- `EL_ZORRO` venue constant in `common/pamms`, plus its `elzorro` entry in
+  `PAMMS` (and therefore in the `PammName` union).
+
 ## [1.3.0] - 2026-08-28
 
 ### Added

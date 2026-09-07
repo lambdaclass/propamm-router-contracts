@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # execute_direct_swaps.sh — fire N $1 swaps DIRECTLY at each propAMM venue
-# (KIPSELI -> FERMI -> KIPSELI -> ...), bypassing the PropAMM router entirely.
+# (KIPSELI -> FERMI -> EL_ZORRO -> KIPSELI -> ...), bypassing the PropAMM router
+# entirely.
 #
 # Unlike execute_swaps.sh there is NO Uniswap V3 fallback and NO frontend fee:
 # a venue that cannot fill is skipped (before any funds move) or the tx simply
@@ -14,8 +15,8 @@
 #     to ~0 when every planned Fermi swap executes). Atomic: a failure just
 #     reverts, nothing can get stranded.
 #
-#   KIPSELI (two txs, push-payment — it only implements `IPropAMM`)
-#     tx A: ERC20.transfer(KIPSELI, amountIn)        <- funds pushed first
+#   KIPSELI, EL_ZORRO (two txs, push-payment — they only implement `IPropAMM`)
+#     tx A: ERC20.transfer(venue, amountIn)          <- funds pushed first
 #     tx B: swap(tokenIn, tokenOut, amountIn, minOut, recipient, deadline)
 #     Both are broadcast back-to-back with explicit sequential nonces (no wait
 #     between broadcasts) so they normally land adjacent in the same block,
@@ -30,11 +31,12 @@
 # and moves on. It then quotes the venue directly (`IPropAMM.quote` via
 # eth_call) and sets AMOUNT_OUT_MIN to the quote minus SLIPPAGE_BPS (default
 # 50 bps). A failed quote also skips the swap: with no fallback there is no
-# reason to push funds (Kipseli) or burn gas (Fermi) on a doomed fill.
-# Kipseli's quote is a simulated swap that pulls tokenIn from the CALLER, so
-# it is quoted `--from` the sender, which actually holds the funds (this is
-# the very reason the router can never auto-select Kipseli; direct quoting
-# should fare better, but is only verifiable while Kipseli's lane is fresh).
+# reason to push funds (the push-payment venues) or burn gas (Fermi) on a
+# doomed fill. Kipseli's quote is a simulated swap that pulls tokenIn from the
+# CALLER, so it is quoted `--from` the sender, which actually holds the funds
+# (this is the very reason the router can never auto-select Kipseli; direct
+# quoting should fare better, but is only verifiable while Kipseli's lane is
+# fresh).
 #
 # A one-shot preflight also checks the sender's tokenIn balance: the run
 # aborts if it cannot fund even a single swap, and warns (but proceeds) if it
@@ -50,16 +52,21 @@
 # Usage:
 #   ETH_RPC_URL=<rpc> PK=<priv-key> ./scripts/execute_direct_swaps.sh <num_swaps> [venue]
 #
-# With no <venue>, the script round-robins KIPSELI -> FERMI across the N
-# swaps. Pass a venue name (e.g. FERMI, case-insensitive) to force ALL N
-# swaps at that single venue instead.
+# With no <venue>, the script round-robins KIPSELI -> FERMI -> EL_ZORRO across
+# the N swaps. Pass a venue name to force ALL N swaps at that single venue
+# instead. Names are matched case-insensitively and ignoring `_`/`-`, so the
+# SDK's `elzorro` key and this script's `EL_ZORRO` label both resolve.
 #
 # Examples:
-#   # 4 swaps alternating KIPSELI -> FERMI:
-#   ETH_RPC_URL=https://mainnet.infura.io/v3/<key> PK=0x... ./scripts/execute_direct_swaps.sh 4
+#   # 6 swaps rotating KIPSELI -> FERMI -> EL_ZORRO:
+#   ETH_RPC_URL=https://mainnet.infura.io/v3/<key> PK=0x... ./scripts/execute_direct_swaps.sh 6
 #
 #   # 10 swaps, all directly at FERMI:
 #   ETH_RPC_URL=... PK=... ./scripts/execute_direct_swaps.sh 10 fermi
+#
+#   # 10 swaps, all directly at EL_ZORRO (push-payment: two txs per swap, so
+#   # every one carries the stranding caveat above):
+#   ETH_RPC_URL=... PK=... ./scripts/execute_direct_swaps.sh 10 elzorro
 #
 #   # Give Kipseli's price updater up to 5 minutes to refresh before skipping:
 #   ACTIVE_WAIT_SECS=300 ETH_RPC_URL=... PK=... ./scripts/execute_direct_swaps.sh 2 kipseli
@@ -172,7 +179,7 @@ VENUE_FILTER="${2:-}"                    # optional: force all swaps at one venu
 if ! [[ "$NUM_SWAPS" =~ ^[1-9][0-9]*$ ]]; then
   echo "usage: ETH_RPC_URL=<rpc> PK=<key> $0 <num_swaps> [venue]" >&2
   echo "  <num_swaps> must be a positive integer" >&2
-  echo "  [venue]     optional venue name (KIPSELI or FERMI) to target for every swap" >&2
+  echo "  [venue]     optional venue name (KIPSELI, FERMI or EL_ZORRO) to target for every swap" >&2
   exit 1
 fi
 : "${ETH_RPC_URL:?set ETH_RPC_URL to the JSON-RPC endpoint}"
@@ -190,22 +197,28 @@ USDC=0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
 WETH=0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2
 
 # Venues, indexed in lockstep: VENUE_NAMES[i] lives at VENUE_ADDRS[i].
-# KIPSELI speaks IPropAMM only (push-payment); FERMI is hit through its
-# bespoke single-tx pull interface.
-VENUE_NAMES=(KIPSELI FERMI)
+# KIPSELI and EL_ZORRO speak IPropAMM only (push-payment); FERMI is hit through
+# its bespoke single-tx pull interface. Anything that is not FERMI_NAME takes
+# the generic push path below, so a new IPropAMM venue is just two more lines.
+VENUE_NAMES=(KIPSELI FERMI EL_ZORRO)
 VENUE_ADDRS=(
   0x71e790dd841c8A9061487cb3E78C288E75cE0B3d
   0x5979458912F80B96d30D4220af8E2e4925A33320
+  0xCF211B4dD0D2be5C173Ea57Bcf938FC61d1d3bd3
 )
 NUM_VENUES=${#VENUE_ADDRS[@]}
 FERMI_NAME=FERMI                         # the pull-payment special case below keys off this
 
-# Build the list of venue indices to actually fire at.
+# Build the list of venue indices to actually fire at. Matching drops case and
+# `_`/`-` so `EL_ZORRO`, `el_zorro` and the SDK's `elzorro` all name the same
+# venue; no two VENUE_NAMES collide once stripped.
+norm_venue() { printf '%s' "$1" | tr -d '[:space:]_-' | tr '[:lower:]' '[:upper:]'; }
+
 ACTIVE_IDXS=()
 if [[ -n "$VENUE_FILTER" ]]; then
-  want=$(printf '%s' "$VENUE_FILTER" | tr '[:lower:]' '[:upper:]')
+  want=$(norm_venue "$VENUE_FILTER")
   for ((v = 0; v < NUM_VENUES; v++)); do
-    if [[ "$want" == "${VENUE_NAMES[$v]}" ]]; then ACTIVE_IDXS=("$v"); break; fi
+    if [[ "$want" == "$(norm_venue "${VENUE_NAMES[$v]}")" ]]; then ACTIVE_IDXS=("$v"); break; fi
   done
   if [[ ${#ACTIVE_IDXS[@]} -eq 0 ]]; then
     echo "error: unknown venue '$VENUE_FILTER'; valid: ${VENUE_NAMES[*]}" >&2
@@ -220,7 +233,7 @@ FILLED_COUNT=()                         # per-venue successful direct fills
 SKIPPED_COUNT=()                        # per-venue skips (inactive / quote failed)
 for ((v = 0; v < NUM_VENUES; v++)); do FILLED_COUNT+=(0); SKIPPED_COUNT+=(0); done
 FAILED_COUNT=0                          # tx reverted / unmined (nothing stranded)
-STRANDED_COUNT=0                        # Kipseli pushes whose swap didn't fill
+STRANDED_COUNT=0                        # push-payment pushes whose swap didn't fill
 STRANDED_TOTAL=0                        # cumulative stranded tokenIn units
 TOTAL_GAS_WEI=0                         # cumulative gasUsed * effectiveGasPrice
 BUILD_TITAN=0
@@ -434,8 +447,8 @@ receipt_gas() {
 }
 
 # --- venue gating & quoting ---------------------------------------------------
-# isActive(tokenIn, tokenOut) — a free view; the one gate that keeps Kipseli's
-# push-payment from ever stranding funds on a stale venue.
+# isActive(tokenIn, tokenOut) — a free view; the one gate that keeps the
+# push-payment venues from ever stranding funds on a stale venue.
 venue_active() {
   local out
   out=$(cast call "$1" "isActive(address,address)(bool)" "$TOKEN_IN" "$TOKEN_OUT" \
@@ -587,7 +600,7 @@ echo
 
 # --- preflight: does the sender hold the run's tokenIn? -----------------------
 # One free eth_call that catches a fat-fingered AMOUNT_IN before any gas burns:
-# an underfunded run would revert every Fermi pull and every Kipseli push
+# an underfunded run would revert every Fermi pull and every IPropAMM push
 # (each one costing real gas). Hard-stop only when even ONE swap can't be
 # funded; a partial balance just warns, since early swaps can still fill.
 TOTAL_IN=$(muldiv "$AMOUNT_IN" "$NUM_SWAPS" 1)
@@ -606,10 +619,10 @@ fi
 echo
 
 # --- approve once for the run's Fermi share ----------------------------------
-# Only Fermi pulls via allowance; Kipseli is push-payment and needs none. The
-# allowance is sized to exactly the planned Fermi swaps, so it self-depletes
-# to ~0 by the end of a fully-successful run (skipped/failed swaps leave a
-# remainder — re-running shrinks or reuses it via the check below).
+# Only Fermi pulls via allowance; the IPropAMM venues are push-payment and need
+# none. The allowance is sized to exactly the planned Fermi swaps, so it self-
+# depletes to ~0 by the end of a fully-successful run (skipped/failed swaps
+# leave a remainder — re-running shrinks or reuses it via the check below).
 if (( FERMI_PLANNED > 0 )); then
   FERMI_ADDR=${VENUE_ADDRS[$FERMI_IDX]}
   allowance=$(cast call "$TOKEN_IN" "allowance(address,address)(uint256)" "$SENDER" "$FERMI_ADDR" \
@@ -659,8 +672,8 @@ for (( i = 0; i < NUM_SWAPS; i++ )); do
   fi
 
   # --- gate 2: direct quote -> slippage floor --------------------------------
-  # No fallback exists out here, so an unquotable venue means skip — never
-  # push funds (Kipseli) or burn gas (Fermi) on a fill nothing priced.
+  # No fallback exists out here, so an unquotable venue means skip — never push
+  # funds (KIPSELI / EL_ZORRO) or burn gas (Fermi) on a fill nothing priced.
   expected_out=$(quote_venue "$venue")
   if [[ -z "$expected_out" || "$expected_out" == "0" ]]; then
     echo "   skip   : $name is active but its direct quote failed — swap skipped, nothing sent"
@@ -710,7 +723,7 @@ for (( i = 0; i < NUM_SWAPS; i++ )); do
     continue
   fi
 
-  # --- KIPSELI: push-payment, two txs, back-to-back nonces --------------------
+  # --- KIPSELI / EL_ZORRO: push-payment, two txs, back-to-back nonces ---------
   # tx A pushes amountIn to the venue; tx B consumes it. Broadcast both before
   # waiting on either so they normally land adjacent in one block. From here
   # on, a mined A without a successful B means STRANDED funds.

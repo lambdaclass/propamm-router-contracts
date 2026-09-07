@@ -97,8 +97,10 @@ frontend-fee check, and which builder built the landing block.
 | `selectedwithfee` | `swapViaSelectedVenuesWithFeeV1` | the **candidate set** (best-of), plus a fee skim |
 
 `[venues]` is an optional comma-separated, case-insensitive list — valid names are
-`BEBOP`, `FERMI`, `KIPSELI` (order preserved, dups dropped). Omit it to use all
-three. Uniswap V3 is the safety net in every mode.
+`BEBOP`, `FERMI`, `KIPSELI`, `TEMPEST`, `TAURUSFI`, `METRIC`, `EL_ZORRO` (order
+preserved, dups dropped). `_` and `-` are ignored when matching, so the SDK's
+`elzorro` key works as-is. Omit the arg to use all seven. Uniswap V3 is the
+safety net in every mode.
 
 ```bash
 # Best-of {KIPSELI, FERMI} with the frontend fee — the router re-quotes BOTH venues
