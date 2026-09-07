@@ -93,17 +93,16 @@ mod tests {
     }
 
     /// The SDK's addresses must equal the contracts' — they are maintained by
-    /// hand in both places, and `BEBOP` in particular is load-bearing: the
-    /// router dispatches `venue == BEBOP_ROUTER` down a bespoke `IBebopRouter`
-    /// path rather than the generic `IPropAMM` one, so a stale SDK copy sends
-    /// callers at the wrong calling convention.
+    /// hand in both places. Only tokens are covered: `BEBOP_ROUTER` was dropped
+    /// with the bespoke `IBebopRouter` dispatch, so no venue address is
+    /// hardcoded in the contracts any more and `PAMMS` has no contract-side
+    /// counterpart to check against.
     #[test]
     fn address_constants_match_contract() {
         let Some(solidity) = solidity_address_constants() else {
             return;
         };
         for (name, expected) in [
-            ("BEBOP_ROUTER", BEBOP),
             ("USDC", USDC),
             ("USDT", USDT),
             ("WETH", WETH),
@@ -119,9 +118,9 @@ mod tests {
         }
     }
 
-    /// The venues below have no Solidity counterpart to check against: the
-    /// router reaches them through the runtime `addVenue` whitelist and the
-    /// generic `IPropAMM` interface, so only Bebop is hardcoded. If a new
+    /// The venues have no Solidity counterpart to check against: the router
+    /// reaches every one of them through the runtime `addVenue` whitelist and
+    /// the generic `IPropAMM` interface, so only tokens are hardcoded. If a new
     /// `address constant` appears in `src/`, it is a new hardcoded dispatch
     /// target and the SDKs must mirror it — add it to
     /// `address_constants_match_contract` (and to `PAMMS` if it is a venue).
@@ -130,7 +129,7 @@ mod tests {
         let Some(solidity) = solidity_address_constants() else {
             return;
         };
-        let mirrored = ["BEBOP_ROUTER", "USDC", "USDT", "WETH", "ETH_SENTINEL"];
+        let mirrored = ["USDC", "USDT", "WETH", "ETH_SENTINEL"];
         let unmirrored: Vec<_> = solidity
             .keys()
             .filter(|name| !mirrored.contains(&name.as_str()))

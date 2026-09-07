@@ -131,7 +131,6 @@ const ERROR_SIGNATURES: &[&str] = &[
     "InsufficientOutput(uint256,uint256)",
     "Expired()",
     "NoQuotesAvailable()",
-    "TokenOutBalanceDecreased()",
     "InvalidFallbackFee(uint24)",
     "ZeroAddress()",
     "ArrayLengthMismatch()",
@@ -369,7 +368,8 @@ mod tests {
     /// Functions present in the contract ABI that the SDK deliberately does
     /// not bind: self-call internals, UUPS/AccessManaged plumbing.
     const OMITTED_FUNCTIONS: &[&str] = &[
-        "_dispatchVenue(address,address,address,uint256,uint256,address,uint256,uint256)",
+        "_dispatchVenue(address,address,address,uint256,uint256,address,address,uint256,uint256)",
+        "_quoteVenueUnchecked(address,address,address,uint256)",
         "initialize(address,address,address)",
         "proxiableUUID()",
         "upgradeToAndCall(address,bytes)",

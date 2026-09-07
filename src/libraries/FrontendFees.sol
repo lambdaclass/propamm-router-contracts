@@ -6,7 +6,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IPropAMMRouter} from "../interfaces/IPropAMMRouter.sol";
 import {ETH_SENTINEL} from "./Constants.sol";
-import {ETHTransferFailed, ZeroAddress} from "./Errors.sol";
+import {ETHTransferFailed, InsufficientOutput, ZeroAddress} from "./Errors.sol";
 
 /// @title FrontendFees
 /// @notice Util functions for managing optional frontend fees
@@ -49,18 +49,29 @@ library FrontendFees {
     }
 
     /// @notice Splits `delivered` tokenOut (held by this contract) into fee + net,
-    /// forwards the fee to `fee.recipient` and the net to `recipient`.
+    /// forwards the fee to `fee.recipient` and the net to `recipient`, and enforces
+    /// `amountOutMin` against what `recipient` actually received.
     /// @dev Zero-value legs are skipped (gas + tokens that revert on 0-value transfers).
+    /// The net ERC-20 leg is measured as `recipient`'s balance delta so a
+    /// short-crediting token (fee-on-transfer, share-rounding) cannot pass the
+    /// slippage check with a nominal amount the recipient never received.
+    /// Native ETH credits exactly, so the nominal amount is used.
+    /// The fee leg stays nominal: `FrontendFeeCharged` reports what
+    /// the router sent, and a short-credit there is the fee recipient's concern.
     /// @param tokenOut The output token held by this contract.
     /// @param delivered The gross amount this contract received from the swap.
     /// @param fee The fee parameters.
     /// @param recipient The end recipient of the net output.
-    /// @return net The amount forwarded to `recipient`.
+    /// @param amountOutMin The net minimum `recipient` must actually receive;
+    /// reverts `InsufficientOutput` when the measured receipt falls short.
+    /// @return net The amount `recipient` actually received: the balance delta for
+    /// ERC-20s, the nominal amount for native ETH.
     function _skimAndDisburse(
         address tokenOut,
         uint256 delivered,
         IPropAMMRouter.FrontendFee calldata fee,
-        address recipient
+        address recipient,
+        uint256 amountOutMin
     ) internal returns (uint256 net) {
         uint256 feeAmt = _feeAmount(delivered, fee.bps);
         net = delivered - feeAmt;
@@ -73,13 +84,18 @@ library FrontendFees {
             }
             emit IPropAMMRouter.FrontendFeeCharged(fee.recipient, tokenOut, feeAmt, msg.sender);
         }
-        if (net > 0) {
-            if (tokenOut == ETH_SENTINEL) {
+        if (tokenOut == ETH_SENTINEL) {
+            if (net > 0) {
                 (bool ok,) = recipient.call{value: net}("");
                 require(ok, ETHTransferFailed());
-            } else {
+            }
+        } else {
+            uint256 prevBalance = IERC20(tokenOut).balanceOf(recipient);
+            if (net > 0) {
                 IERC20(tokenOut).safeTransfer(recipient, net);
             }
+            net = IERC20(tokenOut).balanceOf(recipient) - prevBalance;
         }
+        require(net >= amountOutMin, InsufficientOutput(amountOutMin, net));
     }
 }

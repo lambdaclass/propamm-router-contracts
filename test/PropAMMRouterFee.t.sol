@@ -9,10 +9,9 @@ import {IPropAMMRouter} from "../src/interfaces/IPropAMMRouter.sol";
 import {PropAMMRouter} from "../src/PropAMMRouter.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockFeeOnTransferERC20} from "./mocks/MockFeeOnTransferERC20.sol";
+import {MockPropAMM} from "./mocks/MockPropAMM.sol";
 import {MockV3SwapRouter} from "./mocks/MockV3SwapRouter.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
-import {BEBOP_ROUTER} from "../src/interfaces/IBebopRouter.sol";
-import {MockBebop} from "./mocks/MockBebop.sol";
 import "../src/libraries/Errors.sol";
 import {FrontendFees} from "../src/libraries/FrontendFees.sol";
 
@@ -45,8 +44,6 @@ contract PropAMMRouterFeeTest is Test {
         tokenIn = new MockERC20("In", "IN");
         tokenOut = new MockERC20("Out", "OUT");
         router = _deployRouter();
-        vm.prank(owner);
-        router.addVenue(BEBOP_ROUTER);
     }
 
     // Funds the user with tokenIn, pre-funds the mock swap router with tokenOut to
@@ -131,6 +128,62 @@ contract PropAMMRouterFeeTest is Test {
         assertEq(executedVenue, address(swapRouter), "executed venue mismatch");
         assertEq(tokenOut.balanceOf(user), expectedNet);
         assertEq(tokenOut.balanceOf(feeRecipient), expectedFee);
+    }
+
+    // Regression test for audit Issue C: `swapViaSelectedVenuesWithFeeV1` must
+    // compare a selected venue's quote against `grossMin`, not the net
+    // `amountOutMin`. Comparing against the net min lets a venue that cannot
+    // cover output + fee win selection, so the router burns gas on a venue
+    // attempt that the execution-time `grossMin` check can only reject.
+    //
+    // The venue below quotes 902e18, inside the affected interval
+    // [amountOutMin, grossMin) = [900e18, ~904.52e18), and is configured to
+    // FILL 910e18. Letting it fill is what makes the defect observable: if the
+    // venue under-delivered, the fixed and broken paths would both end up on
+    // the Uniswap fallback and the rolled-back venue attempt would leave no
+    // trace to assert on. Because it can fill, a router that wrongly selects it
+    // reports the propAMM as `executedVenue`; a correct one never picks it and
+    // reports the fallback.
+    function test_swapViaSelectedVenuesWithFee_skipsVenueQuotingBelowGrossMin() public {
+        uint16 feeBps = 50;
+        uint256 netMin = 900e18;
+        uint256 grossMin = Math.ceilDiv(netMin * 10_000, 10_000 - feeBps); // ~904.52e18
+
+        // Fallback delivers comfortably above grossMin, so the swap settles there.
+        _prepare(1_000e18, 1_000e18);
+
+        MockPropAMM propAMM = new MockPropAMM();
+        propAMM.setQuote(902e18); // netMin <= quote < grossMin
+        propAMM.setAmountOut(910e18); // could fill grossMin if it were ever called
+        assertGe(propAMM.quoteToReturn(), netMin, "quote must clear the net min");
+        assertLt(propAMM.quoteToReturn(), grossMin, "quote must fall short of the gross min");
+        assertGe(propAMM.amountOutToDeliver(), grossMin, "venue must be able to fill grossMin");
+
+        vm.prank(owner);
+        router.addVenue(address(propAMM));
+
+        address[] memory venues = new address[](1);
+        venues[0] = address(propAMM);
+
+        vm.prank(user);
+        (uint256 amountOut, address executedVenue) = router.swapViaSelectedVenuesWithFeeV1(
+            venues,
+            address(tokenIn),
+            address(tokenOut),
+            1_000e18,
+            netMin,
+            user,
+            block.timestamp + 1,
+            IPropAMMRouter.FrontendFee({bps: feeBps, recipient: feeRecipient})
+        );
+
+        assertEq(executedVenue, address(swapRouter), "venue quoting below grossMin must not be selected");
+        // Independent of `executedVenue`: dispatching a venue pushes `tokenIn` to
+        // it first, and a successful fill would leave that balance behind rather
+        // than rolling it back. A zero balance proves it was never attempted.
+        assertEq(tokenIn.balanceOf(address(propAMM)), 0, "propAMM must never have been pushed tokenIn");
+        assertGe(amountOut, netMin, "recipient must still clear the net minimum");
+        assertEq(tokenOut.balanceOf(user), amountOut);
     }
 
     function test_swapWithFee_revertsFeeTooHigh() public {
@@ -286,11 +339,43 @@ contract PropAMMRouterFeeTest is Test {
             IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
         );
 
-        assertEq(amountOut, net);
-        // Each outbound leg burns another 1%.
+        // Each outbound leg burns another 1%; the returned amount is the user's
+        // measured receipt, not the nominal net.
+        assertEq(amountOut, _afterFot(net));
         assertEq(fotOut.balanceOf(feeRecipient), _afterFot(fee));
         assertEq(fotOut.balanceOf(user), _afterFot(net));
         assertEq(fotOut.balanceOf(address(router)), 0);
+    }
+
+    // The gross-delta check at the router passes, but the outbound burn pushes the
+    // recipient's measured receipt below the net min -> InsufficientOutput.
+    function test_swapWithFee_fotOutBelowMinReverts() public {
+        MockFeeOnTransferERC20 fotOut = new MockFeeOnTransferERC20("FOT", "FOT", 100); // 1%
+        uint256 routerOut = 1_000e18;
+        tokenIn.mint(user, 1_000e18);
+        fotOut.mint(address(swapRouter), routerOut);
+        swapRouter.setAmountOut(routerOut);
+        quoter.setQuote(routerOut);
+        vm.prank(user);
+        tokenIn.approve(address(router), 1_000e18);
+
+        uint256 delivered = _afterFot(routerOut); // credited to the router
+        uint256 fee = delivered * 50 / 10_000;
+        uint256 net = delivered - fee; // nominal net sent to the user
+        uint256 received = _afterFot(net); // what the user is actually credited
+        uint256 netMin = received + 1;
+
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(InsufficientOutput.selector, netMin, received));
+        router.swapWithFeeV1(
+            address(tokenIn),
+            address(fotOut),
+            1_000e18,
+            netMin,
+            user,
+            block.timestamp + 1,
+            IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
+        );
     }
 
     // For any feeBps in [0, MAX_FEE_BPS] and any delivered >= grossMin, the user nets
@@ -318,37 +403,6 @@ contract PropAMMRouterFeeTest is Test {
         assertEq(amountOut, delivered - expectedFee);
         assertGe(amountOut, netMin); // the core guarantee
         assertEq(tokenOut.balanceOf(feeRecipient), expectedFee);
-        assertEq(tokenOut.balanceOf(address(router)), 0);
-    }
-
-    function test_swapViaVenueWithFee_bebopCustodyPath() public {
-        // Place mock Bebop code at the hard-coded BEBOP_ROUTER address.
-        vm.etch(BEBOP_ROUTER, address(new MockBebop()).code);
-
-        uint256 delivered = 1_000e18;
-        tokenIn.mint(user, 1_000e18);
-        tokenOut.mint(BEBOP_ROUTER, delivered); // Bebop delivers this to the router
-        vm.prank(user);
-        tokenIn.approve(address(router), 1_000e18);
-
-        uint256 fee = delivered * 50 / 10_000;
-        uint256 net = delivered - fee;
-
-        vm.prank(user);
-        uint256 amountOut = router.swapViaVenueWithFeeV1(
-            BEBOP_ROUTER,
-            address(tokenIn),
-            address(tokenOut),
-            1_000e18,
-            net,
-            user,
-            block.timestamp + 1,
-            IPropAMMRouter.FrontendFee({bps: 50, recipient: feeRecipient})
-        );
-
-        assertEq(amountOut, net);
-        assertEq(tokenOut.balanceOf(user), net);
-        assertEq(tokenOut.balanceOf(feeRecipient), fee);
         assertEq(tokenOut.balanceOf(address(router)), 0);
     }
 
