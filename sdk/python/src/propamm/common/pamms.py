@@ -11,6 +11,7 @@ KIPSELI: ChecksumAddress = to_checksum_address("0x71e790dd841c8A9061487cb3E78C28
 TEMPEST: ChecksumAddress = to_checksum_address("0x00000003f1ec2379e79F58E12EC6C4F51Ee92149")
 TAURUSFI: ChecksumAddress = to_checksum_address("0x217d58931A8549ca539426AA8152E33dAfc3d95A")
 METRIC: ChecksumAddress = to_checksum_address("0xE715Dc29d2c273D0FC5A03e5Cca9CcB0Abb1dCDB")
+EL_ZORRO: ChecksumAddress = to_checksum_address("0xCF211B4dD0D2be5C173Ea57Bcf938FC61d1d3bd3")
 
 #: Curated propAMM name -> venue address mapping, for the ``venues`` option of
 #: quotes and swaps.
@@ -24,4 +25,5 @@ PAMMS: dict[str, ChecksumAddress] = {
     "tempest": TEMPEST,
     "taurusfi": TAURUSFI,
     "metric": METRIC,
+    "elzorro": EL_ZORRO,
 }

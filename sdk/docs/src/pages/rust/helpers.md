@@ -77,4 +77,4 @@ format_units(1500000.into(), 6);   // "1.5"
 | Module | Exports |
 |---|---|
 | `common::tokens` | `ETH_SENTINEL` (signals native ETH), `USDC`, `USDT`, `WETH` |
-| `common::pamms` | `FERMI`, `BEBOP`, `KIPSELI`, `TEMPEST`, `TAURUSFI`, `METRIC`, `PAMMS` (name → address array) |
+| `common::pamms` | `FERMI`, `BEBOP`, `KIPSELI`, `TEMPEST`, `TAURUSFI`, `METRIC`, `EL_ZORRO`, `PAMMS` (name → address array) |

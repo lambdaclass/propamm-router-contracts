@@ -25,6 +25,7 @@ NAMES = {
     "0x00000003f1ec2379e79f58e12ec6c4f51ee92149": "Tempest",
     "0x217d58931a8549ca539426aa8152e33dafc3d95a": "TaurusFi",
     "0xe715dc29d2c273d0fc5a03e5cca9ccb0abb1dcdb": "Metric",
+    "0xcf211b4dd0d2be5c173ea57bcf938fc61d1d3bd3": "El Zorro",
     "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45": "UniswapRouter",
     "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": "USDC",
     "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2": "WETH",

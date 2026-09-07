@@ -2,6 +2,13 @@
 
 All notable changes to the Python SDK (`propamm`) are documented here.
 
+## [Unreleased]
+
+### Added
+
+- `EL_ZORRO` venue constant in `common.pamms`, plus its `elzorro` entry in
+  `PAMMS`.
+
 ## [1.2.0] - 2026-08-28
 
 ### Added

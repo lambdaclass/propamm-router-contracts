@@ -2,6 +2,13 @@
 
 All notable changes to the Rust SDK (`propamm`) are documented here.
 
+## [Unreleased]
+
+### Added
+
+- `EL_ZORRO` venue constant in `common::pamms`, plus its `elzorro` entry in
+  `PAMMS` (whose length goes from 6 to 7).
+
 ## [1.2.0] - 2026-08-28
 
 ### Added

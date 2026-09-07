@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # execute_swaps.sh — fire N $1 swaps through the PropAMM router, rotating the
-# venue (BEBOP -> FERMI -> KIPSELI -> TEMPEST -> TAURUSFI -> METRIC -> BEBOP
-# -> ...) across calls.
+# venue (BEBOP -> FERMI -> KIPSELI -> TEMPEST -> TAURUSFI -> METRIC -> EL_ZORRO
+# -> BEBOP -> ...) across calls.
 #
 # Each swap sells 1 USDC ($1) for WETH. The swap function depends on MODE:
 #   MODE=withfee (default) -> `swapViaVenueWithFeeV1`: routes to the named venue
@@ -221,7 +221,7 @@ WETH=0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2
 # These are the propAMMs listed in the README's "Deployed Contracts"; a venue
 # must also be whitelisted on the router (`addVenue`) for it to actually fill —
 # an unlisted one just falls back to Uniswap V3.
-VENUE_NAMES=(BEBOP FERMI KIPSELI TEMPEST TAURUSFI METRIC)
+VENUE_NAMES=(BEBOP FERMI KIPSELI TEMPEST TAURUSFI METRIC EL_ZORRO)
 VENUE_ADDRS=(
   0xB09AaA5614916d7AEb59C295C52c92ca82aDdD76
   0x5979458912F80B96d30D4220af8E2e4925A33320
@@ -229,6 +229,7 @@ VENUE_ADDRS=(
   0x00000003f1ec2379e79F58E12EC6C4F51Ee92149
   0x217d58931A8549ca539426AA8152E33dAfc3d95A
   0xE715Dc29d2c273D0FC5A03e5Cca9CcB0Abb1dCDB
+  0xCF211B4dD0D2be5C173Ea57Bcf938FC61d1d3bd3
 )
 NUM_VENUES=${#VENUE_ADDRS[@]}
 
