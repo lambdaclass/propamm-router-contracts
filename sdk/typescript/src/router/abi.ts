@@ -3,8 +3,8 @@ import { parseAbi } from "viem";
 /**
  * Public ABI of `PropAMMRouter` (src/PropAMMRouter.sol), kept as
  * human-readable signatures so viem can fully infer argument and return
- * types. The self-call-only internal (`_dispatchVenue`) and UUPS plumbing
- * are intentionally omitted.
+ * types. The self-call-only internals (`_dispatchVenue`,
+ * `_quoteVenueUnchecked`) and UUPS plumbing are intentionally omitted.
  */
 export const propAmmRouterAbi = parseAbi([
   "struct FrontendFee { uint16 bps; address recipient; }",
@@ -65,7 +65,6 @@ export const propAmmRouterAbi = parseAbi([
   "error InsufficientOutput(uint256 expectedAmount, uint256 receivedAmount)",
   "error Expired()",
   "error NoQuotesAvailable()",
-  "error TokenOutBalanceDecreased()",
   "error InvalidFallbackFee(uint24 fee)",
   "error ZeroAddress()",
   "error ArrayLengthMismatch()",
