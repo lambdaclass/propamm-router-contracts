@@ -38,11 +38,12 @@
 # Usage:
 #   ETH_RPC_URL=<rpc> PK=<priv-key> ./scripts/execute_swaps.sh <num_swaps> [venues]
 #
-# <venues> is an optional comma-separated list of venue names (case-insensitive),
-# e.g. "kipseli,fermi". With none, all venues are used. In the single-venue MODEs
-# the list is round-robined one venue per swap (a single name forces all swaps at
-# that venue); in the selected MODEs the list IS the candidate set the router
-# re-quotes and best-fills across.
+# <venues> is an optional comma-separated list of venue names (case-insensitive,
+# `_` and `-` ignored — so the SDK's `elzorro` key and this script's `EL_ZORRO`
+# label both resolve), e.g. "kipseli,fermi". With none, all venues are used. In
+# the single-venue MODEs the list is round-robined one venue per swap (a single
+# name forces all swaps at that venue); in the selected MODEs the list IS the
+# candidate set the router re-quotes and best-fills across.
 #
 # Examples:
 #   # 3 swaps, default mode (withfee, 0.50% fee), venues round-robin from BEBOP:
@@ -183,7 +184,7 @@ VENUE_FILTER="${2:-}"                    # optional: comma-separated venue names
 if ! [[ "$NUM_SWAPS" =~ ^[1-9][0-9]*$ ]]; then
   echo "usage: ETH_RPC_URL=<rpc> PK=<key> $0 <num_swaps> [venues]" >&2
   echo "  <num_swaps> must be a positive integer" >&2
-  echo "  [venues]    optional comma-separated venue names (e.g. kipseli,fermi)" >&2
+  echo "  [venues]    optional comma-separated venue names (e.g. kipseli,fermi,elzorro)" >&2
   exit 1
 fi
 : "${ETH_RPC_URL:?set ETH_RPC_URL to the JSON-RPC endpoint}"
@@ -238,15 +239,19 @@ NUM_VENUES=${#VENUE_ADDRS[@]}
 # preserved, dups removed. With no arg we use every venue. In the single-venue
 # MODEs this list is round-robined one venue per swap; in the selected MODEs it
 # IS the candidate set the router re-quotes and best-fills across.
+# Matching drops case and `_`/`-` so `EL_ZORRO`, `el_zorro` and the SDK's
+# `elzorro` all name the same venue; no two VENUE_NAMES collide once stripped.
+norm_venue() { printf '%s' "$1" | tr -d '[:space:]_-' | tr '[:lower:]' '[:upper:]'; }
+
 ACTIVE_IDXS=()
 if [[ -n "$VENUE_FILTER" ]]; then
   IFS=',' read -r -a _req <<< "$VENUE_FILTER"
   for nm in "${_req[@]}"; do
-    want=$(printf '%s' "$nm" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')
+    want=$(norm_venue "$nm")
     [[ -z "$want" ]] && continue
     hit=-1
     for ((v = 0; v < NUM_VENUES; v++)); do
-      [[ "$want" == "${VENUE_NAMES[$v]}" ]] && { hit=$v; break; }
+      [[ "$want" == "$(norm_venue "${VENUE_NAMES[$v]}")" ]] && { hit=$v; break; }
     done
     [[ $hit -lt 0 ]] && { echo "error: unknown venue '$nm'; valid: ${VENUE_NAMES[*]}" >&2; exit 1; }
     dup=0
