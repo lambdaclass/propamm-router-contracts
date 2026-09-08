@@ -296,6 +296,11 @@ contract PropAMMRouter is
         address tokenOut; // caller-visible, may be the ETH sentinel
         uint256 amountOutMin; // aggregate floor on the total delivered
         uint256 fallbackMinOut; // caller's floor on the coalesced Uniswap swap
+        // Sum of `legs[].amountIn`, established by whoever produced the legs:
+        // `_validateLegs` for the multileg paths, `amountIn` for the split
+        // (its plan is required to sum to it). Passed rather than re-summed so
+        // the amount pulled and the pro-rata denominator below cannot drift.
+        uint256 totalIn;
         address payTo; // where legs deliver
         address swapFor; // whom the swap is for (events only)
         uint256 deadline;
@@ -344,6 +349,7 @@ contract PropAMMRouter is
             LegRun({
                 tokenIn: tokenIn,
                 tokenIn_: tokenIn_,
+                totalIn: totalIn,
                 tokenOut: tokenOut,
                 amountOutMin: amountOutMin,
                 fallbackMinOut: fallbackMinOut,
@@ -388,6 +394,7 @@ contract PropAMMRouter is
             LegRun({
                 tokenIn: tokenIn,
                 tokenIn_: tokenIn_,
+                totalIn: totalIn,
                 tokenOut: tokenOut,
                 amountOutMin: grossMin,
                 fallbackMinOut: grossFallbackMin,
@@ -427,10 +434,7 @@ contract PropAMMRouter is
         address recipient,
         uint256 deadline
     ) external payable whenNotPaused nonReentrant returns (uint256 amountOut) {
-        require(block.timestamp <= deadline, Expired());
-        require(amountIn > 0, ZeroAmount());
-        require(amountIn <= type(uint128).max, AmountTooLarge(amountIn));
-        require(maxLegs >= 1, InvalidMaxLegs(maxLegs));
+        _validateSplitParams(amountIn, maxLegs, deadline);
 
         (address[] memory venueSet, uint256[] memory hints) = _resolveVenueSet(venues, probeHints);
 
@@ -453,6 +457,7 @@ contract PropAMMRouter is
             LegRun({
                 tokenIn: tokenIn,
                 tokenIn_: tokenIn_,
+                totalIn: amountIn,
                 tokenOut: tokenOut,
                 amountOutMin: amountOutMin,
                 fallbackMinOut: fallbackMinOut,
@@ -486,10 +491,7 @@ contract PropAMMRouter is
         IPropAMMRouter.FrontendFee calldata fee
     ) external payable whenNotPaused nonReentrant returns (uint256 amountOut) {
         FrontendFees._validateFee(fee);
-        require(block.timestamp <= deadline, Expired());
-        require(amountIn > 0, ZeroAmount());
-        require(amountIn <= type(uint128).max, AmountTooLarge(amountIn));
-        require(maxLegs >= 1, InvalidMaxLegs(maxLegs));
+        _validateSplitParams(amountIn, maxLegs, deadline);
 
         (address[] memory venueSet, uint256[] memory hints) = _resolveVenueSet(venues, probeHints);
         uint256 grossMin = FrontendFees._grossUp(amountOutMin, fee.bps);
@@ -503,6 +505,7 @@ contract PropAMMRouter is
             LegRun({
                 tokenIn: tokenIn,
                 tokenIn_: tokenIn_,
+                totalIn: amountIn,
                 tokenOut: tokenOut,
                 amountOutMin: grossMin,
                 fallbackMinOut: grossFallbackMin,
@@ -826,9 +829,12 @@ contract PropAMMRouter is
         // which simulates a full pool swap and reverts internally. This is the
         // documented outcome for an empty whitelist and for a venue list whose
         // every entry is dead or de-listed, so it is worth short-circuiting.
+        // Cached once: `_tryQuote` below is an external call, so the optimizer
+        // cannot hold this across the reference quotes or the candidate loop.
+        address fb = fallbackSwapRouter;
         if (cands.length == 0) {
             legs = new IPropAMMRouter.Leg[](1);
-            legs[0] = IPropAMMRouter.Leg({venue: fallbackSwapRouter, amountIn: amountIn, minOut: 0});
+            legs[0] = IPropAMMRouter.Leg({venue: fb, amountIn: amountIn, minOut: 0});
             return legs;
         }
 
@@ -853,7 +859,7 @@ contract PropAMMRouter is
         // The quoter is trusted admin config, so this is hygiene, not a
         // control: a zero reference is already the "cannot price the fallback"
         // path, which simply lets every candidate through the cutoff.
-        uint256 refOut = _tryQuote(fallbackSwapRouter, tokenIn_, tokenOut_, refSize);
+        uint256 refOut = _tryQuote(fb, tokenIn_, tokenOut_, refSize);
         if (refOut > type(uint128).max) refOut = 0;
 
         IPropAMMRouter.Leg[] memory tmp = new IPropAMMRouter.Leg[](cands.length + 1);
@@ -867,7 +873,7 @@ contract PropAMMRouter is
                 if (refined) break;
                 refined = true;
                 refSize = remaining;
-                refOut = _tryQuote(fallbackSwapRouter, tokenIn_, tokenOut_, refSize);
+                refOut = _tryQuote(fb, tokenIn_, tokenOut_, refSize);
                 if (refOut > type(uint128).max) refOut = 0;
                 if (cands[i].out * refSize <= refOut * cands[i].fill) break;
             }
@@ -889,7 +895,7 @@ contract PropAMMRouter is
         }
 
         if (remaining > 0) {
-            tmp[legCount++] = IPropAMMRouter.Leg({venue: fallbackSwapRouter, amountIn: remaining, minOut: 0});
+            tmp[legCount++] = IPropAMMRouter.Leg({venue: fb, amountIn: remaining, minOut: 0});
         }
 
         legs = new IPropAMMRouter.Leg[](legCount);
@@ -911,6 +917,19 @@ contract PropAMMRouter is
             require(legs[i].amountIn > 0, ZeroAmount());
             totalIn += legs[i].amountIn;
         }
+    }
+
+    /// @dev Shared parameter validation for `swapSplitV1` and
+    /// `swapSplitWithFeeV1`. Extracted so the two cannot drift: both plan the
+    /// same way and must reject the same inputs, and a bound added to only one
+    /// of them would leave the other reachable with the input it was added to
+    /// exclude. `amountIn` is capped at `uint128` because the planner's rate
+    /// comparisons multiply quoted outputs by fills.
+    function _validateSplitParams(uint256 amountIn, uint256 maxLegs, uint256 deadline) internal view {
+        require(block.timestamp <= deadline, Expired());
+        require(amountIn > 0, ZeroAmount());
+        require(amountIn <= type(uint128).max, AmountTooLarge(amountIn));
+        require(maxLegs >= 1, InvalidMaxLegs(maxLegs));
     }
 
     /// @dev Pulls `amountIn` of `tokenIn` from the caller (wrapping ETH when
@@ -983,13 +1002,14 @@ contract PropAMMRouter is
             tokenOut_ = WETH;
             recipient_ = address(this);
         }
+        // Cached: the loop body makes an external call, so the optimizer cannot
+        // keep this in a stack slot across iterations and would re-SLOAD it
+        // once per leg.
+        address fb = fallbackSwapRouter;
         uint256 fbAmount = 0;
         uint256 fbMinOut = 0;
-        // Denominator for the pro-rata scaling of `fallbackMinOut` below.
-        uint256 totalIn = 0;
         for (uint256 i = 0; i < legs.length; i++) {
-            totalIn += legs[i].amountIn;
-            if (legs[i].venue == fallbackSwapRouter) {
+            if (legs[i].venue == fb) {
                 fbAmount += legs[i].amountIn;
                 fbMinOut += legs[i].minOut;
                 continue;
@@ -1037,22 +1057,16 @@ contract PropAMMRouter is
             // `mulDiv` gives a 512-bit intermediate because multileg leg
             // amounts are not uint128-bounded. Flooring keeps the floor from
             // tripping on its own rounding.
-            uint256 callerMin = Math.mulDiv(r.fallbackMinOut, fbAmount, totalIn);
+            uint256 callerMin = Math.mulDiv(r.fallbackMinOut, fbAmount, r.totalIn);
             if (callerMin > uniMin) uniMin = callerMin;
             uint256 prevBal = IERC20(tokenOut_).balanceOf(recipient_);
             UniV3Router.swapExactIn(
-                r.tokenIn_,
-                tokenOut_,
-                resolvedFee(r.tokenIn_, tokenOut_),
-                fbAmount,
-                uniMin,
-                recipient_,
-                fallbackSwapRouter
+                r.tokenIn_, tokenOut_, resolvedFee(r.tokenIn_, tokenOut_), fbAmount, uniMin, recipient_, fb
             );
             uint256 fbOut = IERC20(tokenOut_).balanceOf(recipient_) - prevBal;
             require(fbOut >= uniMin, InsufficientOutput(uniMin, fbOut));
             delivered += fbOut;
-            _emitSwapped(fallbackSwapRouter, r.tokenIn, r.tokenOut, fbAmount, fbOut, r.swapFor);
+            _emitSwapped(fb, r.tokenIn, r.tokenOut, fbAmount, fbOut, r.swapFor);
         }
 
         require(delivered >= r.amountOutMin, InsufficientOutput(r.amountOutMin, delivered));
