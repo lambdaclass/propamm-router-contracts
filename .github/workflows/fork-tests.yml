@@ -1,0 +1,38 @@
+name: Fork tests
+
+# Live-venue integration, kept off the PR gate on purpose: these suites read
+# real propAMM state, and most lanes are stale at any given block, so they
+# cannot distinguish a regression from ordinary market movement quickly enough
+# to gate a merge. Running them daily keeps the signal without the flapping.
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: fork-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fork:
+    name: Fork suites (live venues)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Build
+        run: forge build
+
+      # ARCHIVE_RPC_URL is deliberately NOT set: the depth sweep in
+      # DepthSamplerFork re-forks thousands of blocks into the past and takes
+      # ~5,400s, so it stays opt-in and skips here. Run it by hand when the
+      # economics need re-deriving.
+      - name: Run fork suites
+        env:
+          RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
+        run: forge test --match-path 'test/*Fork*.t.sol' -vv

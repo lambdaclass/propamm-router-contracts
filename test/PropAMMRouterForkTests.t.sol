@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.35;
 
-import {Test} from "forge-std/Test.sol";
+import {ForkGate} from "./helpers/ForkGate.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {IPropAMMRouter} from "../src/interfaces/IPropAMMRouter.sol";
@@ -10,7 +10,7 @@ import {PRIO_UPDATE_REGISTRY, IPrioUpdateRegistry} from "../test/interfaces/IPri
 /// @title PropAMMRouterForkTests
 /// @notice Fork-test rig exercising the `IPropAMMRouter` interface against a
 /// mainnet fork.
-contract PropAMMRouterForkTests is Test {
+contract PropAMMRouterForkTests is ForkGate {
     /// @dev Mainnet USDC (FiatTokenV2_2). Balance slot is 9 (packed with
     /// the high-bit blacklist flag); allowance slot is 10.
     address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
@@ -45,9 +45,7 @@ contract PropAMMRouterForkTests is Test {
     address taker;
 
     function setUp() public {
-        string memory rpc = vm.envString("RPC_URL");
-
-        vm.createSelectFork(rpc);
+        if (!_selectForkOrSkip()) return;
         taker = makeAddr("taker");
 
         // Target the demo environment router

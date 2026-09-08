@@ -45,6 +45,128 @@ interface IPropAMMRouter {
         address recipient;
     }
 
+    /// @notice One leg of a multileg swap.
+    /// @param venue The venue to route this leg through — a whitelisted
+    /// propAMM, or the fallback router address for a plain Uniswap V3 leg.
+    /// @param amountIn The exact amount of `tokenIn` this leg sells.
+    /// @param minOut The minimum `tokenOut` this leg must deliver; a leg
+    /// failing it falls back to Uniswap V3 (coalesced with other failed
+    /// legs). Zero means no per-leg floor: the leg then falls back only on a
+    /// hard venue revert, not on under-delivery — the aggregate
+    /// `amountOutMin` still gates the whole swap. Note: if THIS leg fails and
+    /// falls back, `minOut` is NOT applied to its fallback execution (see
+    /// `swapMultiLegV1`) — it was priced off this venue's typically better
+    /// rate, so applying it to Uniswap would revert the fallback exactly when
+    /// it is needed. Only a leg that names the fallback venue directly
+    /// contributes its `minOut` to the coalesced fallback's floor, and that
+    /// contribution is diluted if failed prop legs merge into the same swap
+    /// (`fallbackMinOut` is the floor that covers them).
+    struct Leg {
+        address venue;
+        uint256 amountIn;
+        uint256 minOut;
+    }
+
+    /// @notice Executes a caller-computed split across whitelisted venues.
+    /// Pulls `sum(legs.amountIn)` once, runs each leg, coalesces failed legs
+    /// into a single Uniswap V3 fallback swap, and enforces the AGGREGATE
+    /// `amountOutMin` on the total delivered.
+    /// @dev `amountOutMin` is an AGGREGATE floor, so it alone does not protect
+    /// the coalesced fallback slice: once the prop legs that succeeded clear
+    /// it, the shortfall term collapses to zero and that slice would swap
+    /// unfloored. `fallbackMinOut` is the lever that closes this, and it MUST
+    /// come from the caller — a floor the router derived from its own onchain
+    /// quote would be read from the same pool in the same transaction, so a
+    /// sandwich attacker moving that pool moves the floor with it.
+    ///
+    /// Explicit fallback legs are a weaker, partial lever: their `minOut`
+    /// contributes to the slice's floor, but it is DILUTED when failed prop
+    /// legs merge into the same swap, because their input joins the slice
+    /// contributing no floor of its own. The router does not scale that floor
+    /// up to compensate — `minOut` states a rate priced at the explicit legs'
+    /// size, and Uniswap's unit rate falls with size, so a scaled floor would
+    /// exceed what an honest pool returns for the larger slice. Use
+    /// `fallbackMinOut`.
+    /// @param legs The legs to execute (1..MAX_SPLIT_VENUES entries).
+    /// @param tokenIn The token being sold (or the ETH sentinel).
+    /// @param tokenOut The token being bought (or the ETH sentinel).
+    /// @param amountOutMin The minimum TOTAL `tokenOut` across all legs.
+    /// @param fallbackMinOut Floor on the ONE coalesced Uniswap V3 swap that
+    /// absorbs every leg naming the fallback venue plus every prop leg that
+    /// failed. Priced as if the ENTIRE input routed through Uniswap: the
+    /// router pro-rates it to the slice that actually forms
+    /// (`fallbackMinOut * fbAmount / sum(legs.amountIn)`), so it stays
+    /// satisfiable whichever legs fail. Derive it from an OFFCHAIN Uniswap
+    /// quote for the full input, minus your slippage tolerance. Zero disables
+    /// it and leaves that slice MEV-exposed whenever the surviving prop legs
+    /// already cover `amountOutMin`.
+    /// @param recipient The address that receives `tokenOut`.
+    /// @param deadline Unix timestamp after which the swap is no longer valid.
+    /// @return amountOut The total `tokenOut` delivered to `recipient`.
+    function swapMultiLegV1(
+        Leg[] calldata legs,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountOutMin,
+        uint256 fallbackMinOut,
+        address recipient,
+        uint256 deadline
+    ) external payable returns (uint256 amountOut);
+
+    /// @notice Computes a split onchain and executes it: pulls `amountIn`,
+    /// quotes each venue once (capacity-aware via the optional
+    /// IPropAMMPartialFill extension, else a bounded two-point probe),
+    /// ranks candidates by rate against a Uniswap V3 reference, assigns up
+    /// to `maxLegs` propAMM legs by the waterfall, and routes the remainder
+    /// plus any failed legs through one coalesced Uniswap V3 swap.
+    /// @param venues Venues to consider; empty means the whole whitelist
+    /// (reverts `TooManyVenues` if the whitelist exceeds MAX_SPLIT_VENUES).
+    /// An EMPTY whitelist is not an error: like a list whose every entry is
+    /// dead or non-whitelisted, it yields no candidates and routes the whole
+    /// order through the coalesced Uniswap swap.
+    /// @param probeHints Optional per-venue probe sizes; length MUST be 0 or
+    /// `venues.length` (and 0 when `venues` is empty). A zero entry means no
+    /// hint. Hints are advisory: each is validated by the same-transaction
+    /// quote, so a wrong hint only shrinks or fails that leg.
+    /// @param tokenIn The token being sold (or the ETH sentinel).
+    /// @param tokenOut The token being bought (or the ETH sentinel).
+    /// @param amountIn The exact total input; must fit uint128.
+    /// @param amountOutMin The minimum TOTAL `tokenOut` delivered.
+    /// @param fallbackMinOut Floor for the COALESCED Uniswap V3 swap (the
+    /// planned remainder plus any legs that failed at execution time). Price
+    /// it as if the ENTIRE `amountIn` routed through Uniswap: the router
+    /// pro-rates it to the slice that actually forms
+    /// (`fallbackMinOut * fbAmount / amountIn`). That matters most here,
+    /// because the PLANNER decides how large the slice is — a venue
+    /// publishing a price between the caller's offchain simulation and
+    /// execution shrinks the remainder, and an absolute floor priced for the
+    /// larger predicted remainder would revert a BETTER split. Zero disables
+    /// it. This is the only per-portion protection available to a
+    /// `swapSplitV1` caller: because the router plans the legs, the caller
+    /// cannot supply explicit fallback legs the way `swapMultiLegV1` allows.
+    /// It MUST be caller-supplied — a floor derived from an onchain quote
+    /// would be quoted against the same pool in the same transaction, so a
+    /// sandwich attacker moving that pool moves the floor with it.
+    /// @param maxLegs Maximum number of propAMM legs (≥ 1). Only the
+    /// automatically-appended coalesced remainder leg is exempt from it — a
+    /// `fallbackSwapRouter` address the caller lists explicitly in `venues`
+    /// is ranked like any other candidate and DOES consume a `maxLegs` slot.
+    /// @param recipient The address that receives `tokenOut`.
+    /// @param deadline Unix timestamp after which the swap is no longer valid.
+    /// @return amountOut The total `tokenOut` delivered to `recipient`.
+    function swapSplitV1(
+        address[] calldata venues,
+        uint256[] calldata probeHints,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        uint256 fallbackMinOut,
+        uint256 maxLegs,
+        address recipient,
+        uint256 deadline
+    ) external payable returns (uint256 amountOut);
+
     /// @notice Swaps an exact `amountIn` of `tokenIn` for as much `tokenOut` as
     /// possible, routing through the best-quoting venue and falling back to the
     /// public-venue fallback if the chosen venue fails to fill.
@@ -195,6 +317,83 @@ interface IPropAMMRouter {
         uint256 deadline,
         FrontendFee calldata fee
     ) external payable returns (uint256 amountOut, address executedVenue);
+
+    /// @notice `swapMultiLegV1` plus a frontend fee skimmed from the aggregate
+    /// output. Legs deliver to this contract; the fee and the net are then
+    /// forwarded.
+    /// @dev `amountOutMin` and `fallbackMinOut` are NET minimums — what the
+    /// user must be left with after the fee — and the router grosses both up
+    /// by `fee.bps` before applying them to what the legs actually deliver.
+    /// `Leg.minOut` is the exception: it gates a leg's own PRE-fee delivery
+    /// and is never grossed up.
+    ///
+    /// EVENT BASIS differs from the single-venue `*WithFeeV1` entrypoints,
+    /// which emit one `Swapped` carrying the NET amount. This entrypoint emits
+    /// one `Swapped` PER LEG carrying GROSS amounts, so no single event holds
+    /// the user's net output; derive it as
+    /// `SUM(Swapped.amountOut) - FrontendFeeCharged.feeAmount`. `(txHash)` is
+    /// therefore not unique per swap — index on `(txHash, logIndex)`.
+    /// @param legs The legs to execute (1..MAX_SPLIT_VENUES entries).
+    /// @param tokenIn The token being sold (or the ETH sentinel).
+    /// @param tokenOut The token being bought (or the ETH sentinel).
+    /// @param amountOutMin The minimum NET total `tokenOut` the user must receive (after the fee).
+    /// @param fallbackMinOut NET floor on the ONE coalesced Uniswap V3 swap,
+    /// on the same basis and with the same pro-rata treatment as
+    /// `swapMultiLegV1`. Zero disables it.
+    /// @param recipient The address that receives the net `tokenOut`.
+    /// @param deadline Unix timestamp after which the swap is no longer valid.
+    /// @param fee The frontend fee (bps + recipient).
+    /// @return amountOut The net `tokenOut` delivered to `recipient`.
+    function swapMultiLegWithFeeV1(
+        Leg[] calldata legs,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountOutMin,
+        uint256 fallbackMinOut,
+        address recipient,
+        uint256 deadline,
+        FrontendFee calldata fee
+    ) external payable returns (uint256 amountOut);
+
+    /// @notice `swapSplitV1` plus a frontend fee skimmed from the aggregate
+    /// output. The router plans the legs, they deliver to this contract, and
+    /// the fee and the net are then forwarded.
+    /// @dev `amountOutMin` and `fallbackMinOut` are NET minimums and are both
+    /// grossed up by `fee.bps` before they reach execution. This entrypoint
+    /// plans its own legs, so there is no caller-supplied per-leg `minOut`.
+    ///
+    /// EVENT BASIS matches `swapMultiLegWithFeeV1` and differs from the
+    /// single-venue `*WithFeeV1` entrypoints: one GROSS `Swapped` per leg, so
+    /// net output is `SUM(Swapped.amountOut) - FrontendFeeCharged.feeAmount`
+    /// and events must be indexed on `(txHash, logIndex)`.
+    /// @param venues The venues to probe, or an empty array for the whitelist.
+    /// @param probeHints Optional per-venue probe sizes (0 = none); empty, or
+    /// one entry per `venues` entry.
+    /// @param tokenIn The token being sold (or the ETH sentinel).
+    /// @param tokenOut The token being bought (or the ETH sentinel).
+    /// @param amountIn The exact amount of `tokenIn` to sell.
+    /// @param amountOutMin The minimum NET total `tokenOut` the user must receive (after the fee).
+    /// @param fallbackMinOut NET floor on the coalesced remainder swap, priced
+    /// as if the ENTIRE input routed through Uniswap and pro-rated by the
+    /// router to the slice that forms. Zero disables it.
+    /// @param maxLegs Maximum number of propAMM legs (≥ 1).
+    /// @param recipient The address that receives the net `tokenOut`.
+    /// @param deadline Unix timestamp after which the swap is no longer valid.
+    /// @param fee The frontend fee (bps + recipient).
+    /// @return amountOut The net `tokenOut` delivered to `recipient`.
+    function swapSplitWithFeeV1(
+        address[] calldata venues,
+        uint256[] calldata probeHints,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        uint256 fallbackMinOut,
+        uint256 maxLegs,
+        address recipient,
+        uint256 deadline,
+        FrontendFee calldata fee
+    ) external payable returns (uint256 amountOut);
 
     /// @notice Quotes `amount` of `tokenIn` across every venue and returns the
     /// best output and the venue that produced it.

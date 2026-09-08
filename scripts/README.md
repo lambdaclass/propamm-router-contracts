@@ -261,3 +261,64 @@ unavailable (recorded in the `method` column).
 > ℹ️ **Idle venues.** Any of the three named PropAMMs the router did not route to
 > within the window is emitted as an explicit "checked: no router routing … in
 > window" row in both CSVs, so the absence is documented rather than silent.
+
+---
+
+## 6. Onchain-split gas + economics, re-runnable — `gas/split_economics.py`
+
+Drives the split analysis end to end and writes one CSV per run, so re-running it
+and diffing the CSVs shows what moved. It exists because the numbers behind "is
+the onchain split worth it" have two very different shelf lives, and mixing them
+into one verdict gives the verdict the worse error bar:
+
+- **`durable`** — gas per mechanism. Set by bytecode, fine to measure once, and
+  the right thing to assert against in CI.
+- **`perishable`** — venue depth, basis-point advantage, and how many legs the
+  split actually admits. Set by market makers. Fermi's usable depth moved ~3.6x
+  in 17 hours and again from 2M to 3M USDC the next day, so a single reading of
+  any of these is not evidence.
+
+Every metric is tagged with its durability in the CSV. An unrecognised metric is
+tagged `unknown` rather than assumed stable.
+
+```bash
+# full run: anvil fork at head + a 10-block depth sweep (the sweep is the slow part)
+ETH_RPC_URL=… python3 scripts/gas/split_economics.py
+
+# fast real-venue pass, skip the sweep
+ETH_RPC_URL=… python3 scripts/gas/split_economics.py --no-sweep
+
+# reproduce an old run, or widen/narrow the sweep
+ETH_RPC_URL=… python3 scripts/gas/split_economics.py --block 25892401 --samples 20 --step 360
+```
+
+`--port` moves anvil off 8545 if something is already there. anvil is started and
+stopped by the script; it is killed even if a stage fails.
+
+**Output:** `scripts/gas/split_economics_<runId>.csv` (`run_id,metric,value,
+durability,label`) plus a grouped summary. The underlying measurements live in
+`test/RealGasFork.t.sol` (real venues on a fork) and `test/DepthSamplerFork.t.sol`
+(multi-block sweep); both emit `RESULT|<key>|<value>` lines that this script
+harvests, so the parsing does not depend on log prose.
+
+`RealGasFork` is gated on `RPC_URL` like the other fork suites. The depth sweep
+is gated on `ARCHIVE_RPC_URL` instead, deliberately: it re-forks `SAMPLES * STEP`
+blocks into the past, so a pruned endpoint serves the head fork and then dies
+mid-sweep on `historical state is not available` — and at ~5,400s it should
+never start by accident. CI sets a plain `RPC_URL` (a public, non-archive node)
+and runs an unfiltered `forge test`, so the separate variable is what keeps the
+sweep out of it.
+
+Everything here measures **real venues**. A mock-venue gas benchmark used to sit
+alongside it and was removed: mocks understated real costs 3.2–8.1×, distorted the
+quote term far more than the swap term, and had already produced two wrong
+published figures. Mock contracts are still used by the correctness tests, where
+determinism is the point and gas is not.
+
+> **One caveat the numbers cannot settle.** The sweep reports how often a venue is
+> *naturally* quotable — quotable at a block's own timestamp, with no time-warping
+> and no lane patching. That has been 0–1 blocks in 10. But lanes are published
+> just-in-time with fills, so if a market maker publishes on demand for a taker,
+> a real integrated swap always sees a fresh lane and this statistic understates
+> production badly. Whether the propAMM edge is capturable ~10% of the time or
+> ~always depends on that, and no fork measurement can answer it.

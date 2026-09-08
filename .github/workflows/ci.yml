@@ -27,10 +27,13 @@ jobs:
       - name: Check formatting
         run: forge fmt --check
 
+      # Fork suites are excluded here and run on a schedule instead (see
+      # fork-tests.yml). They assert against live venue state, and at any given
+      # block most propAMM lanes are stale, so on a PR gate a red X stops
+      # meaning "you broke something" and starts meaning "the market moved".
+      # Every fork suite carries the `Fork` filename suffix for this filter.
       - name: Run tests
-        env:
-          RPC_URL: https://ethereum-rpc.publicnode.com
-        run: forge test
+        run: forge test --no-match-path '*Fork*'
 
   sdk:
     name: SDK (typecheck / lint / format)

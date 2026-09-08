@@ -28,6 +28,18 @@ pub const SWAP_VIA_SELECTED_VENUES: &str =
     "swapViaSelectedVenuesV1(address[],address,address,uint256,uint256,address,uint256)";
 pub const SWAP_VIA_SELECTED_VENUES_WITH_FEE: &str = "swapViaSelectedVenuesWithFeeV1(address[],address,address,uint256,uint256,address,uint256,(uint16,address))";
 
+// Multileg and onchain split. `Leg` is `(venue, amountIn, minOut)` and appears
+// as `(address,uint256,uint256)`; `probeHints` is a `uint256[]` parallel to
+// `venues` (or empty). The `*WithFeeV1` variants take `amountOutMin` and
+// `fallbackMinOut` on a NET basis and emit one GROSS `Swapped` PER LEG, so net
+// output is `sum(Swapped.amountOut) - FrontendFeeCharged.feeAmount` rather
+// than any single event's field.
+pub const SWAP_MULTI_LEG: &str =
+    "swapMultiLegV1((address,uint256,uint256)[],address,address,uint256,uint256,address,uint256)";
+pub const SWAP_MULTI_LEG_WITH_FEE: &str = "swapMultiLegWithFeeV1((address,uint256,uint256)[],address,address,uint256,uint256,address,uint256,(uint16,address))";
+pub const SWAP_SPLIT: &str = "swapSplitV1(address[],uint256[],address,address,uint256,uint256,uint256,uint256,address,uint256)";
+pub const SWAP_SPLIT_WITH_FEE: &str = "swapSplitWithFeeV1(address[],uint256[],address,address,uint256,uint256,uint256,uint256,address,uint256,(uint16,address))";
+
 // Quotes — nonpayable (not view) on-chain; call off-chain via simulation.
 pub const QUOTE: &str = "quoteV1(address,address,uint256)";
 pub const QUOTE_VENUE: &str = "quoteVenueV1(address,address,address,uint256)";
@@ -43,6 +55,11 @@ pub const IS_WHITELISTED_VENUE: &str = "isWhitelistedVenue(address)";
 pub const GET_WHITELISTED_VENUES: &str = "getWhitelistedVenues()";
 pub const WHITELISTED_VENUE_COUNT: &str = "whitelistedVenueCount()";
 pub const WHITELISTED_VENUE_AT: &str = "whitelistedVenueAt(uint256)";
+pub const MAX_SPLIT_VENUES: &str = "MAX_SPLIT_VENUES()";
+/// False once the whitelist grows past `MAX_SPLIT_VENUES`, which is when the
+/// empty-`venues` convenience path of `swapSplitV1` starts reverting
+/// `TooManyVenues`. Name the venues explicitly from then on.
+pub const IS_SPLIT_WHITELIST_MODE_AVAILABLE: &str = "isSplitWhitelistModeAvailable()";
 pub const PAUSED: &str = "paused()";
 pub const AUTHORITY: &str = "authority()";
 
@@ -84,6 +101,10 @@ pub const FUNCTIONS: &[&str] = &[
     SWAP_VIA_VENUE_WITH_FEE,
     SWAP_VIA_SELECTED_VENUES,
     SWAP_VIA_SELECTED_VENUES_WITH_FEE,
+    SWAP_MULTI_LEG,
+    SWAP_MULTI_LEG_WITH_FEE,
+    SWAP_SPLIT,
+    SWAP_SPLIT_WITH_FEE,
     QUOTE,
     QUOTE_VENUE,
     QUOTE_SELECTED_VENUES,
@@ -96,6 +117,8 @@ pub const FUNCTIONS: &[&str] = &[
     GET_WHITELISTED_VENUES,
     WHITELISTED_VENUE_COUNT,
     WHITELISTED_VENUE_AT,
+    MAX_SPLIT_VENUES,
+    IS_SPLIT_WHITELIST_MODE_AVAILABLE,
     PAUSED,
     AUTHORITY,
     SET_FALLBACK_SWAP_ROUTER,
@@ -141,6 +164,13 @@ const ERROR_SIGNATURES: &[&str] = &[
     "UnexpectedETHSender()",
     "IdenticalTokens()",
     "FeeBpsTooHigh(uint16,uint16)",
+    // Multileg / split.
+    "InvalidLegCount(uint256)",
+    "ZeroAmount()",
+    "AmountTooLarge(uint256)",
+    "TooManyVenues(uint256)",
+    "QuoteBalanceInvariantViolated()",
+    "InvalidMaxLegs(uint256)",
     "EnforcedPause()",
 ];
 

@@ -5,6 +5,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
+import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {
@@ -13,8 +15,10 @@ import {
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {IPropAMMRouter} from "./interfaces/IPropAMMRouter.sol";
 import {IPropAMM} from "./interfaces/IPropAMM.sol";
+import {IPropAMMPartialFill} from "./interfaces/IPropAMMPartialFill.sol";
 import {IWETH} from "./interfaces/IWETH.sol";
 import {UniV3Router} from "./libraries/UniV3Router.sol";
+import {SplitPlanner} from "./libraries/SplitPlanner.sol";
 import {FrontendFees} from "./libraries/FrontendFees.sol";
 import {ETH_SENTINEL, USDC, USDT, WETH} from "./libraries/Constants.sol";
 import "./libraries/Errors.sol";
@@ -269,6 +273,820 @@ contract PropAMMRouter is
 
         amountOut = FrontendFees._skimAndDisburse(tokenOut, delivered, fee, recipient, amountOutMin);
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
+    }
+
+    //------------//
+    // Multileg   //
+    //------------//
+
+    /// @notice Maximum number of legs per multileg call and venues per split.
+    uint256 public constant MAX_SPLIT_VENUES = 8;
+
+    /// @dev Bundled `_executeLegs` inputs. A struct rather than nine
+    /// positional parameters for two reasons: it keeps the function under the
+    /// stack limit, and it names the two distinct recipients so a call site
+    /// cannot transpose them. `payTo` is where legs deliver — the router
+    /// itself for the fee variants, which must hold the gross output to skim
+    /// from it. `swapFor` is the user the swap is actually for and is used
+    /// ONLY for `Swapped` events: an indexer attributing volume by the event's
+    /// recipient must see the user, not the router.
+    struct LegRun {
+        address tokenIn; // caller-visible, may be the ETH sentinel
+        address tokenIn_; // the resolved ERC-20 the legs sell
+        address tokenOut; // caller-visible, may be the ETH sentinel
+        uint256 amountOutMin; // aggregate floor on the total delivered
+        uint256 fallbackMinOut; // caller's floor on the coalesced Uniswap swap
+        // Sum of `legs[].amountIn`, established by whoever produced the legs:
+        // `_validateLegs` for the multileg paths, `amountIn` for the split
+        // (its plan is required to sum to it). Passed rather than re-summed so
+        // the amount pulled and the pro-rata denominator below cannot drift.
+        uint256 totalIn;
+        address payTo; // where legs deliver
+        address swapFor; // whom the swap is for (events only)
+        uint256 deadline;
+    }
+
+    /// @inheritdoc IPropAMMRouter
+    /// @dev The coalesced fallback swap's floor is the largest of the
+    /// aggregate shortfall against `amountOutMin`, the sum of the EXPLICIT
+    /// fallback legs' `minOut`, and `fallbackMinOut` — see `_executeLegs`. A
+    /// failed prop leg's own `minOut` is deliberately not carried in: it was
+    /// priced off that venue's (typically better) rate, so applying it to
+    /// Uniswap would revert the fallback exactly when it is needed to recover
+    /// the leg.
+    ///
+    /// The shortfall term is best-effort ONLY. It collapses to zero the
+    /// moment the prop legs that succeeded clear `amountOutMin`, which is the
+    /// normal outcome of splitting into better-than-Uniswap venues, so a
+    /// caller relying on it alone leaves the fallback slice MEV-exposed.
+    /// `fallbackMinOut` is the term that actually protects that slice. It is
+    /// priced for the ENTIRE input going through Uniswap and pro-rated to the
+    /// slice that forms, so it survives the planner choosing a different split
+    /// than the caller predicted. It is caller-supplied for an unavoidable
+    /// reason: the fair Uniswap rate is information the router can only obtain
+    /// from an onchain quote against the same pool in the same transaction,
+    /// which a sandwich attacker moves along with the floor. No formula over the router's own state can
+    /// substitute, and two tempting formulas are both unsound for the same
+    /// reason — they apply a rate measured at one size to a different size.
+    /// A pro-rata share of `amountOutMin` demands the Uniswap slice deliver
+    /// at the BLENDED rate of the better-priced prop legs; scaling the
+    /// explicit fallback legs' `minOut` up over the merged slice demands the
+    /// small-size Uniswap rate at large size. Both revert sound swaps.
+    function swapMultiLegV1(
+        IPropAMMRouter.Leg[] calldata legs,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountOutMin,
+        uint256 fallbackMinOut,
+        address recipient,
+        uint256 deadline
+    ) external payable whenNotPaused nonReentrant returns (uint256 amountOut) {
+        require(block.timestamp <= deadline, Expired());
+        uint256 totalIn = _validateLegs(legs);
+        (address tokenIn_,) = _pullFunds(tokenIn, tokenOut, totalIn);
+        amountOut = _executeLegs(
+            legs,
+            LegRun({
+                tokenIn: tokenIn,
+                tokenIn_: tokenIn_,
+                totalIn: totalIn,
+                tokenOut: tokenOut,
+                amountOutMin: amountOutMin,
+                fallbackMinOut: fallbackMinOut,
+                payTo: recipient,
+                swapFor: recipient,
+                deadline: deadline
+            })
+        );
+    }
+
+    /// @inheritdoc IPropAMMRouter
+    /// @dev The two AGGREGATE floors, `amountOutMin` and `fallbackMinOut`, are
+    /// NET minimums — what the user must be left with after the fee — and each
+    /// is grossed up by `fee.bps` before it reaches `_executeLegs`, which
+    /// applies its floors to the pre-fee amounts the legs actually deliver.
+    /// Grossing up both keeps them on one basis; forwarding `fallbackMinOut`
+    /// raw would silently give the caller up to `fee.bps` less protection on
+    /// that slice than the same number buys them via `amountOutMin`.
+    ///
+    /// `Leg.minOut` is the exception and stays on a GROSS basis: it gates a
+    /// leg's own pre-fee delivery and is never grossed up. Compute per-leg
+    /// floors from what the venue must hand the router, not from what the user
+    /// ends up with.
+    function swapMultiLegWithFeeV1(
+        IPropAMMRouter.Leg[] calldata legs,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountOutMin,
+        uint256 fallbackMinOut,
+        address recipient,
+        uint256 deadline,
+        FrontendFee calldata fee
+    ) external payable whenNotPaused nonReentrant returns (uint256 amountOut) {
+        FrontendFees._validateFee(fee);
+        require(block.timestamp <= deadline, Expired());
+        uint256 totalIn = _validateLegs(legs);
+        uint256 grossMin = FrontendFees._grossUp(amountOutMin, fee.bps);
+        uint256 grossFallbackMin = FrontendFees._grossUp(fallbackMinOut, fee.bps);
+        (address tokenIn_,) = _pullFunds(tokenIn, tokenOut, totalIn);
+        uint256 deliveredGross = _executeLegs(
+            legs,
+            LegRun({
+                tokenIn: tokenIn,
+                tokenIn_: tokenIn_,
+                totalIn: totalIn,
+                tokenOut: tokenOut,
+                amountOutMin: grossMin,
+                fallbackMinOut: grossFallbackMin,
+                payTo: address(this),
+                swapFor: recipient,
+                deadline: deadline
+            })
+        );
+        amountOut = FrontendFees._skimAndDisburse(tokenOut, deliveredGross, fee, recipient, amountOutMin);
+    }
+
+    /// @inheritdoc IPropAMMRouter
+    /// @dev Bounds `amountIn` to uint128 so every cross-multiplied rate
+    /// comparison in `SplitPlanner` stays below 2^256, then plans and executes
+    /// in one transaction. The planned legs always sum to `amountIn`, so the
+    /// caller's `amountOutMin` is enforced by `_executeLegs` against the
+    /// aggregate delivery exactly as in `swapMultiLegV1`.
+    ///
+    /// The same MEV caveat applies to the slice of the coalesced fallback
+    /// covering legs that failed at execution time, but `swapMultiLegV1`'s
+    /// remedy does NOT: a caller here cannot supply explicit fallback legs,
+    /// because the router plans the legs. `fallbackMinOut` is that remedy's
+    /// replacement — an absolute floor on the coalesced swap. It has to come
+    /// from the caller: a floor the router derived from its own reference
+    /// quote would be read from the same Uniswap pool in the same
+    /// transaction, so a sandwich attacker moving that pool would move the
+    /// floor along with it and the "protection" would be vacuous.
+    function swapSplitV1(
+        address[] calldata venues,
+        uint256[] calldata probeHints,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        uint256 fallbackMinOut,
+        uint256 maxLegs,
+        address recipient,
+        uint256 deadline
+    ) external payable whenNotPaused nonReentrant returns (uint256 amountOut) {
+        _validateSplitParams(amountIn, maxLegs, deadline);
+
+        (address[] memory venueSet, uint256[] memory hints) = _resolveVenueSet(venues, probeHints);
+
+        (address tokenIn_, address tokenOut_) = _pullFunds(tokenIn, tokenOut, amountIn);
+
+        IPropAMMRouter.Leg[] memory legs = _planSplit(venueSet, hints, tokenIn_, tokenOut_, amountIn, maxLegs);
+        // `_validateLegs` is deliberately NOT called here, and restoring it
+        // would break every split that uses all 8 prop legs: a plan may
+        // legitimately hold MAX_SPLIT_VENUES prop legs PLUS the coalesced
+        // remainder leg, and 9 legs trips its `InvalidLegCount` bound. Each
+        // invariant it would have checked is already established by
+        // construction: venue membership by `_probeVenue`'s `_isVenue` gate
+        // (re-checked at execution by `_dispatchVenue`, so a mid-transaction
+        // de-listing degrades to the fallback rather than stranding funds);
+        // non-zero leg amounts by `_gatherCandidates` dropping `fill == 0`
+        // candidates and `_waterfall` appending the remainder leg only while
+        // `remaining > 0`; and `msg.value` by `_pullFunds` above.
+        amountOut = _executeLegs(
+            legs,
+            LegRun({
+                tokenIn: tokenIn,
+                tokenIn_: tokenIn_,
+                totalIn: amountIn,
+                tokenOut: tokenOut,
+                amountOutMin: amountOutMin,
+                fallbackMinOut: fallbackMinOut,
+                payTo: recipient,
+                swapFor: recipient,
+                deadline: deadline
+            })
+        );
+    }
+
+    /// @inheritdoc IPropAMMRouter
+    /// @dev The two AGGREGATE floors, `amountOutMin` and `fallbackMinOut`, are
+    /// NET minimums — what the user must be left with after the fee — and each
+    /// is grossed up by `fee.bps` before reaching `_executeLegs`, which applies
+    /// its floors to the pre-fee amounts the legs deliver. Grossing up both
+    /// keeps them on one basis; forwarding `fallbackMinOut` raw would silently
+    /// give the caller up to `fee.bps` less protection on that slice than the
+    /// same number buys them via `amountOutMin`. This entrypoint plans its own
+    /// legs, so there is no caller-supplied per-leg `minOut` to reconcile.
+    function swapSplitWithFeeV1(
+        address[] calldata venues,
+        uint256[] calldata probeHints,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        uint256 fallbackMinOut,
+        uint256 maxLegs,
+        address recipient,
+        uint256 deadline,
+        IPropAMMRouter.FrontendFee calldata fee
+    ) external payable whenNotPaused nonReentrant returns (uint256 amountOut) {
+        FrontendFees._validateFee(fee);
+        _validateSplitParams(amountIn, maxLegs, deadline);
+
+        (address[] memory venueSet, uint256[] memory hints) = _resolveVenueSet(venues, probeHints);
+        uint256 grossMin = FrontendFees._grossUp(amountOutMin, fee.bps);
+        uint256 grossFallbackMin = FrontendFees._grossUp(fallbackMinOut, fee.bps);
+
+        (address tokenIn_, address tokenOut_) = _pullFunds(tokenIn, tokenOut, amountIn);
+        IPropAMMRouter.Leg[] memory legs = _planSplit(venueSet, hints, tokenIn_, tokenOut_, amountIn, maxLegs);
+
+        uint256 deliveredGross = _executeLegs(
+            legs,
+            LegRun({
+                tokenIn: tokenIn,
+                tokenIn_: tokenIn_,
+                totalIn: amountIn,
+                tokenOut: tokenOut,
+                amountOutMin: grossMin,
+                fallbackMinOut: grossFallbackMin,
+                payTo: address(this),
+                swapFor: recipient,
+                deadline: deadline
+            })
+        );
+        amountOut = FrontendFees._skimAndDisburse(tokenOut, deliveredGross, fee, recipient, amountOutMin);
+    }
+
+    /// @dev Resolves the candidate venue set: the caller's list, or the whole
+    /// whitelist when empty. Validates set size and the probeHints shape
+    /// (length 0 or venues.length; must be 0 in whitelist mode).
+    /// @param venues The caller-supplied venue list, or empty for the whitelist.
+    /// @param probeHints The caller-supplied probe sizes, or empty for none.
+    /// @return venueSet The venues to probe.
+    /// @return hints The per-venue probe hints, zero-filled when unsupplied.
+    function _resolveVenueSet(address[] calldata venues, uint256[] calldata probeHints)
+        internal
+        view
+        returns (address[] memory venueSet, uint256[] memory hints)
+    {
+        if (venues.length == 0) {
+            require(probeHints.length == 0, ArrayLengthMismatch());
+            uint256 n = whitelistedVenueCount();
+            // An empty whitelist yields no candidates, which `_waterfall`
+            // turns into a single coalesced Uniswap leg. That is deliberately
+            // the same outcome as naming a list whose every entry is dead or
+            // non-whitelisted: both mean "no propAMM can price this order",
+            // and reverting on one while silently routing the other would
+            // make identical economics behave differently.
+            require(n <= MAX_SPLIT_VENUES, TooManyVenues(n));
+            venueSet = new address[](n);
+            for (uint256 i = 0; i < n; i++) {
+                venueSet[i] = whitelistedVenueAt(i);
+            }
+            hints = new uint256[](n);
+        } else {
+            require(venues.length <= MAX_SPLIT_VENUES, TooManyVenues(venues.length));
+            require(probeHints.length == 0 || probeHints.length == venues.length, ArrayLengthMismatch());
+            venueSet = venues;
+            if (probeHints.length == venues.length) {
+                hints = probeHints;
+            } else {
+                hints = new uint256[](venues.length);
+            }
+        }
+    }
+
+    /// @notice Quote phase + planning for `swapSplitV1`.
+    /// @dev Quotes run while this contract holds the pulled `amountIn`, so the
+    /// R1 snapshot-delta invariant brackets them: the balance is snapshotted
+    /// after the pull and required not to have FALLEN afterwards, so any venue
+    /// quote that net-consumes in-flight user funds reverts the whole call.
+    /// The comparison is against the snapshot rather than `>= amountIn` on
+    /// purpose: pre-existing router dust would mask a theft of the same size
+    /// against an absolute floor, but dust is already inside `snap`, so a
+    /// theft of any size still shows as a fall below it.
+    ///
+    /// An INCREASE is tolerated. The invariant exists to catch the router
+    /// LOSING user funds, and a venue that pushes tokens in mid-quote has
+    /// taken nothing. Rejecting it would hand any single whitelisted venue a
+    /// denial of service over every caller's split — including splits that
+    /// never named it — for the price of one wei, and would make the path
+    /// incompatible with a `tokenIn` whose balance moves on its own, since a
+    /// rebasing or reflection token can credit this contract while a quote is
+    /// in flight. Anything that arrives this way is inert: legs are sized from
+    /// `amountIn`, never from the balance, so it is stranded rather than
+    /// swapped, and `rescueTokens` recovers it.
+    ///
+    /// What the directional check gives up is that two colluding venues could
+    /// net a theft against a donation inside the same bracket. That buys them
+    /// nothing — the pair returns exactly what it took — so it does not earn
+    /// the per-venue balance reads that detecting it would cost on a contract
+    /// this close to the size limit.
+    ///
+    /// The check sits after `_waterfall`, not after `_gatherCandidates`, so
+    /// that it covers EVERY quote taken while the funds are held — including
+    /// the Uniswap reference quotes `_waterfall` takes through
+    /// `fallbackQuoter`. Those are admin config rather than caller input, so
+    /// this is defence in depth, but a bracket that stops short of some of
+    /// the quotes it claims to cover is worse than no claim at all.
+    /// `sortByRateDesc` is pure, so ordering the candidates first changes
+    /// nothing about what the invariant observes.
+    /// @param venueSet The venues to probe.
+    /// @param hints The per-venue probe hints (0 = none).
+    /// @param tokenIn_ The resolved ERC-20 being sold.
+    /// @param tokenOut_ The resolved ERC-20 being bought.
+    /// @param amountIn The total input the returned legs must sum to.
+    /// @param maxLegs The maximum number of propAMM legs.
+    /// @return legs The planned legs, summing to `amountIn`.
+    function _planSplit(
+        address[] memory venueSet,
+        uint256[] memory hints,
+        address tokenIn_,
+        address tokenOut_,
+        uint256 amountIn,
+        uint256 maxLegs
+    ) internal returns (IPropAMMRouter.Leg[] memory legs) {
+        uint256 snap = IERC20(tokenIn_).balanceOf(address(this));
+
+        SplitPlanner.Candidate[] memory cands = _gatherCandidates(venueSet, hints, tokenIn_, tokenOut_, amountIn);
+
+        SplitPlanner.sortByRateDesc(cands);
+        legs = _waterfall(cands, tokenIn_, tokenOut_, amountIn, maxLegs);
+
+        require(IERC20(tokenIn_).balanceOf(address(this)) >= snap, QuoteBalanceInvariantViolated());
+    }
+
+    /// @dev One candidate per venue, sized at `min(hint or amountIn,
+    /// amountIn)`: the partial-fill extension when the venue advertises it
+    /// (ERC165), else a two-point probe at that size and half it, with τ-band
+    /// saturation detection and a bounded downward probe when both points
+    /// come back saturated. Dead venues (both points revert or zero) and
+    /// absurd quotes (out > uint128.max, which would overflow the rate
+    /// comparisons) yield no candidate. Duplicates are deduped.
+    /// @param venueSet The venues to probe.
+    /// @param hints The per-venue probe hints (0 = none).
+    /// @param tokenIn_ The resolved ERC-20 being sold.
+    /// @param tokenOut_ The resolved ERC-20 being bought.
+    /// @param amountIn The total input being split.
+    /// @return cands The live candidates, unsorted.
+    function _gatherCandidates(
+        address[] memory venueSet,
+        uint256[] memory hints,
+        address tokenIn_,
+        address tokenOut_,
+        uint256 amountIn
+    ) internal returns (SplitPlanner.Candidate[] memory cands) {
+        SplitPlanner.Candidate[] memory tmp = new SplitPlanner.Candidate[](venueSet.length);
+        uint256 count = 0;
+        for (uint256 i = 0; i < venueSet.length; i++) {
+            bool dup = false;
+            for (uint256 j = 0; j < i; j++) {
+                if (venueSet[j] == venueSet[i]) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (dup) continue;
+
+            (uint256 fill, uint256 out) = _probeVenue(venueSet[i], hints[i], tokenIn_, tokenOut_, amountIn);
+            if (fill == 0 || out == 0 || out > type(uint128).max) continue;
+            tmp[count++] = SplitPlanner.Candidate({venue: venueSet[i], fill: fill, out: out});
+        }
+        cands = new SplitPlanner.Candidate[](count);
+        for (uint256 i = 0; i < count; i++) {
+            cands[i] = tmp[i];
+        }
+    }
+
+    /// @dev Extension path or two-point probe for one venue. Probe points:
+    /// p = min(hint or amountIn, amountIn) and p/2. Failure legend: a
+    /// reverting, zero, or oversized quote at a point is a dead point; both
+    /// dead → no candidate; one alive → that point; both alive and EQUAL →
+    /// saturated at both, resolved by `_probeDownToFillable`; both alive and
+    /// unequal → the τ-band saturation test picks full vs half.
+    /// Membership is checked HERE rather than relying on `quoteVenueV1`'s
+    /// `_isVenue` gate: the extension branch calls `quotePartialFill` directly,
+    /// so without this the router would execute arbitrary caller-supplied code
+    /// (an address whose `supportsInterface` returns true) while holding the
+    /// pulled funds, and that address could return a maximal quote to sweep the
+    /// ranking and starve the real venues. Non-members are skipped, matching
+    /// the documented "venues that revert while quoting — including
+    /// non-whitelisted addresses — are skipped" behavior of the other paths.
+    /// @param venue The venue to probe.
+    /// @param hint The caller's probe size for this venue (0 = none).
+    /// @param tokenIn_ The resolved ERC-20 being sold.
+    /// @param tokenOut_ The resolved ERC-20 being bought.
+    /// @param amountIn The total input being split (the probe's upper bound).
+    /// @return fill The input size this venue is a candidate for.
+    /// @return out The `tokenOut` that `fill` was quoted to yield.
+    function _probeVenue(address venue, uint256 hint, address tokenIn_, address tokenOut_, uint256 amountIn)
+        internal
+        returns (uint256 fill, uint256 out)
+    {
+        if (!_isVenue(venue)) return (0, 0);
+
+        // The probe size bounds BOTH paths. Feeding the extension the full
+        // `amountIn` while the two-point probe honored the hint would make a
+        // hint meant to bound exposure to this venue do the opposite: the
+        // venue would be offered the whole order and could claim all of it.
+        uint256 p = hint == 0 || hint > amountIn ? amountIn : hint;
+
+        if (ERC165Checker.supportsInterface(venue, type(IPropAMMPartialFill).interfaceId)) {
+            try IPropAMMPartialFill(venue).quotePartialFill(tokenIn_, tokenOut_, p) returns (
+                uint256 fillable, uint256 amountOut_
+            ) {
+                // A venue reporting more than it was offered has broken this
+                // interface's `fillableAmountIn <= amountIn` requirement.
+                // Clamping the fill while keeping `amountOut_` — which was
+                // quoted for the LARGER size — would read its rate as
+                // `amountOut_ / p`, inflated by exactly the over-report,
+                // letting it sweep the ranking and starve honest venues
+                // before failing its own leg. A venue that breaks the
+                // requirement has told us its quote means nothing, so the
+                // candidate is discarded rather than rescaled.
+                if (fillable > p) return (0, 0);
+                return (fillable, amountOut_);
+            } catch {
+                return (0, 0);
+            }
+        }
+
+        // An out-of-range quote is discarded HERE, before it is used: it feeds
+        // `isSaturated`, whose `out * BPS` would overflow and revert the whole
+        // split — a griefing vector any single whitelisted venue could aim at
+        // every other caller's split, including ones not naming it.
+        uint256 outFull = _tryQuote(venue, tokenIn_, tokenOut_, p);
+        if (outFull > type(uint128).max) outFull = 0;
+        uint256 half = p / 2;
+        if (half == 0) return (p, outFull);
+        uint256 outHalf = _tryQuote(venue, tokenIn_, tokenOut_, half);
+        if (outHalf > type(uint128).max) outHalf = 0;
+
+        if (outFull == 0 && outHalf == 0) return (0, 0);
+        if (outFull == 0) return (half, outHalf);
+        if (outHalf == 0) return (p, outFull);
+        // Equal outputs mean the venue is saturated at the half point as well,
+        // so `half` is NOT a size it fills — it must be resolved downward.
+        if (outFull == outHalf) return _probeDownToFillable(venue, tokenIn_, tokenOut_, half, outFull);
+        if (SplitPlanner.isSaturated(outFull, outHalf)) return (half, outHalf);
+        return (p, outFull);
+    }
+
+    /// @dev Resolves a venue that quoted the same output at both probe points.
+    /// A flat quote across `[half, p]` means the venue's capacity lies below
+    /// `half`, so neither point can be used as a leg size: a saturating venue
+    /// ACCEPTS an oversized input, delivers only its ceiling, and keeps the
+    /// difference. `proRataMin` cannot catch that — the leg's floor would be
+    /// derived from the very quote that is flat — and neither can the
+    /// reference cutoff, which a venue whose ceiling beats Uniswap clears.
+    ///
+    /// So halve down looking for a size that quotes STRICTLY below the
+    /// ceiling. Such a size is provably under the venue's capacity, which
+    /// makes it a size the venue fills in full. If the budget runs out the
+    /// venue gets no candidate at all. That is deliberately conservative: it
+    /// forgoes a quote that may look attractive, in exchange for never
+    /// handing a venue input it will not fill. A caller who knows a venue's
+    /// true capacity can still reach it precisely with `probeHints`.
+    /// @param venue The venue to probe.
+    /// @param tokenIn_ The resolved ERC-20 being sold.
+    /// @param tokenOut_ The resolved ERC-20 being bought.
+    /// @param from The probe size to start halving from (the half point).
+    /// @param ceiling The saturated output both earlier points returned.
+    /// @return fill A size this venue demonstrably fills, or 0.
+    /// @return out The `tokenOut` that `fill` was quoted to yield, or 0.
+    function _probeDownToFillable(address venue, address tokenIn_, address tokenOut_, uint256 from, uint256 ceiling)
+        internal
+        returns (uint256 fill, uint256 out)
+    {
+        uint256 size = from;
+        for (uint256 i = 0; i < SplitPlanner.MAX_SATURATION_STEPS; i++) {
+            size /= 2;
+            if (size == 0) return (0, 0);
+            uint256 outAt = _tryQuote(venue, tokenIn_, tokenOut_, size);
+            if (outAt == 0 || outAt > type(uint128).max) return (0, 0);
+            if (outAt < ceiling) return (size, outAt);
+        }
+        return (0, 0);
+    }
+
+    /// @dev A single venue quote that reports failure as zero instead of
+    /// reverting. Routed through `this.quoteVenueV1` so the try/catch has an
+    /// external call boundary and every venue type (incl. the fallback and
+    /// Bebop branches) is priced by the same code as production quoting. Safe
+    /// under `nonReentrant` because `quoteVenueV1` carries no guard.
+    /// @param venue The venue to quote.
+    /// @param tokenIn_ The resolved ERC-20 being sold.
+    /// @param tokenOut_ The resolved ERC-20 being bought.
+    /// @param amount The input size to quote.
+    /// @return out The quoted `tokenOut`, or 0 if the venue could not price it.
+    function _tryQuote(address venue, address tokenIn_, address tokenOut_, uint256 amount)
+        internal
+        returns (uint256 out)
+    {
+        try this.quoteVenueV1(venue, tokenIn_, tokenOut_, amount) returns (uint256 amountOut_, address) {
+            out = amountOut_;
+        } catch {
+            out = 0;
+        }
+    }
+
+    /// @dev Assigns up to `maxLegs` prop legs in rate order, gated by the
+    /// Uniswap reference rate quoted at the residual lower bound. The
+    /// amountIn/100 floor on that reference size is best-effort, not a
+    /// guarantee: it stops a dust-sized residual from rounding the reference
+    /// rate to zero, but for an `amountIn` under 100 wei the floor is itself
+    /// zero-ish and Uniswap quotes 0, which disables the cutoff entirely and
+    /// lets every candidate through. That is the same by-design behavior as a
+    /// fallback that cannot be priced at all, and it is benign: each leg still
+    /// carries its own pro-rata `minOut` and the aggregate `amountOutMin` still
+    /// gates the swap. On the first contested candidate the reference
+    /// is refined ONCE at the true prospective fallback size. The remainder
+    /// becomes a fallback leg (minOut 0 — `_executeLegs` derives the
+    /// shortfall min). Per-leg minimums are the pro-rata share of the RANKING
+    /// quote, never a fresh quote at the final leg size: a requote is a price
+    /// an adversarial venue gets to pick after it has already won.
+    /// @param cands The candidates, pre-sorted by descending rate.
+    /// @param tokenIn_ The resolved ERC-20 being sold.
+    /// @param tokenOut_ The resolved ERC-20 being bought.
+    /// @param amountIn The total input the legs must sum to.
+    /// @param maxLegs The maximum number of propAMM legs. Only the
+    /// automatically appended coalesced remainder leg is exempt — it is the
+    /// safety net, not a planning choice. A `fallbackSwapRouter` address the
+    /// caller listed in `venues` is ranked like any other candidate and DOES
+    /// consume a slot (it is then merged into the coalesced swap by
+    /// `_executeLegs`).
+    /// @return legs The planned legs, summing to `amountIn`.
+    function _waterfall(
+        SplitPlanner.Candidate[] memory cands,
+        address tokenIn_,
+        address tokenOut_,
+        uint256 amountIn,
+        uint256 maxLegs
+    ) internal returns (IPropAMMRouter.Leg[] memory legs) {
+        // No candidates means no cutoff comparison will ever run, so the
+        // reference quote below would be dead. It is not free: `_tryQuote`
+        // against the fallback router reaches `IQuoterV2.quoteExactInputSingle`,
+        // which simulates a full pool swap and reverts internally. This is the
+        // documented outcome for an empty whitelist and for a venue list whose
+        // every entry is dead or de-listed, so it is worth short-circuiting.
+        // Cached once: `_tryQuote` below is an external call, so the optimizer
+        // cannot hold this across the reference quotes or the candidate loop.
+        address fb = fallbackSwapRouter;
+        if (cands.length == 0) {
+            legs = new IPropAMMRouter.Leg[](1);
+            legs[0] = IPropAMMRouter.Leg({venue: fb, amountIn: amountIn, minOut: 0});
+            return legs;
+        }
+
+        // Only the fills the waterfall can actually place may be subtracted:
+        // `cands` is sorted by descending rate, so the first `maxLegs` of them
+        // are exactly the ones it would take. Subtracting all of them instead
+        // understates the residual — with more candidates than slots it drives
+        // the bound to 0 and drops `refSize` onto the `amountIn/100` floor,
+        // where a concave pool's unit rate is near-perfect. That overstates
+        // Uniswap, contests the first genuinely-better candidate, and spends
+        // the one-shot refinement re-pinning the reference at the loosest size
+        // it can take instead of keeping it for a candidate that needs it.
+        uint256 placeable = cands.length < maxLegs ? cands.length : maxLegs;
+        uint256 residualLb = amountIn;
+        for (uint256 i = 0; i < placeable; i++) {
+            residualLb = cands[i].fill >= residualLb ? 0 : residualLb - cands[i].fill;
+        }
+        uint256 refSize = residualLb > amountIn / 100 ? residualLb : amountIn / 100;
+        if (refSize == 0) refSize = 1;
+        // Clamped like the probe quotes so `refOut * fill` below is provably
+        // in range, leaving no unbounded product for a reader to reason about.
+        // The quoter is trusted admin config, so this is hygiene, not a
+        // control: a zero reference is already the "cannot price the fallback"
+        // path, which simply lets every candidate through the cutoff.
+        uint256 refOut = _tryQuote(fb, tokenIn_, tokenOut_, refSize);
+        if (refOut > type(uint128).max) refOut = 0;
+
+        IPropAMMRouter.Leg[] memory tmp = new IPropAMMRouter.Leg[](cands.length + 1);
+        uint256 legCount = 0;
+        uint256 remaining = amountIn;
+        bool refined = false;
+
+        for (uint256 i = 0; i < cands.length && remaining > 0 && legCount < maxLegs; i++) {
+            // contested: rate_v <= uniRate  <=>  out * refSize <= refOut * fill
+            if (cands[i].out * refSize <= refOut * cands[i].fill) {
+                if (refined) break;
+                refined = true;
+                refSize = remaining;
+                refOut = _tryQuote(fb, tokenIn_, tokenOut_, refSize);
+                if (refOut > type(uint128).max) refOut = 0;
+                if (cands[i].out * refSize <= refOut * cands[i].fill) break;
+            }
+            // NOTE on staleness: candidates after the refinement are still
+            // compared against `(refSize, refOut)` sized for the residual as
+            // it stood at the refining candidate, which is LARGER than their
+            // own prospective residual. Uniswap's unit rate degrades with
+            // size, so the stale reference is a LOOSER cutoff: it can admit a
+            // candidate marginally worse than the true Uniswap rate, never
+            // reject a better one. Bounded economic slippage, and every
+            // admitted leg still carries its own pro-rata `minOut` while the
+            // aggregate `amountOutMin` gates the swap. Re-quoting per
+            // candidate would cost a pool simulation each and is not worth it.
+            uint256 leg = cands[i].fill >= remaining ? remaining : cands[i].fill;
+            tmp[legCount++] = IPropAMMRouter.Leg({
+                venue: cands[i].venue, amountIn: leg, minOut: SplitPlanner.proRataMin(cands[i].out, cands[i].fill, leg)
+            });
+            remaining -= leg;
+        }
+
+        if (remaining > 0) {
+            tmp[legCount++] = IPropAMMRouter.Leg({venue: fb, amountIn: remaining, minOut: 0});
+        }
+
+        legs = new IPropAMMRouter.Leg[](legCount);
+        for (uint256 i = 0; i < legCount; i++) {
+            legs[i] = tmp[i];
+        }
+    }
+
+    /// @dev Validates leg count, per-leg venue membership and non-zero
+    /// amounts; returns the total input to pull. Venues are validated up
+    /// front (revert before pulling funds) rather than relying on
+    /// `_dispatchVenue`'s whitelist check, which inside the per-leg
+    /// `try/catch` would silently convert an unknown venue into a fallback
+    /// leg.
+    function _validateLegs(IPropAMMRouter.Leg[] calldata legs) internal view returns (uint256 totalIn) {
+        require(legs.length >= 1 && legs.length <= MAX_SPLIT_VENUES, InvalidLegCount(legs.length));
+        for (uint256 i = 0; i < legs.length; i++) {
+            require(_isVenue(legs[i].venue), UnknownVenue());
+            require(legs[i].amountIn > 0, ZeroAmount());
+            totalIn += legs[i].amountIn;
+        }
+    }
+
+    /// @dev Shared parameter validation for `swapSplitV1` and
+    /// `swapSplitWithFeeV1`. Extracted so the two cannot drift: both plan the
+    /// same way and must reject the same inputs, and a bound added to only one
+    /// of them would leave the other reachable with the input it was added to
+    /// exclude. `amountIn` is capped at `uint128` because the planner's rate
+    /// comparisons multiply quoted outputs by fills.
+    function _validateSplitParams(uint256 amountIn, uint256 maxLegs, uint256 deadline) internal view {
+        require(block.timestamp <= deadline, Expired());
+        require(amountIn > 0, ZeroAmount());
+        require(amountIn <= type(uint128).max, AmountTooLarge(amountIn));
+        require(maxLegs >= 1, InvalidMaxLegs(maxLegs));
+    }
+
+    /// @dev Pulls `amountIn` of `tokenIn` from the caller (wrapping ETH when
+    /// `tokenIn` is the sentinel) and returns the resolved ERC-20s the swap
+    /// will actually sell and buy. Mirrors `_coreSwap`'s pull block.
+    ///
+    /// This is where `tokenIn == tokenOut` is rejected, for both the multileg
+    /// and the split path: it is the first point at which BOTH sentinels are
+    /// resolved, and it sits before the transfer. Checking it later — once the
+    /// funds are in and, on the split path, after a two-quote probe per venue
+    /// plus a QuoterV2 pool simulation — spends all of that planning a route
+    /// for a pair no venue can fill. `_executeLegs` therefore does not repeat
+    /// the check; every path into it comes through here.
+    function _pullFunds(address tokenIn, address tokenOut, uint256 amountIn)
+        internal
+        returns (address tokenIn_, address tokenOut_)
+    {
+        tokenIn_ = tokenIn;
+        tokenOut_ = tokenOut == ETH_SENTINEL ? WETH : tokenOut;
+        require((tokenIn == ETH_SENTINEL ? WETH : tokenIn) != tokenOut_, IdenticalTokens());
+        if (tokenIn == ETH_SENTINEL) {
+            require(msg.value == amountIn, InvalidValue(amountIn, msg.value));
+            IWETH(WETH).deposit{value: msg.value}();
+            tokenIn_ = WETH;
+        } else {
+            require(msg.value == 0, InvalidValue(0, msg.value));
+            IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
+        }
+    }
+
+    /// @notice Runs a list of legs with funds already held by this contract.
+    /// @dev Legs naming the fallback router and legs whose venue fails are
+    /// coalesced into ONE Uniswap V3 swap at the end, whose floor is the
+    /// largest of:
+    ///  (a) the aggregate shortfall vs `amountOutMin` (saturating —
+    ///      over-delivering prop legs must not underflow). BEST-EFFORT ONLY:
+    ///      it is zero whenever the prop legs that succeeded already clear
+    ///      `amountOutMin`, which is the normal outcome of splitting into
+    ///      better-than-Uniswap venues.
+    ///  (b) the sum of the explicit fallback legs' `minOut`. DILUTED when
+    ///      failed prop legs merge into the same swap: their `amountIn`
+    ///      joins the slice contributing no floor, so requiring only
+    ///      `sum(minOut)` over `explicitIn + failedIn` amounts to a rate of
+    ///      `sum(minOut) / (explicitIn + failedIn)` — looser than the
+    ///      `sum(minOut) / explicitIn` the caller asked for. This is left
+    ///      unscaled on purpose. Scaling the floor up over the merged slice
+    ///      is UNSOUND: `minOut` states a rate the caller priced at the
+    ///      explicit legs' size, Uniswap's unit rate falls with size, and so
+    ///      the scaled floor exceeds what an honest pool returns for the
+    ///      larger slice and reverts good swaps (a 1k leg priced at its own
+    ///      ~0.999 rate, scaled over a 1M merged slice, demands ~999k from a
+    ///      pool that honestly yields ~500k). Only (c) closes the failed
+    ///      portion. A failed PROP leg's `minOut` is excluded for a separate
+    ///      reason — priced off a better venue (see `swapMultiLegV1`).
+    ///  (c) the caller's `fallbackMinOut`, PRO-RATED to `fbAmount / totalIn`.
+    ///      The caller prices it for the entire input going through Uniswap,
+    ///      so this is their own full-order unit rate applied to the slice
+    ///      the planner actually produced. It is the only term that is
+    ///      neither derived from this swap's own accounting nor inferable
+    ///      from an onchain quote, and so the only one that survives a
+    ///      sandwich.
+    /// Emits one `Swapped` per executed leg, naming `swapFor` so the events
+    /// attribute the swap to the user even when legs deliver to the router.
+    /// `tokenIn` is the caller-visible token (sentinel allowed, for events);
+    /// `tokenIn_` is the resolved ERC-20 being sold.
+    function _executeLegs(IPropAMMRouter.Leg[] memory legs, LegRun memory r) internal returns (uint256 delivered) {
+        address tokenOut_ = r.tokenOut;
+        address recipient_ = r.payTo;
+        if (r.tokenOut == ETH_SENTINEL) {
+            tokenOut_ = WETH;
+            recipient_ = address(this);
+        }
+        // Cached: the loop body makes an external call, so the optimizer cannot
+        // keep this in a stack slot across iterations and would re-SLOAD it
+        // once per leg.
+        address fb = fallbackSwapRouter;
+        uint256 fbAmount = 0;
+        uint256 fbMinOut = 0;
+        for (uint256 i = 0; i < legs.length; i++) {
+            if (legs[i].venue == fb) {
+                fbAmount += legs[i].amountIn;
+                fbMinOut += legs[i].minOut;
+                continue;
+            }
+            uint256 prevBal = IERC20(tokenOut_).balanceOf(recipient_);
+            try this._dispatchVenue(
+                legs[i].venue,
+                r.tokenIn_,
+                tokenOut_,
+                legs[i].amountIn,
+                legs[i].minOut,
+                // The funds were pulled before the quote phase (R1 brackets
+                // it holding them), so legs are paid from this contract's own
+                // balance rather than pulled from the user per leg.
+                address(this),
+                recipient_,
+                r.deadline,
+                prevBal
+            ) returns (
+                uint256 legOut
+            ) {
+                delivered += legOut;
+                _emitSwapped(legs[i].venue, r.tokenIn, r.tokenOut, legs[i].amountIn, legOut, r.swapFor);
+            } catch {
+                fbAmount += legs[i].amountIn;
+            }
+        }
+
+        if (fbAmount > 0) {
+            // (a) Best-effort: zero once the surviving prop legs clear the
+            // aggregate min. See this function's NatSpec.
+            uint256 uniMin = delivered >= r.amountOutMin ? 0 : r.amountOutMin - delivered;
+            // (b) The explicit fallback legs' floor, unscaled. It is DILUTED
+            // when failed prop legs merge into the same swap — see this
+            // function's NatSpec — and deliberately left that way: scaling it
+            // up over the merged slice would extend a rate the caller stated
+            // for a SMALLER size, and Uniswap's unit rate falls with size, so
+            // the scaled floor over-demands and reverts honest swaps.
+            if (fbMinOut > uniMin) uniMin = fbMinOut;
+            // (c) The caller's own floor, scaled to the slice the planner
+            // actually produced. `fallbackMinOut` is priced for the ENTIRE
+            // input routing through Uniswap, so the pro-rata share is the
+            // caller's own full-order unit rate applied to `fbAmount`.
+            //
+            // Scaling DOWN is what makes this sound, and it is the mirror of
+            // the unsound scale-up reverted earlier: the full-order unit rate
+            // is the WORST one a concave pool offers, so for any slice
+            // `fbAmount <= totalIn` the scaled floor sits at or below the
+            // honest output. An ABSOLUTE floor cannot do this — the slice size
+            // is chosen by the planner, not the caller, so a venue coming
+            // alive between the caller's offchain simulation and execution
+            // shrinks the slice and an absolute floor priced for the larger
+            // predicted slice would revert a BETTER split.
+            //
+            // `totalIn >= fbAmount > 0` here, so the division is safe, and
+            // `mulDiv` gives a 512-bit intermediate because multileg leg
+            // amounts are not uint128-bounded. Flooring keeps the floor from
+            // tripping on its own rounding.
+            uint256 callerMin = Math.mulDiv(r.fallbackMinOut, fbAmount, r.totalIn);
+            if (callerMin > uniMin) uniMin = callerMin;
+            uint256 prevBal = IERC20(tokenOut_).balanceOf(recipient_);
+            UniV3Router.swapExactIn(
+                r.tokenIn_, tokenOut_, resolvedFee(r.tokenIn_, tokenOut_), fbAmount, uniMin, recipient_, fb
+            );
+            uint256 fbOut = IERC20(tokenOut_).balanceOf(recipient_) - prevBal;
+            require(fbOut >= uniMin, InsufficientOutput(uniMin, fbOut));
+            delivered += fbOut;
+            _emitSwapped(fb, r.tokenIn, r.tokenOut, fbAmount, fbOut, r.swapFor);
+        }
+
+        require(delivered >= r.amountOutMin, InsufficientOutput(r.amountOutMin, delivered));
+
+        if (r.tokenOut == ETH_SENTINEL) {
+            // Unwrapped to `payTo`, not `swapFor`: the fee variants must
+            // receive the gross themselves before disbursing.
+            _sendWrappedETH(r.payTo, delivered);
+        }
     }
 
     /// @notice Pulls funds once and executes a swap, attempting `venue` first
@@ -751,9 +1569,34 @@ contract PropAMMRouter is
     /// foot-gun: its `quote`/`swap` calls revert, so it is skipped by selection
     /// and, on an explicit swap, the reverting `_dispatchVenue` rolls back and the
     /// Uniswap fallback engages — no funds are stranded.
+    ///
+    /// IMPORTANT — interaction with `swapSplitV1`'s whitelist mode. Growing the
+    /// whitelist past `MAX_SPLIT_VENUES` makes `swapSplitV1` / `swapSplitWithFeeV1`
+    /// revert `TooManyVenues` for calls that pass an EMPTY `venues` array (the
+    /// "probe the whole whitelist" convenience). Callers naming venues explicitly
+    /// are unaffected, as is every other entrypoint — `swapV1` / `quoteV1` keep
+    /// iterating the full whitelist. The revert is deliberate: `EnumerableSet`
+    /// ordering is unstable across removals, so silently probing "the first eight"
+    /// would make the split's venue set nondeterministic. This function does NOT
+    /// cap the whitelist, because doing so would limit the protocol's venue roster
+    /// to eight for the benefit of one optional convenience path. Check
+    /// {isSplitWhitelistModeAvailable} before and after listing, and migrate
+    /// integrators to explicit `venues` lists before crossing the bound.
     /// @param venue The venue address to whitelist.
     function addVenue(address venue) external restricted {
         _addVenue(venue);
+    }
+
+    /// @notice Whether `swapSplitV1` / `swapSplitWithFeeV1` still accept an empty
+    /// `venues` array (the "probe the whole whitelist" convenience).
+    /// @dev False once `whitelistedVenueCount()` exceeds `MAX_SPLIT_VENUES`, at
+    /// which point those calls revert `TooManyVenues` and callers must name their
+    /// venues explicitly. Exposed so admins can check before {addVenue} and
+    /// integrators can detect the mode without simulating a swap. See {addVenue}
+    /// for why the whitelist itself is not capped.
+    /// @return available True while the empty-`venues` split path is usable.
+    function isSplitWhitelistModeAvailable() external view returns (bool available) {
+        return whitelistedVenueCount() <= MAX_SPLIT_VENUES;
     }
 
     /// @dev Whitelist-insertion core behind the public `addVenue`. Reverts
