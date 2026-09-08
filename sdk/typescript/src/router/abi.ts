@@ -8,6 +8,7 @@ import { parseAbi } from "viem";
  */
 export const propAmmRouterAbi = parseAbi([
   "struct FrontendFee { uint16 bps; address recipient; }",
+  "struct Leg { address venue; uint256 amountIn; uint256 minOut; }",
 
   // Swaps
   "function swapV1(address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOutMin, address recipient, uint256 deadline) payable returns (uint256 amountOut, address executedVenue)",
@@ -16,6 +17,16 @@ export const propAmmRouterAbi = parseAbi([
   "function swapViaVenueWithFeeV1(address venue, address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOutMin, address recipient, uint256 deadline, FrontendFee fee) payable returns (uint256 amountOut)",
   "function swapViaSelectedVenuesV1(address[] venues, address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOutMin, address recipient, uint256 deadline) payable returns (uint256 amountOut, address executedVenue)",
   "function swapViaSelectedVenuesWithFeeV1(address[] venues, address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOutMin, address recipient, uint256 deadline, FrontendFee fee) payable returns (uint256 amountOut, address executedVenue)",
+
+  // Multileg and onchain split. The `*WithFeeV1` variants take `amountOutMin`
+  // and `fallbackMinOut` on a NET basis (the router grosses both up) and emit
+  // one GROSS `Swapped` PER LEG, so net output is
+  // `sum(Swapped.amountOut) - FrontendFeeCharged.feeAmount` rather than any
+  // single event's field, and logs must be keyed on (txHash, logIndex).
+  "function swapMultiLegV1(Leg[] legs, address tokenIn, address tokenOut, uint256 amountOutMin, uint256 fallbackMinOut, address recipient, uint256 deadline) payable returns (uint256 amountOut)",
+  "function swapMultiLegWithFeeV1(Leg[] legs, address tokenIn, address tokenOut, uint256 amountOutMin, uint256 fallbackMinOut, address recipient, uint256 deadline, FrontendFee fee) payable returns (uint256 amountOut)",
+  "function swapSplitV1(address[] venues, uint256[] probeHints, address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOutMin, uint256 fallbackMinOut, uint256 maxLegs, address recipient, uint256 deadline) payable returns (uint256 amountOut)",
+  "function swapSplitWithFeeV1(address[] venues, uint256[] probeHints, address tokenIn, address tokenOut, uint256 amountIn, uint256 amountOutMin, uint256 fallbackMinOut, uint256 maxLegs, address recipient, uint256 deadline, FrontendFee fee) payable returns (uint256 amountOut)",
 
   // Quotes — nonpayable (not view) on-chain; call off-chain via simulation
   "function quoteV1(address tokenIn, address tokenOut, uint256 amount) returns (uint256 bestQuote, address venue)",
@@ -32,6 +43,11 @@ export const propAmmRouterAbi = parseAbi([
   "function getWhitelistedVenues() view returns (address[])",
   "function whitelistedVenueCount() view returns (uint256)",
   "function whitelistedVenueAt(uint256 index) view returns (address)",
+  "function MAX_SPLIT_VENUES() view returns (uint256)",
+  // False once the whitelist grows past MAX_SPLIT_VENUES, which is when the
+  // empty-`venues` convenience path of swapSplitV1 starts reverting
+  // TooManyVenues. Name the venues explicitly from then on.
+  "function isSplitWhitelistModeAvailable() view returns (bool)",
   "function paused() view returns (bool)",
   "function authority() view returns (address)",
 
@@ -76,6 +92,13 @@ export const propAmmRouterAbi = parseAbi([
   "error UnexpectedETHSender()",
   "error IdenticalTokens()",
   "error FeeBpsTooHigh(uint16 requested, uint16 max)",
+  // Multileg / split
+  "error InvalidLegCount(uint256 count)",
+  "error ZeroAmount()",
+  "error AmountTooLarge(uint256 amount)",
+  "error TooManyVenues(uint256 count)",
+  "error QuoteBalanceInvariantViolated()",
+  "error InvalidMaxLegs(uint256 maxLegs)",
   // From OpenZeppelin Pausable — what swaps revert with while paused.
   "error EnforcedPause()",
 ]);
