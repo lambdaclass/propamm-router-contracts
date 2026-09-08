@@ -8,19 +8,21 @@ pub const KIPSELI: Address = H160(hex!("71e790dd841c8A9061487cb3E78C288E75cE0B3d
 pub const TEMPEST: Address = H160(hex!("00000003f1ec2379e79F58E12EC6C4F51Ee92149"));
 pub const TAURUSFI: Address = H160(hex!("217d58931A8549ca539426AA8152E33dAfc3d95A"));
 pub const METRIC: Address = H160(hex!("E715Dc29d2c273D0FC5A03e5Cca9CcB0Abb1dCDB"));
+pub const EL_ZORRO: Address = H160(hex!("CF211B4dD0D2be5C173Ea57Bcf938FC61d1d3bd3"));
 
 /// Curated propAMM name → venue address mapping, for the `venues` option of
 /// quotes and swaps.
 ///
 /// The Uniswap V3 fallback is intentionally absent: its address is router
 /// configuration, read it via `PropAmmRouter::fallback_swap_router`.
-pub const PAMMS: [(&str, Address); 6] = [
+pub const PAMMS: [(&str, Address); 7] = [
     ("fermi", FERMI),
     ("bebop", BEBOP),
     ("kipseli", KIPSELI),
     ("tempest", TEMPEST),
     ("taurusfi", TAURUSFI),
     ("metric", METRIC),
+    ("elzorro", EL_ZORRO),
 ];
 
 #[cfg(test)]
@@ -93,17 +95,16 @@ mod tests {
     }
 
     /// The SDK's addresses must equal the contracts' — they are maintained by
-    /// hand in both places, and `BEBOP` in particular is load-bearing: the
-    /// router dispatches `venue == BEBOP_ROUTER` down a bespoke `IBebopRouter`
-    /// path rather than the generic `IPropAMM` one, so a stale SDK copy sends
-    /// callers at the wrong calling convention.
+    /// hand in both places. Only tokens are covered: `BEBOP_ROUTER` was dropped
+    /// with the bespoke `IBebopRouter` dispatch, so no venue address is
+    /// hardcoded in the contracts any more and `PAMMS` has no contract-side
+    /// counterpart to check against.
     #[test]
     fn address_constants_match_contract() {
         let Some(solidity) = solidity_address_constants() else {
             return;
         };
         for (name, expected) in [
-            ("BEBOP_ROUTER", BEBOP),
             ("USDC", USDC),
             ("USDT", USDT),
             ("WETH", WETH),
@@ -119,9 +120,9 @@ mod tests {
         }
     }
 
-    /// The venues below have no Solidity counterpart to check against: the
-    /// router reaches them through the runtime `addVenue` whitelist and the
-    /// generic `IPropAMM` interface, so only Bebop is hardcoded. If a new
+    /// The venues have no Solidity counterpart to check against: the router
+    /// reaches every one of them through the runtime `addVenue` whitelist and
+    /// the generic `IPropAMM` interface, so only tokens are hardcoded. If a new
     /// `address constant` appears in `src/`, it is a new hardcoded dispatch
     /// target and the SDKs must mirror it — add it to
     /// `address_constants_match_contract` (and to `PAMMS` if it is a venue).
@@ -130,7 +131,7 @@ mod tests {
         let Some(solidity) = solidity_address_constants() else {
             return;
         };
-        let mirrored = ["BEBOP_ROUTER", "USDC", "USDT", "WETH", "ETH_SENTINEL"];
+        let mirrored = ["USDC", "USDT", "WETH", "ETH_SENTINEL"];
         let unmirrored: Vec<_> = solidity
             .keys()
             .filter(|name| !mirrored.contains(&name.as_str()))
@@ -145,7 +146,7 @@ mod tests {
     /// individual constants and carry no duplicates.
     #[test]
     fn pamms_is_consistent() {
-        assert_eq!(PAMMS.len(), 6);
+        assert_eq!(PAMMS.len(), 7);
         for (name, address) in PAMMS {
             assert_ne!(address, Address::zero(), "{name} is the zero address");
             assert_eq!(

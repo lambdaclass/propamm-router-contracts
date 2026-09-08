@@ -17,7 +17,6 @@ import {IPropAMMRouter} from "./interfaces/IPropAMMRouter.sol";
 import {IPropAMM} from "./interfaces/IPropAMM.sol";
 import {IPropAMMPartialFill} from "./interfaces/IPropAMMPartialFill.sol";
 import {IWETH} from "./interfaces/IWETH.sol";
-import {BEBOP_ROUTER, IBebopRouter} from "./interfaces/IBebopRouter.sol";
 import {UniV3Router} from "./libraries/UniV3Router.sol";
 import {SplitPlanner} from "./libraries/SplitPlanner.sol";
 import {FrontendFees} from "./libraries/FrontendFees.sol";
@@ -58,13 +57,13 @@ contract PropAMMRouter is
     /// (`_isVenue`, `quoteVenueV1`, `_dispatchVenue`): a venue de-listed here is
     /// skipped by every selection path and rejected on every explicit path. As an
     /// enumerable set it is also the source of candidates iterated by
-    /// `_pickBestVenue`, so a venue added via `addVenue` is automatically
+    /// `_pickBestPropAMM`, so a venue added via `addVenue` is automatically
     /// considered by `swapV1` / `quoteV1` without a contract upgrade. The Uniswap
     /// V3 fallback (`fallbackSwapRouter`) is the always-available safety net and is
     /// intentionally NOT a member — it is accepted independently of this set.
     /// Starts empty (`initialize` seeds no venues) and is managed (access-controlled)
     /// via `addVenue` / `removeVenue`, so its size (and thus the
-    /// `_pickBestVenue` loop bound) is trusted to stay small.
+    /// `_pickBestPropAMM` loop bound) is trusted to stay small.
     /// @dev Declared last to keep the upgradeable storage layout append-only.
     EnumerableSet.AddressSet private _whitelistedVenues;
 
@@ -126,13 +125,11 @@ contract PropAMMRouter is
     //------//
 
     /// @inheritdoc IPropAMMRouter
-    /// @dev Picks the best-quoting venue via `_pickBestVenue`, then executes
-    /// through `_coreSwap`; a `fallbackSwapRouter` selection (the Uniswap
-    /// fallback won, or no venue could quote) routes straight to the fallback venue.
-    /// Reverts `InsufficientOutput`
-    /// before pulling funds when the best quote is under `amountOutMin`. Quotes
-    /// are advisory, so `_coreSwap` re-checks `amountOutMin` against the
-    /// delivered balance delta.
+    /// @dev Picks the best-quoting whitelisted propAMM via `_pickBestPropAMM`, then
+    /// executes through `_coreSwap`. Routes straight to the Uniswap fallback when
+    /// no propAMM can be priced or the best propAMM quote is below `amountOutMin`.
+    /// Quotes are advisory: `_coreSwap` enforces `amountOutMin` against the delivered
+    /// balance delta and engages the Uniswap fallback there if the chosen propAMM under-delivers.
     function swapV1(
         address tokenIn,
         address tokenOut,
@@ -141,8 +138,10 @@ contract PropAMMRouter is
         address recipient,
         uint256 deadline
     ) external payable whenNotPaused nonReentrant returns (uint256 amountOut, address executedVenue) {
-        (uint256 bestQuote, address venue) = _pickBestVenue(tokenIn, tokenOut, amountIn);
-        require(bestQuote >= amountOutMin, InsufficientOutput(amountOutMin, bestQuote));
+        (uint256 bestQuote, address venue) = _pickBestPropAMM(tokenIn, tokenOut, amountIn);
+        if (venue == address(0) || bestQuote < amountOutMin) {
+            venue = fallbackSwapRouter;
+        }
 
         (amountOut, executedVenue) = _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
@@ -165,14 +164,15 @@ contract PropAMMRouter is
         FrontendFees._validateFee(fee);
 
         uint256 grossMin = FrontendFees._grossUp(amountOutMin, fee.bps);
-        (uint256 bestQuote, address venue) = _pickBestVenue(tokenIn, tokenOut, amountIn);
-
-        require(bestQuote >= grossMin, InsufficientOutput(grossMin, bestQuote));
+        (uint256 bestQuote, address venue) = _pickBestPropAMM(tokenIn, tokenOut, amountIn);
+        if (venue == address(0) || bestQuote < grossMin) {
+            venue = fallbackSwapRouter;
+        }
 
         uint256 delivered;
         (delivered, executedVenue) = _coreSwap(venue, tokenIn, tokenOut, amountIn, grossMin, address(this), deadline);
 
-        amountOut = FrontendFees._skimAndDisburse(tokenOut, delivered, fee, recipient);
+        amountOut = FrontendFees._skimAndDisburse(tokenOut, delivered, fee, recipient, amountOutMin);
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
 
@@ -216,7 +216,7 @@ contract PropAMMRouter is
         (uint256 delivered, address executedVenue) =
             _coreSwap(venue, tokenIn, tokenOut, amountIn, grossMin, address(this), deadline);
 
-        amountOut = FrontendFees._skimAndDisburse(tokenOut, delivered, fee, recipient);
+        amountOut = FrontendFees._skimAndDisburse(tokenOut, delivered, fee, recipient, amountOutMin);
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
 
@@ -264,14 +264,14 @@ contract PropAMMRouter is
         uint256 grossMin = FrontendFees._grossUp(amountOutMin, fee.bps);
         (uint256 bestQuote, address venue) = _pickBestVenueFrom(venues, tokenIn, tokenOut, amountIn);
 
-        if (venue == address(0) || bestQuote < amountOutMin) {
+        if (venue == address(0) || bestQuote < grossMin) {
             venue = fallbackSwapRouter;
         }
 
         uint256 delivered;
         (delivered, executedVenue) = _coreSwap(venue, tokenIn, tokenOut, amountIn, grossMin, address(this), deadline);
 
-        amountOut = FrontendFees._skimAndDisburse(tokenOut, delivered, fee, recipient);
+        amountOut = FrontendFees._skimAndDisburse(tokenOut, delivered, fee, recipient, amountOutMin);
         _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
 
@@ -403,7 +403,7 @@ contract PropAMMRouter is
                 deadline: deadline
             })
         );
-        amountOut = FrontendFees._skimAndDisburse(tokenOut, deliveredGross, fee, recipient);
+        amountOut = FrontendFees._skimAndDisburse(tokenOut, deliveredGross, fee, recipient, amountOutMin);
     }
 
     /// @inheritdoc IPropAMMRouter
@@ -514,7 +514,7 @@ contract PropAMMRouter is
                 deadline: deadline
             })
         );
-        amountOut = FrontendFees._skimAndDisburse(tokenOut, deliveredGross, fee, recipient);
+        amountOut = FrontendFees._skimAndDisburse(tokenOut, deliveredGross, fee, recipient, amountOutMin);
     }
 
     /// @dev Resolves the candidate venue set: the caller's list, or the whole
@@ -1016,7 +1016,18 @@ contract PropAMMRouter is
             }
             uint256 prevBal = IERC20(tokenOut_).balanceOf(recipient_);
             try this._dispatchVenue(
-                legs[i].venue, r.tokenIn_, tokenOut_, legs[i].amountIn, legs[i].minOut, recipient_, r.deadline, prevBal
+                legs[i].venue,
+                r.tokenIn_,
+                tokenOut_,
+                legs[i].amountIn,
+                legs[i].minOut,
+                // The funds were pulled before the quote phase (R1 brackets
+                // it holding them), so legs are paid from this contract's own
+                // balance rather than pulled from the user per leg.
+                address(this),
+                recipient_,
+                r.deadline,
+                prevBal
             ) returns (
                 uint256 legOut
             ) {
@@ -1107,14 +1118,15 @@ contract PropAMMRouter is
         require(block.timestamp <= deadline, Expired());
 
         address tokenIn_ = tokenIn;
+        address payer = msg.sender;
         if (tokenIn == ETH_SENTINEL) {
             // If tokenIn is ETH, we wrap it and use WETH as the tokenIn for swap
             require(msg.value == amountIn, InvalidValue(amountIn, msg.value));
             IWETH(WETH).deposit{value: msg.value}();
             tokenIn_ = WETH;
+            payer = address(this);
         } else {
             require(msg.value == 0, InvalidValue(0, msg.value));
-            IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
         }
 
         address tokenOut_ = tokenOut;
@@ -1130,7 +1142,7 @@ contract PropAMMRouter is
 
         if (venue != fallbackSwapRouter) {
             try this._dispatchVenue(
-                venue, tokenIn_, tokenOut_, amountIn, amountOutMin, recipient_, deadline, prevTokenOutBalance
+                venue, tokenIn_, tokenOut_, amountIn, amountOutMin, payer, recipient_, deadline, prevTokenOutBalance
             ) returns (
                 uint256 amountOut_
             ) {
@@ -1144,6 +1156,12 @@ contract PropAMMRouter is
             }
         }
 
+        // Uniswap is pull-based, so the router needs to pull the tokens from the sender.
+        // If the input token is ETH, it was already wrapped and the router already
+        // has the WETH.
+        if (tokenIn != ETH_SENTINEL) {
+            IERC20(tokenIn_).safeTransferFrom(msg.sender, address(this), amountIn);
+        }
         UniV3Router.swapExactIn(
             tokenIn_,
             tokenOut_,
@@ -1163,7 +1181,7 @@ contract PropAMMRouter is
         return (amountOut, fallbackSwapRouter);
     }
 
-    /// @notice Executes a swap on a venue with funds already held by this contract.
+    /// @notice Executes a swap on a venue, sourcing `tokenIn` from `payer`.
     /// @dev Reverts `UnknownVenue` for non-whitelisted addresses, or
     /// bubbles up the underlying propAMM router's revert.
     /// @param venue The venue to route the swap through.
@@ -1172,9 +1190,10 @@ contract PropAMMRouter is
     /// @param amountIn The exact amount of `tokenIn` to sell.
     /// @param amountOutMin The minimum acceptable amount of `tokenOut`; an
     /// under-fill below this triggers a revert here so the fallback engages.
+    /// @param payer Account `tokenIn` is taken from: the router (`address(this)`)
+    /// commonly for wrapped ETH, otherwise the caller.
     /// @param recipient The address that will receive `tokenOut`.
     /// @param deadline Unix timestamp after which the swap is no longer valid;
-    /// only honored by venues that enforce it (e.g. Bebop).
     /// @param prevTokenOutBalance `recipient`'s `tokenOut` balance snapshotted
     /// by `_coreSwap` before this call, passed through so the delivered delta
     /// can be computed without re-reading the pre-balance.
@@ -1186,6 +1205,7 @@ contract PropAMMRouter is
         address tokenOut,
         uint256 amountIn,
         uint256 amountOutMin,
+        address payer,
         address recipient,
         uint256 deadline,
         uint256 prevTokenOutBalance
@@ -1196,34 +1216,16 @@ contract PropAMMRouter is
         // `_coreSwap` engages the Uniswap fallback.
         require(isWhitelistedVenue(venue), UnknownVenue());
 
-        if (venue == BEBOP_ROUTER) {
-            uint256 balanceTokenOutBefore = IERC20(tokenOut).balanceOf(address(this));
-
-            IERC20(tokenIn).forceApprove(BEBOP_ROUTER, amountIn);
-            IBebopRouter(BEBOP_ROUTER).swap(tokenIn, tokenOut, amountIn, amountOutMin, deadline);
-
-            // Prevent later transfers if token was partially pulled
-            IERC20(tokenIn).forceApprove(BEBOP_ROUTER, 0);
-
-            // Bebop's swap function has no `recipient` argument, it
-            // delivers `tokenOut` to `msg.sender`, which here is this
-            // router, so it is required to transfer the received tokens
-            // to the actual recipient
-            uint256 balanceTokenOut = IERC20(tokenOut).balanceOf(address(this));
-            require(balanceTokenOut >= balanceTokenOutBefore, TokenOutBalanceDecreased());
-            uint256 received = balanceTokenOut - balanceTokenOutBefore;
-            if (received > 0 && recipient != address(this)) {
-                IERC20(tokenOut).safeTransfer(recipient, received);
-            }
-        } else {
-            // Any other whitelisted venue speaks the common `IPropAMM` interface.
-            // Push-payment model: transfer `tokenIn` first, then let the venue
-            // consume it and deliver `tokenOut` straight to `recipient`. A revert
-            // (or an under-delivery caught below) rolls back this transfer via the
-            // `_coreSwap` self-call `try/catch` and engages the Uniswap fallback.
+        // Push-payment model: transfer `tokenIn` first, then let the venue
+        // consume it and deliver `tokenOut` straight to `recipient`. A revert
+        // (or an under-delivery caught below) rolls back this transfer via the
+        // `_coreSwap` self-call `try/catch` and engages the Uniswap fallback.
+        if (payer == address(this)) {
             IERC20(tokenIn).safeTransfer(venue, amountIn);
-            IPropAMM(venue).swap(tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
+        } else {
+            IERC20(tokenIn).safeTransferFrom(payer, venue, amountIn);
         }
+        IPropAMM(venue).swap(tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
 
         amountOut = IERC20(tokenOut).balanceOf(recipient) - prevTokenOutBalance;
         require(amountOut >= amountOutMin, InsufficientOutput(amountOutMin, amountOut));
@@ -1299,7 +1301,32 @@ contract PropAMMRouter is
         returns (uint256 amountOut, address quotedVenue)
     {
         require(_isVenue(venue), UnknownVenue());
+        quotedVenue = venue;
+        amountOut = _quoteVenue(venue, tokenIn, tokenOut, amount);
+    }
 
+    /// @notice Quotes `venue` without the `_isVenue` whitelist gate. Self-only.
+    /// @param venue The venue to quote (trusted to be a whitelisted propAMM or
+    /// the fallback by the self-caller).
+    /// @param tokenIn The address of the token being sold.
+    /// @param tokenOut The address of the token being bought.
+    /// @param amount The exact amount of `tokenIn` to quote against.
+    /// @return amountOut The amount of `tokenOut` the venue would produce.
+    function _quoteVenueUnchecked(address venue, address tokenIn, address tokenOut, uint256 amount)
+        external
+        returns (uint256 amountOut)
+    {
+        require(msg.sender == address(this), OnlySelf());
+        amountOut = _quoteVenue(venue, tokenIn, tokenOut, amount);
+    }
+
+    /// @dev Shared quote body for `quoteVenueV1` (whitelist-gated) and
+    /// `_quoteVenueUnchecked` (self-only). Resolves the ETH sentinel to WETH and
+    /// dispatches to the fallback quoter or the common `IPropAMM` interface.
+    function _quoteVenue(address venue, address tokenIn, address tokenOut, uint256 amount)
+        private
+        returns (uint256 amountOut)
+    {
         if (tokenIn == ETH_SENTINEL) {
             tokenIn = WETH;
         }
@@ -1307,16 +1334,10 @@ contract PropAMMRouter is
             tokenOut = WETH;
         }
 
-        // The asked venue. Kept for retro-compatibility.
-        quotedVenue = venue;
-
         if (venue == fallbackSwapRouter) {
             amountOut =
                 UniV3Router.quoteExactIn(tokenIn, tokenOut, resolvedFee(tokenIn, tokenOut), amount, fallbackQuoter);
-        } else if (venue == BEBOP_ROUTER) {
-            amountOut = IBebopRouter(BEBOP_ROUTER).quote(tokenIn, tokenOut, amount);
         } else {
-            // Any other whitelisted venue speaks the common `IPropAMM` interface.
             amountOut = IPropAMM(venue).quote(tokenIn, tokenOut, amount);
         }
     }
@@ -1356,35 +1377,49 @@ contract PropAMMRouter is
         internal
         returns (uint256 bestQuote, address venue)
     {
-        // A venue overtakes it only by quoting strictly more; if none do (or nothing can be priced at all),
-        // `venue` stays `fallbackSwapRouter` and `_coreSwap` routes to fallback.
-        venue = fallbackSwapRouter;
+        (bestQuote, venue) = _pickBestPropAMM(tokenIn, tokenOut, amount);
 
+        address fallbackRouter = fallbackSwapRouter;
+        if (venue == address(0)) {
+            venue = fallbackRouter;
+        }
+        try this._quoteVenueUnchecked(fallbackRouter, tokenIn, tokenOut, amount) returns (uint256 amountOut) {
+            if (amountOut > bestQuote) {
+                bestQuote = amountOut;
+                venue = fallbackRouter;
+            }
+        } catch {}
+    }
+
+    /// @notice Finds the whitelisted propAMM offering the best `tokenOut` for
+    /// `amount` of `tokenIn`.
+    /// @dev Iterates the live venue whitelist (`_whitelistedVenues`), so venues
+    /// added or removed via `addVenue` / `removeVenue` are reflected without a
+    /// contract upgrade. Each venue is queried in its own `try/catch` so a reverting
+    /// venue — including one listed ahead of its interface — is simply skipped.
+    /// Does NOT consider the Uniswap fallback: returns `(0, address(0))` when no
+    /// whitelisted propAMM can be priced, so the swap entrypoints route straight to
+    /// the fallback without paying for an on-chain Uniswap quote. `quoteV1` layers
+    /// the fallback on via `_pickBestVenue`.
+    /// @param tokenIn The address of the token being sold.
+    /// @param tokenOut The address of the token being bought.
+    /// @param amount The exact amount of `tokenIn` to quote against.
+    /// @return bestQuote The best `tokenOut` amount across the propAMMs, or 0.
+    /// @return venue The propAMM that produced `bestQuote`, or `address(0)` if none.
+    function _pickBestPropAMM(address tokenIn, address tokenOut, uint256 amount)
+        internal
+        returns (uint256 bestQuote, address venue)
+    {
         uint256 venueCount = whitelistedVenueCount();
         for (uint256 i = 0; i < venueCount; i++) {
             address candidate = whitelistedVenueAt(i);
-            try this.quoteVenueV1(candidate, tokenIn, tokenOut, amount) returns (
-                uint256 amountOut, address _quotedVenue
-            ) {
+            try this._quoteVenueUnchecked(candidate, tokenIn, tokenOut, amount) returns (uint256 amountOut) {
                 if (amountOut > bestQuote) {
                     bestQuote = amountOut;
                     venue = candidate;
                 }
             } catch {}
         }
-
-        // Uniswap V3 is the always-present fallback candidate: when it wins,
-        // `venue` is `fallbackSwapRouter`, which `_coreSwap` (via `swapV1`)
-        // treats as the Uniswap fallback. Callers may also name that address
-        // directly through `swapViaVenueV1` / `quoteVenueV1`.
-        try this.quoteVenueV1(fallbackSwapRouter, tokenIn, tokenOut, amount) returns (
-            uint256 amountOut, address _quotedVenue
-        ) {
-            if (amountOut > bestQuote) {
-                bestQuote = amountOut;
-                venue = fallbackSwapRouter;
-            }
-        } catch {}
     }
 
     /// @notice Finds the venue offering the best `tokenOut` for `amount` of
@@ -1528,8 +1563,7 @@ contract PropAMMRouter is
     /// (and quote) through it — including as an auto-selection candidate in
     /// `swapV1` / `quoteV1`, which iterate the whitelist.
     /// @dev Access-controlled via the AccessManager authority. Reverts `ZeroAddress` if `venue` is zero, or
-    /// `VenueAlreadyWhitelisted` if it is already listed. Other than the
-    /// built-in propAMMs Bebop, (which use their bespoke interface), a venue is expected
+    /// `VenueAlreadyWhitelisted` if it is already listed. A venue is expected
     /// to implement the common `IPropAMM` interface. Listing an address that does
     /// not (an EOA, the wrong contract, a not-yet-deployed adapter) is not a
     /// foot-gun: its `quote`/`swap` calls revert, so it is skipped by selection

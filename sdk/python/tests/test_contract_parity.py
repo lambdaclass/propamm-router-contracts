@@ -48,12 +48,12 @@ _TS_ADDRESS_CONSTANT = re.compile(
     r'^export\s+const\s+(\w+)\s*:\s*Address\s*=\s*"(0x[0-9a-fA-F]{40})"\s*;', re.MULTILINE
 )
 
-# Solidity constant name -> the SDK constant that must mirror it. `BEBOP_ROUTER`
-# is load-bearing: the router dispatches `venue == BEBOP_ROUTER` down a bespoke
-# `IBebopRouter` path rather than the generic `IPropAMM` one, so a stale SDK copy
-# points callers at the wrong calling convention.
+# Solidity constant name -> the SDK constant that must mirror it. Only tokens
+# remain: `BEBOP_ROUTER` was dropped with the bespoke `IBebopRouter` dispatch, so
+# no venue address is hardcoded in the contracts any more — every venue is
+# reached through the runtime `addVenue` whitelist and the generic `IPropAMM`
+# interface, and the SDK's `PAMMS` map has no contract-side counterpart to check.
 MIRRORED_CONSTANTS = {
-    "BEBOP_ROUTER": "BEBOP",
     "USDC": "USDC",
     "USDT": "USDT",
     "WETH": "WETH",
@@ -82,13 +82,12 @@ def _solidity_address_constants() -> dict[str, str]:
 
 
 def test_address_constants_match_contract():
-    from propamm.common import pamms, tokens
+    from propamm.common import tokens
 
     solidity = _solidity_address_constants()
     for sol_name, sdk_name in MIRRORED_CONSTANTS.items():
         assert sol_name in solidity, f"`address constant {sol_name}` not found in src/"
-        module = pamms if sdk_name == "BEBOP" else tokens
-        actual = getattr(module, sdk_name).lower()
+        actual = getattr(tokens, sdk_name).lower()
         assert actual == solidity[sol_name], (
             f"{sol_name} drifted: contracts say {solidity[sol_name]}, SDK says {actual}"
         )
@@ -97,9 +96,9 @@ def test_address_constants_match_contract():
 def test_no_unmirrored_address_constant_in_contracts():
     """A new hardcoded `address constant` is a new dispatch target to mirror.
 
-    The other venues have no Solidity counterpart — the router reaches them
+    No venue has a Solidity counterpart — the router reaches every one of them
     through the runtime `addVenue` whitelist and the generic `IPropAMM`
-    interface, so only Bebop is hardcoded. If this fails, add the constant to
+    interface, so only tokens are hardcoded. If this fails, add the constant to
     `MIRRORED_CONSTANTS` and to each SDK (and to `PAMMS` if it is a venue).
     """
     unmirrored = sorted(set(_solidity_address_constants()) - set(MIRRORED_CONSTANTS))

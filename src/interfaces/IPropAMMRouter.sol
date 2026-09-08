@@ -171,7 +171,10 @@ interface IPropAMMRouter {
     /// possible, routing through the best-quoting venue and falling back to the
     /// public-venue fallback if the chosen venue fails to fill.
     /// @dev The caller must approve this contract for at least `amountIn` of
-    /// `tokenIn`. Reverts if the output is below `amountOutMin`.
+    /// `tokenIn`. Reverts if the output is below `amountOutMin`. Only the propAMMs
+    /// are quoted for selection (quoting the fallback on-chain costs gas), so the
+    /// fallback is picked only when no propAMM can be priced or the best one is
+    /// below `amountOutMin`.
     /// @param tokenIn The token being sold.
     /// @param tokenOut The token being bought.
     /// @param amountIn The exact amount of `tokenIn` to sell.
@@ -191,7 +194,10 @@ interface IPropAMMRouter {
 
     /// @notice Best-venue swap that skims a frontend fee from the output token.
     /// @dev The caller must approve this contract for at least `amountIn` of
-    /// `tokenIn`. Reverts if the output is below `amountOutMin`.
+    /// `tokenIn`. Reverts if the output is below `amountOutMin`. Only the propAMMs
+    /// are quoted for selection (quoting the fallback on-chain costs gas), so the
+    /// fallback is picked only when no propAMM can be priced or the best one is
+    /// below the grossed-up `amountOutMin`.
     /// @param tokenIn The token being sold.
     /// @param tokenOut The token being bought.
     /// @param amountIn The exact amount of `tokenIn` to sell.
@@ -391,6 +397,8 @@ interface IPropAMMRouter {
 
     /// @notice Quotes `amount` of `tokenIn` across every venue and returns the
     /// best output and the venue that produced it.
+    /// @dev Unlike `swapV1`, this includes the fallback, so `venue` is the price to
+    /// beat rather than the venue `swapV1` would pick.
     /// @param tokenIn The token being sold.
     /// @param tokenOut The token being bought.
     /// @param amount The amount of `tokenIn` to quote.

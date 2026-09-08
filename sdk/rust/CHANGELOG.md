@@ -2,6 +2,20 @@
 
 All notable changes to the Rust SDK (`propamm`) are documented here.
 
+## [1.3.0] - 2026-09-07
+
+### Added
+
+- `EL_ZORRO` venue constant in `common::pamms`, plus its `elzorro` entry in
+  `PAMMS` (whose length goes from 6 to 7).
+
+### Removed
+
+- `TokenOutBalanceDecreased()` from `ERROR_SIGNATURES`. The router stopped
+  reverting with it when the bespoke Bebop adapter was removed, so the selector
+  no longer decodes into a named error.
+  ([#67](https://github.com/lambdaclass/propamm-router-contracts/pull/67))
+
 ## [1.2.0] - 2026-08-28
 
 ### Added

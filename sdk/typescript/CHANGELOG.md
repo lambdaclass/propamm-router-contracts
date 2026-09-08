@@ -2,6 +2,20 @@
 
 All notable changes to the TypeScript SDK (`propamm`) are documented here.
 
+## [1.4.0] - 2026-09-07
+
+### Added
+
+- `EL_ZORRO` venue constant in `common/pamms`, plus its `elzorro` entry in
+  `PAMMS` (and therefore in the `PammName` union).
+
+### Removed
+
+- `TokenOutBalanceDecreased()` from `propAmmRouterAbi`. The router stopped
+  reverting with it when the bespoke Bebop adapter was removed, so viem can no
+  longer decode a revert into it.
+  ([#67](https://github.com/lambdaclass/propamm-router-contracts/pull/67))
+
 ## [1.3.0] - 2026-08-28
 
 ### Added

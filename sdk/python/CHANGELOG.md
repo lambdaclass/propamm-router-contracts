@@ -2,6 +2,20 @@
 
 All notable changes to the Python SDK (`propamm`) are documented here.
 
+## [1.3.0] - 2026-09-07
+
+### Added
+
+- `EL_ZORRO` venue constant in `common.pamms`, plus its `elzorro` entry in
+  `PAMMS`.
+
+### Removed
+
+- `TokenOutBalanceDecreased` from the bundled router ABI. The router stopped
+  reverting with it when the bespoke Bebop adapter was removed, so it is no
+  longer part of the compiled ABI and no longer decodes from a revert.
+  ([#67](https://github.com/lambdaclass/propamm-router-contracts/pull/67))
+
 ## [1.2.0] - 2026-08-28
 
 ### Added
