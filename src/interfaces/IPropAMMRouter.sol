@@ -312,6 +312,83 @@ interface IPropAMMRouter {
         FrontendFee calldata fee
     ) external payable returns (uint256 amountOut, address executedVenue);
 
+    /// @notice `swapMultiLegV1` plus a frontend fee skimmed from the aggregate
+    /// output. Legs deliver to this contract; the fee and the net are then
+    /// forwarded.
+    /// @dev `amountOutMin` and `fallbackMinOut` are NET minimums — what the
+    /// user must be left with after the fee — and the router grosses both up
+    /// by `fee.bps` before applying them to what the legs actually deliver.
+    /// `Leg.minOut` is the exception: it gates a leg's own PRE-fee delivery
+    /// and is never grossed up.
+    ///
+    /// EVENT BASIS differs from the single-venue `*WithFeeV1` entrypoints,
+    /// which emit one `Swapped` carrying the NET amount. This entrypoint emits
+    /// one `Swapped` PER LEG carrying GROSS amounts, so no single event holds
+    /// the user's net output; derive it as
+    /// `SUM(Swapped.amountOut) - FrontendFeeCharged.feeAmount`. `(txHash)` is
+    /// therefore not unique per swap — index on `(txHash, logIndex)`.
+    /// @param legs The legs to execute (1..MAX_SPLIT_VENUES entries).
+    /// @param tokenIn The token being sold (or the ETH sentinel).
+    /// @param tokenOut The token being bought (or the ETH sentinel).
+    /// @param amountOutMin The minimum NET total `tokenOut` the user must receive (after the fee).
+    /// @param fallbackMinOut NET floor on the ONE coalesced Uniswap V3 swap,
+    /// on the same basis and with the same pro-rata treatment as
+    /// `swapMultiLegV1`. Zero disables it.
+    /// @param recipient The address that receives the net `tokenOut`.
+    /// @param deadline Unix timestamp after which the swap is no longer valid.
+    /// @param fee The frontend fee (bps + recipient).
+    /// @return amountOut The net `tokenOut` delivered to `recipient`.
+    function swapMultiLegWithFeeV1(
+        Leg[] calldata legs,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountOutMin,
+        uint256 fallbackMinOut,
+        address recipient,
+        uint256 deadline,
+        FrontendFee calldata fee
+    ) external payable returns (uint256 amountOut);
+
+    /// @notice `swapSplitV1` plus a frontend fee skimmed from the aggregate
+    /// output. The router plans the legs, they deliver to this contract, and
+    /// the fee and the net are then forwarded.
+    /// @dev `amountOutMin` and `fallbackMinOut` are NET minimums and are both
+    /// grossed up by `fee.bps` before they reach execution. This entrypoint
+    /// plans its own legs, so there is no caller-supplied per-leg `minOut`.
+    ///
+    /// EVENT BASIS matches `swapMultiLegWithFeeV1` and differs from the
+    /// single-venue `*WithFeeV1` entrypoints: one GROSS `Swapped` per leg, so
+    /// net output is `SUM(Swapped.amountOut) - FrontendFeeCharged.feeAmount`
+    /// and events must be indexed on `(txHash, logIndex)`.
+    /// @param venues The venues to probe, or an empty array for the whitelist.
+    /// @param probeHints Optional per-venue probe sizes (0 = none); empty, or
+    /// one entry per `venues` entry.
+    /// @param tokenIn The token being sold (or the ETH sentinel).
+    /// @param tokenOut The token being bought (or the ETH sentinel).
+    /// @param amountIn The exact amount of `tokenIn` to sell.
+    /// @param amountOutMin The minimum NET total `tokenOut` the user must receive (after the fee).
+    /// @param fallbackMinOut NET floor on the coalesced remainder swap, priced
+    /// as if the ENTIRE input routed through Uniswap and pro-rated by the
+    /// router to the slice that forms. Zero disables it.
+    /// @param maxLegs Maximum number of propAMM legs (≥ 1).
+    /// @param recipient The address that receives the net `tokenOut`.
+    /// @param deadline Unix timestamp after which the swap is no longer valid.
+    /// @param fee The frontend fee (bps + recipient).
+    /// @return amountOut The net `tokenOut` delivered to `recipient`.
+    function swapSplitWithFeeV1(
+        address[] calldata venues,
+        uint256[] calldata probeHints,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        uint256 fallbackMinOut,
+        uint256 maxLegs,
+        address recipient,
+        uint256 deadline,
+        FrontendFee calldata fee
+    ) external payable returns (uint256 amountOut);
+
     /// @notice Quotes `amount` of `tokenIn` across every venue and returns the
     /// best output and the venue that produced it.
     /// @param tokenIn The token being sold.

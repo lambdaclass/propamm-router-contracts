@@ -354,10 +354,7 @@ contract PropAMMRouter is
         );
     }
 
-    /// @notice `swapMultiLegV1` plus a frontend fee skimmed from the
-    /// aggregate output. Implementation-only, like the other `*WithFeeV1`
-    /// entrypoints. Legs deliver to this contract; the fee and the net are
-    /// then forwarded.
+    /// @inheritdoc IPropAMMRouter
     /// @dev The two AGGREGATE floors, `amountOutMin` and `fallbackMinOut`, are
     /// NET minimums — what the user must be left with after the fee — and each
     /// is grossed up by `fee.bps` before it reaches `_executeLegs`, which
@@ -466,8 +463,7 @@ contract PropAMMRouter is
         );
     }
 
-    /// @notice `swapSplitV1` plus a frontend fee skimmed from the aggregate
-    /// output. Implementation-only.
+    /// @inheritdoc IPropAMMRouter
     /// @dev The two AGGREGATE floors, `amountOutMin` and `fallbackMinOut`, are
     /// NET minimums — what the user must be left with after the fee — and each
     /// is grossed up by `fee.bps` before reaching `_executeLegs`, which applies
