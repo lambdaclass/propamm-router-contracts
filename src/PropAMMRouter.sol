@@ -338,7 +338,7 @@ contract PropAMMRouter is
     ) external payable whenNotPaused nonReentrant returns (uint256 amountOut) {
         require(block.timestamp <= deadline, Expired());
         uint256 totalIn = _validateLegs(legs);
-        address tokenIn_ = _pullFunds(tokenIn, totalIn);
+        (address tokenIn_,) = _pullFunds(tokenIn, tokenOut, totalIn);
         amountOut = _executeLegs(
             legs,
             LegRun({
@@ -385,7 +385,7 @@ contract PropAMMRouter is
         uint256 totalIn = _validateLegs(legs);
         uint256 grossMin = FrontendFees._grossUp(amountOutMin, fee.bps);
         uint256 grossFallbackMin = FrontendFees._grossUp(fallbackMinOut, fee.bps);
-        address tokenIn_ = _pullFunds(tokenIn, totalIn);
+        (address tokenIn_,) = _pullFunds(tokenIn, tokenOut, totalIn);
         uint256 deliveredGross = _executeLegs(
             legs,
             LegRun({
@@ -437,8 +437,7 @@ contract PropAMMRouter is
 
         (address[] memory venueSet, uint256[] memory hints) = _resolveVenueSet(venues, probeHints);
 
-        address tokenIn_ = _pullFunds(tokenIn, amountIn);
-        address tokenOut_ = tokenOut == ETH_SENTINEL ? WETH : tokenOut;
+        (address tokenIn_, address tokenOut_) = _pullFunds(tokenIn, tokenOut, amountIn);
 
         IPropAMMRouter.Leg[] memory legs = _planSplit(venueSet, hints, tokenIn_, tokenOut_, amountIn, maxLegs);
         // `_validateLegs` is deliberately NOT called here, and restoring it
@@ -500,8 +499,7 @@ contract PropAMMRouter is
         uint256 grossMin = FrontendFees._grossUp(amountOutMin, fee.bps);
         uint256 grossFallbackMin = FrontendFees._grossUp(fallbackMinOut, fee.bps);
 
-        address tokenIn_ = _pullFunds(tokenIn, amountIn);
-        address tokenOut_ = tokenOut == ETH_SENTINEL ? WETH : tokenOut;
+        (address tokenIn_, address tokenOut_) = _pullFunds(tokenIn, tokenOut, amountIn);
         IPropAMMRouter.Leg[] memory legs = _planSplit(venueSet, hints, tokenIn_, tokenOut_, amountIn, maxLegs);
 
         uint256 deliveredGross = _executeLegs(
@@ -920,10 +918,23 @@ contract PropAMMRouter is
     }
 
     /// @dev Pulls `amountIn` of `tokenIn` from the caller (wrapping ETH when
-    /// `tokenIn` is the sentinel) and returns the resolved ERC-20 the swap
-    /// legs will actually sell. Mirrors `_coreSwap`'s pull block.
-    function _pullFunds(address tokenIn, uint256 amountIn) internal returns (address tokenIn_) {
+    /// `tokenIn` is the sentinel) and returns the resolved ERC-20s the swap
+    /// will actually sell and buy. Mirrors `_coreSwap`'s pull block.
+    ///
+    /// This is where `tokenIn == tokenOut` is rejected, for both the multileg
+    /// and the split path: it is the first point at which BOTH sentinels are
+    /// resolved, and it sits before the transfer. Checking it later — once the
+    /// funds are in and, on the split path, after a two-quote probe per venue
+    /// plus a QuoterV2 pool simulation — spends all of that planning a route
+    /// for a pair no venue can fill. `_executeLegs` therefore does not repeat
+    /// the check; every path into it comes through here.
+    function _pullFunds(address tokenIn, address tokenOut, uint256 amountIn)
+        internal
+        returns (address tokenIn_, address tokenOut_)
+    {
         tokenIn_ = tokenIn;
+        tokenOut_ = tokenOut == ETH_SENTINEL ? WETH : tokenOut;
+        require((tokenIn == ETH_SENTINEL ? WETH : tokenIn) != tokenOut_, IdenticalTokens());
         if (tokenIn == ETH_SENTINEL) {
             require(msg.value == amountIn, InvalidValue(amountIn, msg.value));
             IWETH(WETH).deposit{value: msg.value}();
@@ -976,8 +987,6 @@ contract PropAMMRouter is
             tokenOut_ = WETH;
             recipient_ = address(this);
         }
-        require(r.tokenIn_ != tokenOut_, IdenticalTokens());
-
         uint256 fbAmount = 0;
         uint256 fbMinOut = 0;
         // Denominator for the pro-rata scaling of `fallbackMinOut` below.

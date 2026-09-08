@@ -16,6 +16,7 @@ import {MockCappedPropAMM} from "./mocks/MockCappedPropAMM.sol";
 import {MockPartialFillPropAMM} from "./mocks/MockPartialFillPropAMM.sol";
 import {MockThievingQuoteVenue} from "./mocks/MockThievingQuoteVenue.sol";
 import {MockDonatingQuoteVenue} from "./mocks/MockDonatingQuoteVenue.sol";
+import {IPropAMM} from "../src/interfaces/IPropAMM.sol";
 import {MockThievingQuoterV2} from "./mocks/MockThievingQuoterV2.sol";
 import {MockLinearSwapRouter, MockLinearQuoterV2} from "./mocks/MockLinearUniswap.sol";
 import {MockWETH} from "./mocks/MockWETH.sol";
@@ -297,6 +298,30 @@ contract PropAMMRouterSplitTest is Test {
         assertEq(opIn.balanceOf(user), 100e18);
         assertEq(opIn.balanceOf(address(router)), 0);
         assertEq(opIn.balanceOf(address(thief)), 0);
+    }
+
+    /// @dev `tokenIn == tokenOut` is a pair no venue can ever fill, so it must
+    /// be rejected before the router pulls the funds and spends a two-quote
+    /// probe per venue plus a QuoterV2 pool simulation planning a split for it.
+    function test_split_identicalTokensRevertsBeforeQuoting() public {
+        MockCappedPropAMM v = new MockCappedPropAMM(100, 100);
+        tokenOut.mint(address(v), 1_000e18);
+        vm.prank(owner);
+        router.addVenue(address(v));
+
+        tokenIn.mint(user, 100e18);
+        vm.prank(user);
+        tokenIn.approve(address(router), 100e18);
+
+        address[] memory venues = new address[](1);
+        venues[0] = address(v);
+
+        vm.expectCall(address(v), abi.encodeWithSelector(IPropAMM.quote.selector), 0);
+        vm.prank(user);
+        vm.expectRevert(IdenticalTokens.selector);
+        router.swapSplitV1(
+            venues, _noHints(), address(tokenIn), address(tokenIn), 100e18, 0, 0, 8, user, block.timestamp + 1
+        );
     }
 
     function test_split_r1_donatingQuoteDoesNotBrickTheSplit() public {
