@@ -162,7 +162,7 @@ def main():
     else:
         print("\n[2/2] depth/edge sweep: %d blocks, step %d (direct RPC, slow)"
               % (args.samples, args.step))
-        rr = sh(["forge", "test", "--match-path", "test/DepthSampler.t.sol", "-vv"],
+        rr = sh(["forge", "test", "--match-path", "test/DepthSamplerFork.t.sol", "-vv"],
                 env={"RPC_URL": rpc, "SAMPLES": str(args.samples), "STEP": str(args.step)},
                 timeout=5400)
         got = harvest(rr.stdout)

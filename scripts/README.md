@@ -295,7 +295,7 @@ stopped by the script; it is killed even if a stage fails.
 
 **Output:** `scripts/gas/split_economics_<runId>.csv` (`run_id,metric,value,
 durability,label`) plus a grouped summary. The underlying measurements live in
-`test/RealGasFork.t.sol` (real venues on a fork) and `test/DepthSampler.t.sol`
+`test/RealGasFork.t.sol` (real venues on a fork) and `test/DepthSamplerFork.t.sol`
 (multi-block sweep); both emit `RESULT|<key>|<value>` lines that this script
 harvests, so the parsing does not depend on log prose. Both skip cleanly without
 an RPC, so a bare `forge test` stays green.

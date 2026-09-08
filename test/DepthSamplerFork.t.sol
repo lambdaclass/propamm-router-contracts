@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.35;
 
-import {Test} from "forge-std/Test.sol";
 import {console2} from "forge-std/console2.sol";
+import {ForkGate} from "./helpers/ForkGate.sol";
+import {SampleStats} from "./helpers/SampleStats.sol";
 import {IPropAMMRouter} from "../src/interfaces/IPropAMMRouter.sol";
 import {PRIO_UPDATE_REGISTRY} from "../test/interfaces/IPrioUpdateRegistry.sol";
 
@@ -21,8 +22,10 @@ import {PRIO_UPDATE_REGISTRY} from "../test/interfaces/IPrioUpdateRegistry.sol";
 ///
 /// Runs against a real archive RPC, not the local anvil fork, because it hops
 /// blocks. Set SAMPLES / STEP to trade runtime for resolution.
-///   RPC_URL=<archive> forge test --match-path test/DepthSampler.t.sol -vv
-contract DepthSamplerTest is Test {
+///   RPC_URL=<archive> forge test --match-path test/DepthSamplerFork.t.sol -vv
+contract DepthSamplerForkTest is ForkGate {
+    string internal rpc;
+
     address constant LIVE_ROUTER = 0x4DdF368080CD7946db5b459aD591c350158175e1;
     address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
     address constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
@@ -84,30 +87,17 @@ contract DepthSamplerTest is Test {
         return false;
     }
 
-    function _median(uint256[] memory a) internal pure returns (uint256) {
-        if (a.length == 0) return 0;
-        for (uint256 i = 1; i < a.length; i++) {
-            uint256 k = a[i];
-            uint256 j = i;
-            while (j > 0 && a[j - 1] > k) {
-                a[j] = a[j - 1];
-                j--;
-            }
-            a[j] = k;
-        }
-        return a[a.length / 2];
+    function setUp() public {
+        if (!_selectForkOrSkip()) return;
+        // The sampler hops blocks, so it needs the URL itself, not just the
+        // fork `_selectForkOrSkip` has already selected at head.
+        rpc = vm.envString("RPC_URL");
     }
 
     function test_depthAndEdgeOverTime() public {
-        string memory rpc = vm.envOr("RPC_URL", string(""));
-        if (bytes(rpc).length == 0) {
-            vm.skip(true, "set RPC_URL (archive) to run the sampler");
-            return;
-        }
         uint256 samples = vm.envOr("SAMPLES", uint256(10));
         uint256 step = vm.envOr("STEP", uint256(720)); // ~2.4h at 12s blocks
 
-        vm.createSelectFork(rpc);
         uint256 head = block.number;
         console2.log("head block", head);
         console2.log("samples", samples);
@@ -135,8 +125,6 @@ contract DepthSamplerTest is Test {
                 console2.log("block / natural-fresh / Fermi: unrecoverable", blk, nat);
                 continue;
             }
-            fermiOk++;
-
             uint256 depth = 0;
             uint256 prev = 0;
             for (uint256 j = 0; j < 4; j++) {
@@ -145,12 +133,16 @@ contract DepthSamplerTest is Test {
                 prev = o;
                 depth = LADDER[j];
             }
-            depths[s] = depth;
+            // Written at `fermiOk`, not at `s`: an unrecoverable block above
+            // `continue`d without measuring anything, and a zero left in its
+            // slot would be sorted into the medians as real depth.
+            depths[fermiOk] = depth;
 
             uint256 f = _q(FERMI, 1_000_000e6);
             uint256 u = _q(UNISWAP_ROUTER_02, 1_000_000e6);
             uint256 bp = (u == 0 || f <= u) ? 0 : (f - u) * 10_000 / u;
-            bp1m[s] = bp;
+            bp1m[fermiOk] = bp;
+            fermiOk++;
 
             console2.log("block", blk);
             console2.log("   naturally-fresh venues", nat);
@@ -164,8 +156,8 @@ contract DepthSamplerTest is Test {
         console2.log("Fermi lane recoverable in", fermiOk);
         console2.log("at least ONE venue naturally fresh in", anyFresh);
         console2.log("TWO OR MORE naturally fresh in", multiFresh);
-        console2.log("median Fermi depth", _median(depths));
-        console2.log("median Fermi edge @1M, bp", _median(bp1m));
+        console2.log("median Fermi depth", SampleStats.median(depths, fermiOk));
+        console2.log("median Fermi edge @1M, bp", SampleStats.median(bp1m, fermiOk));
 
         _emit("samples", samples);
         _emit("span_blocks", samples * step);
@@ -173,7 +165,7 @@ contract DepthSamplerTest is Test {
         _emit("fermi_lane_recoverable", fermiOk);
         _emit("natural_fresh_ge1", anyFresh);
         _emit("natural_fresh_ge2", multiFresh);
-        _emit("fermi_depth_median_usdc6", _median(depths));
-        _emit("fermi_edge_1m_bp_median", _median(bp1m));
+        _emit("fermi_depth_median_usdc6", SampleStats.median(depths, fermiOk));
+        _emit("fermi_edge_1m_bp_median", SampleStats.median(bp1m, fermiOk));
     }
 }
