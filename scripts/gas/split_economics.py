@@ -25,6 +25,7 @@ import os
 import re
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -91,8 +92,24 @@ def require(tool):
         sys.exit("error: `%s` not found on PATH" % tool)
 
 
+def port_in_use(port):
+    with socket.socket() as s:
+        s.settimeout(0.5)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
 def start_anvil(rpc, block, port):
     require("anvil")
+    require("cast")
+    # A node already on this port would make the readiness probe below succeed
+    # against a chain we did not start, at a block we did not choose, and every
+    # gas number in the run would be attributed to `--block`/head regardless.
+    # Refuse rather than measure something else.
+    if port_in_use(port):
+        sys.exit(
+            "error: something is already listening on 127.0.0.1:%d — "
+            "stop it or pass --port to move anvil" % port
+        )
     cmd = ["anvil", "--fork-url", rpc, "--port", str(port), "--silent"]
     if block:
         cmd += ["--fork-block-number", str(block)]
@@ -100,16 +117,23 @@ def start_anvil(rpc, block, port):
     print("  starting anvil on :%d %s" % (port, where), flush=True)
     proc = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     local = "http://127.0.0.1:%d" % port
-    for _ in range(30):
-        time.sleep(1)
-        r = sh(["cast", "block-number", "--rpc-url", local], quiet=True)
-        if r.returncode == 0 and r.stdout.strip().isdigit():
-            print("  anvil up at block %s" % r.stdout.strip(), flush=True)
-            return proc, local
-        if proc.poll() is not None:
-            sys.exit("error: anvil exited during startup (bad RPC URL?)")
-    stop_anvil(proc)
-    sys.exit("error: anvil did not become ready in 30s")
+    try:
+        for _ in range(30):
+            time.sleep(1)
+            # Liveness BEFORE the probe: a dead child cannot be the thing that
+            # answers, so asking it first stops any stray node from standing in.
+            if proc.poll() is not None:
+                sys.exit("error: anvil exited during startup (bad RPC URL?)")
+            r = sh(["cast", "block-number", "--rpc-url", local], quiet=True)
+            if r.returncode == 0 and r.stdout.strip().isdigit():
+                print("  anvil up at block %s" % r.stdout.strip(), flush=True)
+                return proc, local
+        sys.exit("error: anvil did not become ready in 30s")
+    except BaseException:
+        # Covers the sys.exit paths above and anything cast raises: the child is
+        # already spawned, so it must not outlive this function.
+        stop_anvil(proc)
+        raise
 
 
 def stop_anvil(proc):
@@ -142,8 +166,12 @@ def main():
         sys.exit("error: set ETH_RPC_URL (or RPC_URL) to an archive node")
 
     print("\n[1/2] real-venue gas on an anvil fork")
-    proc, local = start_anvil(rpc, args.block, args.port)
+    proc = None
     try:
+        # Spawned INSIDE the try so no failure between here and the loop can
+        # leave a forked anvil running; `start_anvil` cleans up its own child
+        # when it fails before returning.
+        proc, local = start_anvil(rpc, args.block, args.port)
         for name in ("test_allMethodsSameOrder", "test_capacityRecheck"):
             rr = sh(["forge", "test", "--match-test", name, "-vv"],
                     env={"RPC_URL": local}, timeout=1800)
@@ -154,8 +182,9 @@ def main():
             results.update(got)
             print("  %s: %d metrics" % (name, len(got)))
     finally:
-        stop_anvil(proc)
-        print("  anvil stopped")
+        if proc is not None:
+            stop_anvil(proc)
+            print("  anvil stopped")
 
     if args.no_sweep:
         print("\n[2/2] skipped (--no-sweep)")
