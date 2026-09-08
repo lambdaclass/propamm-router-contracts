@@ -827,8 +827,18 @@ contract PropAMMRouter is
             return legs;
         }
 
+        // Only the fills the waterfall can actually place may be subtracted:
+        // `cands` is sorted by descending rate, so the first `maxLegs` of them
+        // are exactly the ones it would take. Subtracting all of them instead
+        // understates the residual — with more candidates than slots it drives
+        // the bound to 0 and drops `refSize` onto the `amountIn/100` floor,
+        // where a concave pool's unit rate is near-perfect. That overstates
+        // Uniswap, contests the first genuinely-better candidate, and spends
+        // the one-shot refinement re-pinning the reference at the loosest size
+        // it can take instead of keeping it for a candidate that needs it.
+        uint256 placeable = cands.length < maxLegs ? cands.length : maxLegs;
         uint256 residualLb = amountIn;
-        for (uint256 i = 0; i < cands.length; i++) {
+        for (uint256 i = 0; i < placeable; i++) {
             residualLb = cands[i].fill >= residualLb ? 0 : residualLb - cands[i].fill;
         }
         uint256 refSize = residualLb > amountIn / 100 ? residualLb : amountIn / 100;

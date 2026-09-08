@@ -179,4 +179,68 @@ contract PropAMMRouterSplitReferenceTest is Test {
 
         assertEq(out, uni.quote(amountIn), "everything routed through the single remainder leg");
     }
+
+    /// @dev `residualLb` is a LOWER BOUND on the input the coalesced fallback
+    /// leg will carry, so it must only subtract fills the waterfall can
+    /// actually place — at most `maxLegs` of them. Subtracting every candidate
+    /// underestimates the residual, which overstates Uniswap's apparent rate
+    /// and makes the cutoff over-strict on the very first comparison.
+    ///
+    /// Four candidates, each hinted to `amountIn/4`, with `maxLegs = 2`:
+    ///   - subtracting all four drives the bound to 0, so `refSize` falls back
+    ///     to the `amountIn/100` floor (4_000e18), where the concave pool
+    ///     quotes a ~0.99602 unit rate;
+    ///   - subtracting only the two placeable fills leaves `amountIn/2`
+    ///     (200_000e18), a ~0.83333 unit rate — the honest bound.
+    ///
+    /// The 0.90 venue clears the honest bound outright, but the coarse bound
+    /// CONTESTS it: that burns the one-shot refinement on candidate 0 and
+    /// re-pins the reference at `remaining == amountIn` (~0.71429), the
+    /// loosest it can ever be. The 0.74 venue then slips through that stale
+    /// reference — even though Uniswap pays ~0.76923 on the true residual, and
+    /// the refinement, still unspent under the honest bound, rejects it.
+    function test_split_residualLowerBoundIsCappedAtMaxLegs() public {
+        uni.setReserves(1e24, 1e24);
+        quoter.setReserves(1e24, 1e24);
+
+        uint256 amountIn = 400_000e18;
+        uint256 quarter = amountIn / 4;
+
+        // The two reference rates the argument turns on, read off the pool
+        // rather than trusted from the comment above.
+        assertGt(quoter.quote(amountIn / 100) * 1e18 / (amountIn / 100), 0.99e18, "coarse reference is near-perfect");
+        assertLt(quoter.quote(amountIn / 2) * 1e18 / (amountIn / 2), 0.84e18, "honest bound is materially worse");
+
+        // Uncapped venues: the hint alone fixes each candidate's fill at a
+        // quarter of the order, so four candidates sum to exactly `amountIn`.
+        MockCappedPropAMM good = _venue(100, 90, 0);
+        MockCappedPropAMM marginal = _venue(100, 74, 0);
+        MockCappedPropAMM filler1 = _venue(100, 72, 0);
+        MockCappedPropAMM filler2 = _venue(100, 71, 0);
+
+        address[] memory venues = new address[](4);
+        venues[0] = address(good);
+        venues[1] = address(marginal);
+        venues[2] = address(filler1);
+        venues[3] = address(filler2);
+
+        uint256[] memory hints = new uint256[](4);
+        for (uint256 i = 0; i < 4; i++) {
+            hints[i] = quarter;
+        }
+
+        _fundUser(amountIn);
+        vm.prank(user);
+        uint256 out = router.swapSplitV1(
+            venues, hints, address(tokenIn), address(tokenOut), amountIn, 0, 0, 2, user, block.timestamp + 1
+        );
+
+        assertEq(tokenIn.balanceOf(address(good)), quarter, "the 0.90 venue must take its leg");
+        assertEq(
+            tokenIn.balanceOf(address(marginal)),
+            0,
+            "the 0.74 venue loses to Uniswap at the true residual and must be declined"
+        );
+        assertEq(out, quarter * 90 / 100 + uni.quote(amountIn - quarter), "one prop leg plus the honest remainder");
+    }
 }
