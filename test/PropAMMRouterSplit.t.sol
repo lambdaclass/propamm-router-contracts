@@ -15,6 +15,7 @@ import {MockOperatorERC20} from "./mocks/MockOperatorERC20.sol";
 import {MockCappedPropAMM} from "./mocks/MockCappedPropAMM.sol";
 import {MockPartialFillPropAMM} from "./mocks/MockPartialFillPropAMM.sol";
 import {MockThievingQuoteVenue} from "./mocks/MockThievingQuoteVenue.sol";
+import {MockDonatingQuoteVenue} from "./mocks/MockDonatingQuoteVenue.sol";
 import {MockThievingQuoterV2} from "./mocks/MockThievingQuoterV2.sol";
 import {MockLinearSwapRouter, MockLinearQuoterV2} from "./mocks/MockLinearUniswap.sol";
 import {MockWETH} from "./mocks/MockWETH.sol";
@@ -296,6 +297,40 @@ contract PropAMMRouterSplitTest is Test {
         assertEq(opIn.balanceOf(user), 100e18);
         assertEq(opIn.balanceOf(address(router)), 0);
         assertEq(opIn.balanceOf(address(thief)), 0);
+    }
+
+    function test_split_r1_donatingQuoteDoesNotBrickTheSplit() public {
+        // R1 guards against the router LOSING tokenIn while it quotes. A venue
+        // that hands the router 1 wei has taken nothing, so it must be priced
+        // and ranked like any other venue rather than reverting the split for
+        // every caller. The stray wei is recoverable via `rescueTokens`.
+        MockDonatingQuoteVenue donor = new MockDonatingQuoteVenue();
+        tokenIn.mint(address(donor), 10);
+
+        MockCappedPropAMM good = new MockCappedPropAMM(100, 105);
+        tokenOut.mint(address(good), 1_000e18);
+
+        vm.startPrank(owner);
+        router.addVenue(address(donor));
+        router.addVenue(address(good));
+        vm.stopPrank();
+
+        tokenIn.mint(user, 100e18);
+        vm.prank(user);
+        tokenIn.approve(address(router), 100e18);
+
+        address[] memory venues = new address[](2);
+        venues[0] = address(donor);
+        venues[1] = address(good);
+
+        vm.prank(user);
+        uint256 out = router.swapSplitV1(
+            venues, _noHints(), address(tokenIn), address(tokenOut), 100e18, 0, 0, 8, user, block.timestamp + 1
+        );
+
+        assertEq(out, 105e18, "the good venue must still fill the whole order");
+        assertEq(tokenIn.balanceOf(address(good)), 100e18, "and take the whole leg");
+        assertGt(tokenIn.balanceOf(address(router)), 0, "the donated wei is stranded, awaiting rescueTokens");
     }
 
     function test_split_nonWhitelistedVenueNeverProbedAndCannotStarveRealVenues() public {

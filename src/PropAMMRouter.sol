@@ -562,18 +562,29 @@ contract PropAMMRouter is
     /// @notice Quote phase + planning for `swapSplitV1`.
     /// @dev Quotes run while this contract holds the pulled `amountIn`, so the
     /// R1 snapshot-delta invariant brackets them: the balance is snapshotted
-    /// after the pull and required to be EXACTLY equal afterwards, so any
-    /// venue quote that net-consumes in-flight user funds reverts the whole
-    /// call. The check is `==` and not `>= amountIn` on purpose — pre-existing
-    /// router dust would otherwise mask a theft of the same size.
+    /// after the pull and required not to have FALLEN afterwards, so any venue
+    /// quote that net-consumes in-flight user funds reverts the whole call.
+    /// The comparison is against the snapshot rather than `>= amountIn` on
+    /// purpose: pre-existing router dust would mask a theft of the same size
+    /// against an absolute floor, but dust is already inside `snap`, so a
+    /// theft of any size still shows as a fall below it.
     ///
-    /// The flip side of `==` is that a balance INCREASE across the quote phase
-    /// also reverts. That is intended for a venue that pushes tokens mid-quote
-    /// (nothing legitimate does), but it makes the split path incompatible with
-    /// a `tokenIn` whose balances move on their own — rebasing and
-    /// reflection/fee-redistribution tokens can credit this contract while a
-    /// quote is in flight and revert an honest split. Do not whitelist venues
-    /// for such tokens, or route them through `swapV1` instead.
+    /// An INCREASE is tolerated. The invariant exists to catch the router
+    /// LOSING user funds, and a venue that pushes tokens in mid-quote has
+    /// taken nothing. Rejecting it would hand any single whitelisted venue a
+    /// denial of service over every caller's split — including splits that
+    /// never named it — for the price of one wei, and would make the path
+    /// incompatible with a `tokenIn` whose balance moves on its own, since a
+    /// rebasing or reflection token can credit this contract while a quote is
+    /// in flight. Anything that arrives this way is inert: legs are sized from
+    /// `amountIn`, never from the balance, so it is stranded rather than
+    /// swapped, and `rescueTokens` recovers it.
+    ///
+    /// What the directional check gives up is that two colluding venues could
+    /// net a theft against a donation inside the same bracket. That buys them
+    /// nothing — the pair returns exactly what it took — so it does not earn
+    /// the per-venue balance reads that detecting it would cost on a contract
+    /// this close to the size limit.
     ///
     /// The check sits after `_waterfall`, not after `_gatherCandidates`, so
     /// that it covers EVERY quote taken while the funds are held — including
@@ -605,7 +616,7 @@ contract PropAMMRouter is
         SplitPlanner.sortByRateDesc(cands);
         legs = _waterfall(cands, tokenIn_, tokenOut_, amountIn, maxLegs);
 
-        require(IERC20(tokenIn_).balanceOf(address(this)) == snap, QuoteBalanceInvariantViolated());
+        require(IERC20(tokenIn_).balanceOf(address(this)) >= snap, QuoteBalanceInvariantViolated());
     }
 
     /// @dev One candidate per venue, sized at `min(hint or amountIn,
