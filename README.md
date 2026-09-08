@@ -110,11 +110,14 @@ limit the protocol's venue roster to eight for one optional convenience path. Us
 `isSplitWhitelistModeAvailable()` to check the mode before listing a venue, and migrate
 integrators to explicit `venues` lists before crossing the bound.
 
-The split path is also **not compatible with rebasing or reflection `tokenIn` tokens**. It
-brackets its quote phase with an exact balance check (`==`) to catch a venue that consumes
-in-flight user funds while quoting; a token that credits the router on its own during that
-window trips the same check and reverts an honest split. Route such tokens through
-`swapV1`.
+The split path brackets its quote phase with a balance check that catches a venue
+consuming in-flight user funds while quoting: the router's `tokenIn` balance is
+snapshotted after the pull and must not have **fallen** by the end of the phase. The check
+is directional rather than exact, so a venue (or a rebasing/reflection token) that credits
+the router mid-quote is tolerated rather than treated as theft — an exact check would let
+any single whitelisted venue revert every caller's split by donating one wei. Anything
+that arrives that way is inert, since legs are sized from `amountIn` and never from the
+balance, and `rescueTokens` recovers it.
 
 ### Frontend fees
 
