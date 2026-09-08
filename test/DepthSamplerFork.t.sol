@@ -22,7 +22,7 @@ import {PRIO_UPDATE_REGISTRY} from "../test/interfaces/IPrioUpdateRegistry.sol";
 ///
 /// Runs against a real archive RPC, not the local anvil fork, because it hops
 /// blocks. Set SAMPLES / STEP to trade runtime for resolution.
-///   RPC_URL=<archive> forge test --match-path test/DepthSamplerFork.t.sol -vv
+///   ARCHIVE_RPC_URL=<archive> forge test --match-path test/DepthSamplerFork.t.sol -vv
 contract DepthSamplerForkTest is ForkGate {
     string internal rpc;
 
@@ -87,11 +87,21 @@ contract DepthSamplerForkTest is ForkGate {
         return false;
     }
 
+    /// @dev Gated on ARCHIVE_RPC_URL rather than the RPC_URL every other fork
+    /// suite uses, because this one needs strictly more than a fork endpoint:
+    /// it re-forks at `SAMPLES * STEP` blocks into the past (7,200 by default,
+    /// ~24h) and reads venue state there. A pruned node answers the head fork
+    /// happily and then fails deep in the sweep with "historical state is not
+    /// available" — which is what CI's public endpoint does. It also costs
+    /// ~5,400s, so it has no business running on every push. Point
+    /// ARCHIVE_RPC_URL at a real archive node to run it.
     function setUp() public {
-        if (!_selectForkOrSkip()) return;
-        // The sampler hops blocks, so it needs the URL itself, not just the
-        // fork `_selectForkOrSkip` has already selected at head.
-        rpc = vm.envString("RPC_URL");
+        rpc = vm.envOr("ARCHIVE_RPC_URL", string(""));
+        if (bytes(rpc).length == 0) {
+            vm.skip(true, "depth sampler: set ARCHIVE_RPC_URL (an ARCHIVE node) to run this sweep");
+            return;
+        }
+        vm.createSelectFork(rpc);
     }
 
     function test_depthAndEdgeOverTime() public {

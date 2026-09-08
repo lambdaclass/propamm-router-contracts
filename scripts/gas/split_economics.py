@@ -192,7 +192,10 @@ def main():
         print("\n[2/2] depth/edge sweep: %d blocks, step %d (direct RPC, slow)"
               % (args.samples, args.step))
         rr = sh(["forge", "test", "--match-path", "test/DepthSamplerFork.t.sol", "-vv"],
-                env={"RPC_URL": rpc, "SAMPLES": str(args.samples), "STEP": str(args.step)},
+                # The sweep re-forks deep into the past, so it needs an ARCHIVE node —
+                # gated on its own variable so a plain RPC_URL (CI's, say) cannot
+                # start a 5,400s sweep that dies on pruned state.
+                env={"ARCHIVE_RPC_URL": rpc, "SAMPLES": str(args.samples), "STEP": str(args.step)},
                 timeout=5400)
         got = harvest(rr.stdout)
         if not got:

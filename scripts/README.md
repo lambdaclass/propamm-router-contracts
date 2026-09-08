@@ -299,8 +299,15 @@ stopped by the script; it is killed even if a stage fails.
 durability,label`) plus a grouped summary. The underlying measurements live in
 `test/RealGasFork.t.sol` (real venues on a fork) and `test/DepthSamplerFork.t.sol`
 (multi-block sweep); both emit `RESULT|<key>|<value>` lines that this script
-harvests, so the parsing does not depend on log prose. Both skip cleanly without
-an RPC, so a bare `forge test` stays green.
+harvests, so the parsing does not depend on log prose.
+
+`RealGasFork` is gated on `RPC_URL` like the other fork suites. The depth sweep
+is gated on `ARCHIVE_RPC_URL` instead, deliberately: it re-forks `SAMPLES * STEP`
+blocks into the past, so a pruned endpoint serves the head fork and then dies
+mid-sweep on `historical state is not available` — and at ~5,400s it should
+never start by accident. CI sets a plain `RPC_URL` (a public, non-archive node)
+and runs an unfiltered `forge test`, so the separate variable is what keeps the
+sweep out of it.
 
 Everything here measures **real venues**. A mock-venue gas benchmark used to sit
 alongside it and was removed: mocks understated real costs 3.2–8.1×, distorted the
