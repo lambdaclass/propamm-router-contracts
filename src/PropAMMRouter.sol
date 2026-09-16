@@ -819,19 +819,32 @@ contract PropAMMRouter is
     /// rather than per candidate.
     ///
     /// The `amountIn/100` floor on the reference size is best-effort: it stops a
-    /// dust residual from rounding the reference rate to zero. For an `amountIn`
-    /// under 100 wei the floor is itself zero-ish and Uniswap quotes 0, which
-    /// disables the cutoff entirely and lets every candidate through. That is the
-    /// same by-design behaviour as a fallback that cannot be priced at all, and it
-    /// is benign: each leg still carries its own pro-rata `minOut` and the
-    /// aggregate `amountOutMin` still gates the swap.
+    /// dust residual from rounding the reference rate to zero for a normal-sized
+    /// order. For an `amountIn` under 100 wei the floor itself rounds to zero, so
+    /// `refSize` is bumped to 1 wei instead. What that 1-wei quote returns is
+    /// venue- and decimals-dependent, and either extreme is possible: it can come
+    /// back zero (disabling the cutoff and letting every candidate through), or,
+    /// for a token-decimals mismatch (e.g. a 6-decimal `tokenIn` against an
+    /// 18-decimal `tokenOut`), an inflated unit rate that contests every
+    /// candidate instead. Either outcome is benign — the economics of a
+    /// sub-100-wei order are nil, each leg still carries its own pro-rata
+    /// `minOut`, and the aggregate `amountOutMin` still gates the swap.
     ///
     /// On the FIRST contested candidate the reference is refined ONCE, at the true
-    /// prospective remainder. Uniswap's unit rate degrades with size, so the
-    /// refined cutoff is LOOSER — it can admit a candidate that only looked bad
-    /// against an under-sized reference, and can never reject a better one.
-    /// Candidates after the refinement are still compared against that reference,
-    /// sized for a residual LARGER than their own, which is likewise looser.
+    /// prospective remainder — but only when that re-quote is itself usable (see
+    /// the adoption guard below); a failed or out-of-range re-quote leaves the
+    /// original, already-contesting reference in place rather than discarding a
+    /// working verdict. Uniswap's unit rate degrades with size, so refining
+    /// USUALLY loosens the cutoff — the refined size is normally larger than the
+    /// `amountIn/100` floor, so it can admit a candidate that only looked bad
+    /// against the under-sized floor and can never reject a better one. This is
+    /// not a universal guarantee: if earlier legs already placed more than 99% of
+    /// `amountIn`, the true remainder can be SMALLER than the floor reference,
+    /// tightening rather than loosening the bar. That is harmless — a candidate
+    /// contested against the larger, easier floor reference is still contested
+    /// against the smaller, tougher one, so the loop breaks exactly as it would
+    /// without refinement. Candidates after the refinement are compared against
+    /// whichever reference size the refinement settled on.
     function _waterfall(SplitPlanner.Candidate[] memory cands, address tokenIn_, address tokenOut_, uint256 amountIn)
         internal
         returns (Leg[] memory legs)
@@ -875,9 +888,21 @@ contract PropAMMRouter is
             if (cands[i].out * refSize <= refOut * cands[i].fill) {
                 if (refined) break;
                 refined = true;
-                refSize = remaining;
-                refOut = _tryQuote(fb, tokenIn_, tokenOut_, refSize);
-                if (refOut > type(uint128).max) refOut = 0;
+                // Adopt the refined pair ONLY when it is itself usable. A failed
+                // (reverting) or out-of-range re-quote must NOT overwrite a
+                // working reference that had already rejected this candidate —
+                // doing so would zero `refOut`, make the recheck below vacuously
+                // false, and admit the very candidate the working reference just
+                // rejected (and every later one, since `refOut` would stay zero
+                // for the rest of the loop). Keeping the old reference instead
+                // means the recheck repeats the same comparison that got us
+                // here, so the candidate is rejected exactly as it would be
+                // without a refinement attempt at all.
+                uint256 newOut = _tryQuote(fb, tokenIn_, tokenOut_, remaining);
+                if (newOut != 0 && newOut <= type(uint128).max) {
+                    refSize = remaining;
+                    refOut = newOut;
+                }
                 if (cands[i].out * refSize <= refOut * cands[i].fill) break;
             }
             uint256 leg = cands[i].fill >= remaining ? remaining : cands[i].fill;

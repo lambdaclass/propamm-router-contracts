@@ -23,9 +23,27 @@ contract MockConcaveUniswap {
     uint256 public reserveIn = 1_000_000e18;
     uint256 public reserveOut = 1_000_000e18;
 
+    /// @notice Above this input size, `quoteExactInputSingle` reverts instead of
+    /// quoting — models the real QuoterV2 reverting once a revert-based
+    /// simulation runs past the initialized tick range / available liquidity.
+    /// Defaults to unlimited so existing tests are unaffected.
+    uint256 public quoteRevertAboveSize = type(uint256).max;
+
+    /// @notice The `tokenIn`/`tokenOut` most recently passed to
+    /// `quoteExactInputSingle`, so a test can assert the router quoted the
+    /// reference with the pair the right way round rather than transposed —
+    /// a bug this mock's pricing (which ignores both addresses) would
+    /// otherwise never surface.
+    address public lastQuoteTokenIn;
+    address public lastQuoteTokenOut;
+
     function setReserves(uint256 rin, uint256 rout) external {
         reserveIn = rin;
         reserveOut = rout;
+    }
+
+    function setQuoteRevertAboveSize(uint256 v) external {
+        quoteRevertAboveSize = v;
     }
 
     function _out(uint256 amountIn) internal view returns (uint256) {
@@ -36,9 +54,11 @@ contract MockConcaveUniswap {
 
     function quoteExactInputSingle(IQuoterV2.QuoteExactInputSingleParams memory params)
         external
-        view
         returns (uint256 amountOut, uint160, uint32, uint256)
     {
+        lastQuoteTokenIn = params.tokenIn;
+        lastQuoteTokenOut = params.tokenOut;
+        require(params.amountIn <= quoteRevertAboveSize, "uni: exceeds liquidity");
         return (_out(params.amountIn), 0, 0, 0);
     }
 

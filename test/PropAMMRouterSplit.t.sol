@@ -591,6 +591,90 @@ contract PropAMMRouterSplitTest is Test {
         // Whole order through the venue at 0.9995, not through Uniswap.
         assertEq(out, 1000e18 * 9_995 / 10_000);
     }
+
+    /// @dev If the refined re-quote reverts (e.g. QuoterV2 running past
+    /// available liquidity at the larger, refined size) or returns an
+    /// out-of-range value, the ORIGINAL reference — which had already
+    /// rejected this candidate — must be kept rather than discarded. Adopting
+    /// a zeroed-out refined reference would make the recheck vacuously false
+    /// and wrongly admit the candidate (and every later one, since a zero
+    /// `refOut` never contests anything for the rest of the loop). Here the
+    /// venue is priced below the floor reference (so it is contested and
+    /// triggers the one-shot refinement), and the refined re-quote at the
+    /// true remainder (1000e18) is made to revert by capping
+    /// `MockConcaveUniswap`'s quotable size at 500e18 — comfortably above the
+    /// 10e18 floor reference, comfortably below the refined size. A correct
+    /// implementation must still reject the venue and route through Uniswap.
+    function test_split_refinementRequoteFailureKeepsWorkingReference() public {
+        (PropAMMRouter r, MockConcaveUniswap c) = _concaveRouter();
+        c.setQuoteRevertAboveSize(500e18);
+
+        MockCappedPropAMM venue = new MockCappedPropAMM();
+        venue.setCap(type(uint256).max);
+        venue.setRateBps(9_990); // below the floor reference's ~0.99999 rate — contested
+        r.addVenue(address(venue));
+
+        tin.mint(user, 1000e18);
+        vm.prank(user);
+        tin.approve(address(r), 1000e18);
+
+        vm.prank(user);
+        uint256 out = r.swapSplitV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1);
+
+        // Whole order through Uniswap: a failed refinement must not admit the
+        // venue it was trying (and failing) to re-check.
+        assertEq(out, c.reserveOut() * 1000e18 / (c.reserveIn() + 1000e18));
+    }
+
+    /// @dev The reference quote must be taken with `(tokenIn, tokenOut)` in
+    /// the order the caller actually sold/bought, not transposed.
+    /// `MockConcaveUniswap`'s pricing ignores both addresses, so a
+    /// transposition at the `_tryQuote` call sites in `_waterfall` — the exact
+    /// parameters this task added — would otherwise pass every value-based
+    /// assertion in this file unnoticed. The mock instead records the pair it
+    /// was last quoted with, so this test checks the order directly.
+    function test_split_referenceQuoteUsesCorrectTokenOrder() public {
+        (PropAMMRouter r, MockConcaveUniswap c) = _concaveRouter();
+        MockCappedPropAMM venue = new MockCappedPropAMM();
+        venue.setCap(type(uint256).max);
+        venue.setRateBps(20_000);
+        r.addVenue(address(venue));
+
+        tin.mint(user, 1000e18);
+        vm.prank(user);
+        tin.approve(address(r), 1000e18);
+
+        vm.prank(user);
+        r.swapSplitV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1);
+
+        assertEq(c.lastQuoteTokenIn(), address(tin), "reference quote used the wrong tokenIn");
+        assertEq(c.lastQuoteTokenOut(), address(tout), "reference quote used the wrong tokenOut");
+    }
+
+    /// @dev Sibling of `test_split_referenceQuoteUsesCorrectTokenOrder`, aimed
+    /// at the OTHER `_tryQuote` call site: the refined re-quote. A venue rate
+    /// of 9995bps is (as in `test_split_refinementAdmitsCandidateBetweenReferenceSizes`)
+    /// contested against the floor reference, so refinement fires and the
+    /// refined call overwrites `lastQuoteTokenIn`/`lastQuoteTokenOut` — the
+    /// values asserted here reflect ONLY that second call, so this cannot pass
+    /// by accident if only the first call site were correct.
+    function test_split_refinedReferenceQuoteUsesCorrectTokenOrder() public {
+        (PropAMMRouter r, MockConcaveUniswap c) = _concaveRouter();
+        MockCappedPropAMM venue = new MockCappedPropAMM();
+        venue.setCap(type(uint256).max);
+        venue.setRateBps(9_995); // contested at the floor reference, triggers refinement
+        r.addVenue(address(venue));
+
+        tin.mint(user, 1000e18);
+        vm.prank(user);
+        tin.approve(address(r), 1000e18);
+
+        vm.prank(user);
+        r.swapSplitV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1);
+
+        assertEq(c.lastQuoteTokenIn(), address(tin), "refined reference quote used the wrong tokenIn");
+        assertEq(c.lastQuoteTokenOut(), address(tout), "refined reference quote used the wrong tokenOut");
+    }
 }
 
 /// @title PropAMMRouterSplitEthTest
