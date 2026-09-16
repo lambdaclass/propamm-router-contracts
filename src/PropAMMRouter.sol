@@ -500,14 +500,18 @@ contract PropAMMRouter is
     /// @dev Bundled `_executeLegs` inputs. A struct rather than positional
     /// parameters: it keeps the function under the stack limit and names the two
     /// distinct recipients so a call site cannot transpose them. `payTo` is
-    /// where legs deliver — the router itself for the fee variant, which must
-    /// hold the gross output to skim from it. `swapFor` is the user the swap is
-    /// for, used ONLY for `Swapped` events so an indexer attributing volume by
-    /// recipient sees the user, not the router.
+    /// where the proceeds end up — the router itself for the fee variant (which
+    /// must hold the gross output to skim from it), and also internally
+    /// overridden to `address(this)` whenever `tokenOut` is the ETH sentinel,
+    /// since ETH must be unwrapped before it can be forwarded. `swapFor` is the
+    /// user the swap is for, used ONLY for `Swapped` events so an indexer
+    /// attributing volume by recipient sees the user, not the router.
     struct LegRun {
         address tokenIn; // caller-visible, may be the ETH sentinel
         address tokenIn_; // the resolved ERC-20 the legs sell
         address tokenOut; // caller-visible, may be the ETH sentinel
+        address tokenOut_; // the resolved ERC-20 the legs buy
+        uint256 totalIn; // amount pulled from the caller; legs must sum to this
         uint256 amountOutMin; // aggregate floor on the total delivered
         address payTo;
         address swapFor;
@@ -536,6 +540,8 @@ contract PropAMMRouter is
                 tokenIn: tokenIn,
                 tokenIn_: tokenIn_,
                 tokenOut: tokenOut,
+                tokenOut_: tokenOut_,
+                totalIn: amountIn,
                 amountOutMin: amountOutMin,
                 payTo: recipient,
                 swapFor: recipient,
@@ -592,13 +598,25 @@ contract PropAMMRouter is
     /// `amountOutMin`. That floor is best-effort: it is zero whenever the prop
     /// legs that succeeded already clear the minimum. See `swapSplitV1`.
     /// Emits one `Swapped` per executed leg, naming `swapFor`.
+    ///
+    /// Reverts `SplitAllocationMismatch` before moving any funds if `legs` is
+    /// empty or does not sum to `r.totalIn`. Today the caller's `_planSplit`
+    /// always emits one leg for the full amount, so this can never fire yet —
+    /// it exists because this function, not the planner, is where the
+    /// custody guarantee belongs: Task 5 replaces the planner, and a plan bug
+    /// there must be caught here rather than silently stranding or overspending
+    /// the router's balance.
     function _executeLegs(Leg[] memory legs, LegRun memory r) internal returns (uint256 delivered) {
-        address tokenOut_ = r.tokenOut;
-        address recipient_ = r.payTo;
-        if (r.tokenOut == ETH_SENTINEL) {
-            tokenOut_ = WETH;
-            recipient_ = address(this);
+        // Pre-pass, not accumulated inside the execution loop below: the sum
+        // must be validated before any leg moves funds.
+        uint256 allocated;
+        for (uint256 i = 0; i < legs.length; i++) {
+            allocated += legs[i].amountIn;
         }
+        require(legs.length > 0, SplitAllocationMismatch(r.totalIn, allocated));
+        require(allocated == r.totalIn, SplitAllocationMismatch(r.totalIn, allocated));
+
+        address recipient_ = r.tokenOut == ETH_SENTINEL ? address(this) : r.payTo;
         // Cached: the loop body makes an external call, so the optimizer cannot
         // hold this across iterations and would re-SLOAD it once per leg.
         address fb = fallbackSwapRouter;
@@ -608,11 +626,11 @@ contract PropAMMRouter is
                 fbAmount += legs[i].amountIn;
                 continue;
             }
-            uint256 prevBal = IERC20(tokenOut_).balanceOf(recipient_);
+            uint256 prevBal = IERC20(r.tokenOut_).balanceOf(recipient_);
             try this._dispatchVenue(
                 legs[i].venue,
                 r.tokenIn_,
-                tokenOut_,
+                r.tokenOut_,
                 legs[i].amountIn,
                 legs[i].minOut,
                 // Paid from this contract's balance: the whole input was pulled
@@ -633,11 +651,11 @@ contract PropAMMRouter is
 
         if (fbAmount > 0) {
             uint256 uniMin = delivered >= r.amountOutMin ? 0 : r.amountOutMin - delivered;
-            uint256 prevBal = IERC20(tokenOut_).balanceOf(recipient_);
+            uint256 prevBal = IERC20(r.tokenOut_).balanceOf(recipient_);
             UniV3Router.swapExactIn(
-                r.tokenIn_, tokenOut_, resolvedFee(r.tokenIn_, tokenOut_), fbAmount, uniMin, recipient_, fb
+                r.tokenIn_, r.tokenOut_, resolvedFee(r.tokenIn_, r.tokenOut_), fbAmount, uniMin, recipient_, fb
             );
-            uint256 fbOut = IERC20(tokenOut_).balanceOf(recipient_) - prevBal;
+            uint256 fbOut = IERC20(r.tokenOut_).balanceOf(recipient_) - prevBal;
             require(fbOut >= uniMin, InsufficientOutput(uniMin, fbOut));
             delivered += fbOut;
             _emitSwapped(fb, r.tokenIn, r.tokenOut, fbAmount, fbOut, r.swapFor);

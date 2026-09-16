@@ -60,3 +60,12 @@ error TooManyVenues(uint256 count);
 /// @notice Thrown when the router's `tokenIn` balance FELL during the split's
 /// quote phase — some venue's quote consumed in-flight user funds (R1).
 error QuoteBalanceInvariantViolated();
+/// @notice Thrown when `_executeLegs` is handed a plan whose legs do not sum
+/// exactly to the amount pulled from the caller — including an empty plan,
+/// which sums to zero. This is the split's custody invariant: every unit
+/// pulled from the user must be assigned to exactly one leg before any leg
+/// executes, so a mis-planned allocation is caught before funds move rather
+/// than stranding or overspending the router's balance.
+/// @param amountIn The amount pulled from the caller (`LegRun.totalIn`).
+/// @param allocated The sum of `legs[i].amountIn` across the plan.
+error SplitAllocationMismatch(uint256 amountIn, uint256 allocated);

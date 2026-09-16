@@ -2,12 +2,16 @@
 pragma solidity ^0.8.35;
 
 import {Test} from "forge-std/Test.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
 import {PropAMMRouter} from "../src/PropAMMRouter.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockSwapRouter02} from "./mocks/MockSwapRouter02.sol";
+import {MockV3SwapRouter} from "./mocks/MockV3SwapRouter.sol";
+import {MockWETH} from "./mocks/MockWETH.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
+import {ETH_SENTINEL, WETH} from "../src/libraries/Constants.sol";
 import "../src/libraries/Errors.sol";
 
 contract PropAMMRouterSplitTest is Test {
@@ -74,6 +78,11 @@ contract PropAMMRouterSplitTest is Test {
 
         assertEq(out, 990e18);
         assertEq(tout.balanceOf(recipient), 990e18);
+        assertEq(tin.balanceOf(user), 0, "user's tokenIn should be pulled");
+        // MockSwapRouter02 deliberately does not pull tokenIn (see its own
+        // docs), so the router retains what it pulled from the user, pulled
+        // exactly once.
+        assertEq(tin.balanceOf(address(router)), 1000e18, "router should hold exactly what it pulled, once");
     }
 
     function test_split_revertsPastDeadline() public {
@@ -127,5 +136,99 @@ contract PropAMMRouterSplitTest is Test {
         vm.prank(user);
         vm.expectRevert(abi.encodeWithSelector(TooManyVenues.selector, 13));
         router.swapSplitV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1);
+    }
+}
+
+/// @title PropAMMRouterSplitEthTest
+/// @notice Exercises `swapSplitV1`'s two ETH-sentinel branches: `_pullSplitFunds`'s
+/// wrap-and-require-msg.value arm, and `_executeLegs`'s recipient override plus
+/// unwrap-to-`payTo` arm. Both are reachable today through the empty-whitelist
+/// stub's fallback-only plan, but `PropAMMRouterSplitTest`'s ERC20-only harness
+/// never drives them.
+/// @dev Own router instance rather than bending the shared harness:
+/// `PropAMMRouterSplitTest`'s `MockSwapRouter02` deliberately does not pull
+/// `tokenIn` (see its own docs), which cannot fund a WETH-backed unwrap.
+/// Modeled on `test/PropAMMRouterEth.t.sol`, which solves the same
+/// ETH-wrapping problem for the non-split entrypoints: a `MockWETH` etched at
+/// the hard-coded WETH address, and a pull-based `MockV3SwapRouter` fallback.
+contract PropAMMRouterSplitEthTest is Test {
+    PropAMMRouter internal router;
+    AccessManager internal manager;
+    MockV3SwapRouter internal fallbackRouter;
+    MockQuoterV2 internal quoter;
+    MockERC20 internal tin;
+    MockERC20 internal tout;
+
+    address internal owner = address(this);
+    address internal user = address(0xBEEF);
+    address internal recipient;
+
+    function setUp() public {
+        fallbackRouter = new MockV3SwapRouter();
+        quoter = new MockQuoterV2();
+        tin = new MockERC20("TokenIn", "TIN");
+        tout = new MockERC20("TokenOut", "TOUT");
+        recipient = makeAddr("splitEthRecipient");
+
+        // Put a working WETH at the address the router hard-codes.
+        vm.etch(WETH, address(new MockWETH()).code);
+
+        manager = new AccessManager(owner);
+        PropAMMRouter impl = new PropAMMRouter();
+        bytes memory initData =
+            abi.encodeCall(PropAMMRouter.initialize, (address(fallbackRouter), address(quoter), address(manager)));
+        router = PropAMMRouter(payable(address(new ERC1967Proxy(address(impl), initData))));
+    }
+
+    /// @dev Covers `_executeLegs`'s ETH-out branch: `recipient_` is overridden
+    /// to `address(this)` (the router) so it can hold the gross WETH before
+    /// `_sendWrappedETH` unwraps it and forwards real ETH to `payTo`. With no
+    /// whitelisted venues the stub's single leg IS the fallback, so this
+    /// drives the branch through the same plan the ERC20-only suite already
+    /// exercises for an ERC20 `tokenOut`.
+    function test_split_ethOut_unwrapsToRecipient() public {
+        uint256 amountIn = 1000e18;
+        uint256 amountOut = 1 ether;
+
+        tin.mint(user, amountIn);
+        vm.prank(user);
+        tin.approve(address(router), amountIn);
+
+        // Fund the fallback with WETH backed by real ETH, so the later
+        // `IWETH.withdraw` inside `_sendWrappedETH` has ETH to pay out.
+        vm.deal(address(fallbackRouter), amountOut);
+        vm.prank(address(fallbackRouter));
+        MockWETH(payable(WETH)).deposit{value: amountOut}();
+        fallbackRouter.setAmountOut(amountOut);
+
+        vm.prank(user);
+        uint256 out =
+            router.swapSplitV1(address(tin), ETH_SENTINEL, amountIn, amountOut, recipient, block.timestamp + 1);
+
+        assertEq(out, amountOut);
+        assertEq(recipient.balance, amountOut);
+        assertEq(IERC20(WETH).balanceOf(address(router)), 0, "no WETH stranded in router");
+    }
+
+    /// @dev Covers `_pullSplitFunds`'s ETH-in branch: `msg.value == amountIn`
+    /// is enforced and the ETH is wrapped to WETH before the (fallback-only)
+    /// plan runs.
+    function test_split_ethIn_wrapsAndDelivers() public {
+        uint256 amountIn = 1 ether;
+        uint256 amountOut = 500e18;
+
+        tout.mint(address(fallbackRouter), amountOut);
+        fallbackRouter.setAmountOut(amountOut);
+        vm.deal(user, amountIn);
+
+        vm.prank(user);
+        uint256 out = router.swapSplitV1{value: amountIn}(
+            ETH_SENTINEL, address(tout), amountIn, amountOut, recipient, block.timestamp + 1
+        );
+
+        assertEq(out, amountOut);
+        assertEq(tout.balanceOf(recipient), amountOut);
+        assertEq(IERC20(WETH).balanceOf(address(router)), 0, "no WETH stranded in router");
+        assertEq(address(router).balance, 0, "no ETH stranded in router");
     }
 }
