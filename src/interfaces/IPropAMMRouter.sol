@@ -280,9 +280,9 @@ interface IPropAMMRouter {
     /// @notice `swapSplitV1` with a frontend fee skimmed from the output token.
     /// @dev `amountOutMin` is a NET minimum — what the user must be left with
     /// AFTER the fee — and is grossed up by `fee.bps` before planning, so the
-    /// legs' floors and the aggregate check all sit on one basis. The returned
-    /// `amountOut` and the per-leg `Swapped` events report GROSS amounts; net
-    /// user output is `SUM(Swapped.amountOut) − FrontendFeeCharged.feeAmount`.
+    /// legs' floors and the aggregate check all sit on one basis. The per-leg
+    /// `Swapped` events report GROSS amounts; net user output is
+    /// `SUM(Swapped.amountOut) − FrontendFeeCharged.feeAmount`.
     /// @param fee The frontend fee (bps capped at `MAX_FEE_BPS`, plus recipient).
     /// @return amountOut The NET `tokenOut` delivered to `recipient`.
     function swapSplitWithFeeV1(

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.35;
 
+import {Vm} from "forge-std/Test.sol";
 import {PropAMMRouterSplitTest} from "./PropAMMRouterSplit.t.sol";
 import {IPropAMMRouter} from "../src/interfaces/IPropAMMRouter.sol";
 import {FrontendFees} from "../src/libraries/FrontendFees.sol";
@@ -52,15 +53,29 @@ contract PropAMMRouterSplitFeeTest is PropAMMRouterSplitTest {
         assertEq(tout.balanceOf(recipient), 980.1e18);
     }
 
+    /// @dev Also asserts NO `FrontendFeeCharged` event fires: a zero-balance
+    /// fee transfer alone would not distinguish a correctly-skipped disburse
+    /// from a bug that dropped `_skimAndDisburse`'s `feeAmt > 0` guard while
+    /// still moving 0 tokens.
     function test_splitFee_zeroBpsTakesNothing() public {
         _fund(1000e18);
         uni.setAmountOut(990e18);
 
+        vm.recordLogs();
         vm.prank(user);
         uint256 net =
             router.swapSplitWithFeeV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1, _fee(0));
+
         assertEq(net, 990e18);
         assertEq(tout.balanceOf(feeRecipient), 0);
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        for (uint256 i = 0; i < logs.length; i++) {
+            assertTrue(
+                logs[i].topics[0] != IPropAMMRouter.FrontendFeeCharged.selector,
+                "FrontendFeeCharged must not fire at zero fee"
+            );
+        }
     }
 
     function test_splitFee_revertsAboveCap() public {

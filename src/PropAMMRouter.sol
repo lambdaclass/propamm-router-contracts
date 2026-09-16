@@ -551,10 +551,12 @@ contract PropAMMRouter is
     }
 
     /// @inheritdoc IPropAMMRouter
-    /// @dev `amountOutMin` is a NET minimum and is grossed up by `fee.bps`
-    /// before planning, so the planner, the per-leg floors and the aggregate
-    /// check all work on one basis. Legs deliver to the router (`payTo`) so it
-    /// holds the gross to skim from; `swapFor` keeps the `Swapped` events
+    /// @dev `amountOutMin` is a NET minimum, grossed up by `fee.bps` into
+    /// `grossMin` before execution. `_planSplit` sizes legs from `amountIn`
+    /// alone and never sees the fee; `grossMin` feeds only `_executeLegs`'s
+    /// per-leg floors and aggregate check, so those sit on the gross basis the
+    /// legs actually deliver. Legs deliver to the router (`payTo`) so it holds
+    /// the gross to skim from; `swapFor` keeps the `Swapped` events
     /// attributed to the real user.
     ///
     /// `_skimAndDisburse` receives the RAW net `amountOutMin`, not the grossed-up
