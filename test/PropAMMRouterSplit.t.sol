@@ -18,6 +18,8 @@ import {MockSaturatingPropAMM} from "./mocks/MockSaturatingPropAMM.sol";
 import {MockPropAMM} from "./mocks/MockPropAMM.sol";
 import {MockFillablePropAMM} from "./mocks/MockFillablePropAMM.sol";
 import {MockConcaveUniswap} from "./mocks/MockConcaveUniswap.sol";
+import {MockThievingQuoteVenue} from "./mocks/MockThievingQuoteVenue.sol";
+import {MockDonatingQuoteVenue} from "./mocks/MockDonatingQuoteVenue.sol";
 import {IPropAMMFillable} from "../src/interfaces/IPropAMMFillable.sol";
 import {ETH_SENTINEL, WETH} from "../src/libraries/Constants.sol";
 import "../src/libraries/Errors.sol";
@@ -674,6 +676,45 @@ contract PropAMMRouterSplitTest is Test {
 
         assertEq(c.lastQuoteTokenIn(), address(tin), "refined reference quote used the wrong tokenIn");
         assertEq(c.lastQuoteTokenOut(), address(tout), "refined reference quote used the wrong tokenOut");
+    }
+
+    /// @dev A venue that consumes in-flight user funds while quoting reverts
+    /// the whole split. This is what pays for pulling before quoting.
+    function test_split_r1_thievingQuoteReverts() public {
+        MockThievingQuoteVenue thief = new MockThievingQuoteVenue();
+        thief.configure(address(router), address(tin), 1e18);
+        router.addVenue(address(thief));
+
+        _fund(1000e18);
+        vm.prank(user);
+        vm.expectRevert(QuoteBalanceInvariantViolated.selector);
+        router.swapSplitV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1);
+    }
+
+    /// @dev A donation during the quote phase is TOLERATED. Rejecting it would
+    /// hand any whitelisted venue a one-wei denial of service over every
+    /// caller's split, including splits it is not part of.
+    function test_split_r1_donationIsTolerated() public {
+        MockDonatingQuoteVenue donor = new MockDonatingQuoteVenue();
+        donor.configure(address(router), address(tin), 1);
+        router.addVenue(address(donor));
+
+        _fund(1000e18);
+        uni.setAmountOut(990e18);
+
+        vm.prank(user);
+        uint256 out = router.swapSplitV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1);
+        assertEq(out, 990e18);
+
+        // The donated wei is inert — legs are sized from amountIn, never from
+        // the balance — so it is stranded on the router for `rescueTokens`.
+        // NOTE: `MockSwapRouter02` deliberately does NOT pull `tokenIn` (see its
+        // NatSpec), so the router also still holds the 1000e18 it pulled. On top
+        // of that, `_probeVenue` quotes a non-`IPropAMMFillable` venue TWICE
+        // (once at `amountIn`, once at `amountIn / 2`) before giving up on a
+        // venue that never returns a usable quote, so `donor.quote()` runs
+        // twice and donates 2 wei, not 1. Do not "fix" this to `+ 1`.
+        assertEq(tin.balanceOf(address(router)), 1000e18 + 2);
     }
 }
 

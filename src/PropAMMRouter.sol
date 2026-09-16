@@ -670,14 +670,44 @@ contract PropAMMRouter is
         }
     }
 
-    /// @dev Quote phase + planning.
+    /// @dev Quote phase + planning, bracketed by the R1 balance invariant.
+    ///
+    /// Quotes run while this contract holds the pulled `amountIn`, because
+    /// pricing some venues requires it (Kipseli's quote is a simulated swap that
+    /// pulls from the router's own balance). So the balance is snapshotted after
+    /// the pull and required not to have FALLEN by the end of planning: any
+    /// venue quote that net-consumes in-flight user funds reverts the call.
+    ///
+    /// The check is DIRECTIONAL. An increase is tolerated: the invariant exists
+    /// to catch the router LOSING user funds, and a venue that pushes tokens in
+    /// has taken nothing. Rejecting a donation would hand any single whitelisted
+    /// venue a denial of service over every caller's split — including splits
+    /// that never touched it — for the price of one wei, and would make the path
+    /// incompatible with a rebasing or reflection `tokenIn`. Anything arriving
+    /// this way is inert: legs are sized from `amountIn`, never from the balance,
+    /// so it is stranded rather than swapped, and `rescueTokens` recovers it.
+    ///
+    /// Compared against the snapshot rather than `>= amountIn` because
+    /// pre-existing router dust would mask a theft of the same size against an
+    /// absolute floor — dust is already inside `snap`, so a theft of any size
+    /// still shows as a fall below it.
+    ///
+    /// The check sits AFTER `_waterfall`, not after `_gatherCandidates`, so it
+    /// covers EVERY quote taken while the funds are held, including the Uniswap
+    /// reference quotes. Those are admin config rather than caller input, so that
+    /// is defence in depth — but a bracket that stops short of some of the quotes
+    /// it claims to cover is worse than no claim at all.
     function _planSplit(address[] memory venueSet, address tokenIn_, address tokenOut_, uint256 amountIn)
         internal
         returns (Leg[] memory legs)
     {
+        uint256 snap = IERC20(tokenIn_).balanceOf(address(this));
+
         SplitPlanner.Candidate[] memory cands = _gatherCandidates(venueSet, tokenIn_, tokenOut_, amountIn);
         SplitPlanner.sortByRateDesc(cands);
         legs = _waterfall(cands, tokenIn_, tokenOut_, amountIn);
+
+        require(IERC20(tokenIn_).balanceOf(address(this)) >= snap, QuoteBalanceInvariantViolated());
     }
 
     /// @dev A single venue quote that reports failure as zero instead of
