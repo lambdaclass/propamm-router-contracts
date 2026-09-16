@@ -4,6 +4,7 @@ pragma solidity ^0.8.35;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
@@ -13,9 +14,11 @@ import {
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import {IPropAMMRouter} from "./interfaces/IPropAMMRouter.sol";
 import {IPropAMM} from "./interfaces/IPropAMM.sol";
+import {IPropAMMFillable} from "./interfaces/IPropAMMFillable.sol";
 import {IWETH} from "./interfaces/IWETH.sol";
 import {UniV3Router} from "./libraries/UniV3Router.sol";
 import {FrontendFees} from "./libraries/FrontendFees.sol";
+import {SplitPlanner} from "./libraries/SplitPlanner.sol";
 import {ETH_SENTINEL, USDC, USDT, WETH} from "./libraries/Constants.sol";
 import "./libraries/Errors.sol";
 import "./libraries/Events.sol";
@@ -458,6 +461,40 @@ contract PropAMMRouter is
     // receive() is needed though, to receive the withdrawal ETH from WETH.
     receive() external payable {
         require(msg.sender == WETH, UnexpectedETHSender());
+    }
+
+    //-------//
+    // Split //
+    //-------//
+
+    /// @notice Maximum propAMM legs a planned split may place. The coalesced
+    /// Uniswap remainder is exempt — it is the safety net, not a planning
+    /// choice — so a split executes at most `MAX_LEGS + 1` legs.
+    uint256 public constant MAX_LEGS = 5;
+
+    /// @notice Maximum whitelist size `swapSplitV1` can plan over. Beyond this
+    /// the entrypoint reverts `TooManyVenues` rather than truncating, because
+    /// `EnumerableSet` ordering shifts on removal and a truncated probe set
+    /// would be nondeterministic. Check with `isSplitAvailable()` before
+    /// listing a venue.
+    uint256 public constant MAX_SPLIT_VENUES = 12;
+
+    /// @notice One planned leg. Internal: callers never supply legs, the
+    /// router plans them, so this is deliberately absent from `IPropAMMRouter`.
+    /// @param venue The venue to route through, or `fallbackSwapRouter`.
+    /// @param amountIn The input assigned to this leg.
+    /// @param minOut The leg's own floor — the pro-rata share of the quote that
+    /// won the ranking. Zero on the Uniswap remainder leg.
+    struct Leg {
+        address venue;
+        uint256 amountIn;
+        uint256 minOut;
+    }
+
+    /// @notice False once the whitelist has outgrown `MAX_SPLIT_VENUES`, i.e.
+    /// once `swapSplitV1` reverts. Every other entrypoint is unaffected.
+    function isSplitAvailable() external view returns (bool) {
+        return whitelistedVenueCount() <= MAX_SPLIT_VENUES;
     }
 
     //-------//
