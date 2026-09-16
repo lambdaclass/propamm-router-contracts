@@ -757,6 +757,7 @@ contract PropAMMRouterSplitEthTest is Test {
     address internal owner = address(this);
     address internal user = address(0xBEEF);
     address internal recipient;
+    address internal feeRecipient;
 
     function setUp() public {
         fallbackRouter = new MockV3SwapRouter();
@@ -764,6 +765,7 @@ contract PropAMMRouterSplitEthTest is Test {
         tin = new MockERC20("TokenIn", "TIN");
         tout = new MockERC20("TokenOut", "TOUT");
         recipient = makeAddr("splitEthRecipient");
+        feeRecipient = makeAddr("splitEthFeeRecipient");
 
         // Put a working WETH at the address the router hard-codes.
         vm.etch(WETH, address(new MockWETH()).code);
@@ -823,6 +825,65 @@ contract PropAMMRouterSplitEthTest is Test {
 
         assertEq(out, amountOut);
         assertEq(tout.balanceOf(recipient), amountOut);
+        assertEq(IERC20(WETH).balanceOf(address(router)), 0, "no WETH stranded in router");
+        assertEq(address(router).balance, 0, "no ETH stranded in router");
+    }
+
+    /// @dev Covers `_pullSplitFunds`'s ETH-in guard on a mismatched
+    /// `msg.value`: it must revert `InvalidValue(amountIn, msg.value)` naming
+    /// both figures, not a bare `vm.expectRevert()`, before any funds move.
+    function test_split_ethIn_wrongValueReverts() public {
+        uint256 amountIn = 1 ether;
+        uint256 wrongValue = 0.4 ether;
+        vm.deal(user, amountIn);
+
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(InvalidValue.selector, amountIn, wrongValue));
+        router.swapSplitV1{value: wrongValue}(ETH_SENTINEL, address(tout), amountIn, 0, recipient, block.timestamp + 1);
+    }
+
+    /// @dev The case PR #89 shipped without: `swapSplitWithFeeV1` with
+    /// `tokenOut == ETH_SENTINEL`. `_executeLegs` unwraps the gross output to
+    /// `payTo`, which on the fee path is the router itself (see `LegRun`'s
+    /// docs), so the router holds native ETH by the time `_skimAndDisburse`
+    /// splits it between the fee recipient and the user. Both assertions
+    /// below are real balance increases, not just the nominal `net` return.
+    function test_splitFee_ethOut_paysBothInNativeEth() public {
+        uint256 amountIn = 1000e18;
+        uint256 amountOutGross = 1 ether;
+        uint16 feeBps = 100; // 1%
+
+        tin.mint(user, amountIn);
+        vm.prank(user);
+        tin.approve(address(router), amountIn);
+
+        // Fund the fallback with WETH backed by real ETH, so the later
+        // `IWETH.withdraw` inside `_sendWrappedETH` has ETH to pay out.
+        vm.deal(address(fallbackRouter), amountOutGross);
+        vm.prank(address(fallbackRouter));
+        MockWETH(payable(WETH)).deposit{value: amountOutGross}();
+        fallbackRouter.setAmountOut(amountOutGross);
+
+        uint256 expectedFee = amountOutGross * feeBps / 10_000;
+        uint256 expectedNet = amountOutGross - expectedFee;
+
+        uint256 recipientBefore = recipient.balance;
+        uint256 feeRecipientBefore = feeRecipient.balance;
+
+        vm.prank(user);
+        uint256 net = router.swapSplitWithFeeV1(
+            address(tin),
+            ETH_SENTINEL,
+            amountIn,
+            0,
+            recipient,
+            block.timestamp + 1,
+            IPropAMMRouter.FrontendFee({bps: feeBps, recipient: feeRecipient})
+        );
+
+        assertEq(net, expectedNet);
+        assertEq(recipient.balance - recipientBefore, expectedNet);
+        assertEq(feeRecipient.balance - feeRecipientBefore, expectedFee);
         assertEq(IERC20(WETH).balanceOf(address(router)), 0, "no WETH stranded in router");
         assertEq(address(router).balance, 0, "no ETH stranded in router");
     }
