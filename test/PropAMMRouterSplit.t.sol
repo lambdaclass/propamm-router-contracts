@@ -680,6 +680,15 @@ contract PropAMMRouterSplitTest is Test {
 
     /// @dev A venue that consumes in-flight user funds while quoting reverts
     /// the whole split. This is what pays for pulling before quoting.
+    ///
+    /// `stealAmount` is 1e18, but the theft happens twice (2e18 total): a
+    /// non-`IPropAMMFillable` venue is probed at both `amountIn` and
+    /// `amountIn / 2` (see `_probeVenue`), and `MockThievingQuoteVenue.quote`
+    /// steals `stealAmount` on every call, not just the first. The invariant
+    /// only needs a net fall below the snapshot to fire, so this test does not
+    /// depend on that count — it is noted here only so a future change to the
+    /// probe's call count doesn't turn into a mystery if this test's trace is
+    /// ever inspected.
     function test_split_r1_thievingQuoteReverts() public {
         MockThievingQuoteVenue thief = new MockThievingQuoteVenue();
         thief.configure(address(router), address(tin), 1e18);
@@ -708,12 +717,19 @@ contract PropAMMRouterSplitTest is Test {
 
         // The donated wei is inert — legs are sized from amountIn, never from
         // the balance — so it is stranded on the router for `rescueTokens`.
+        // `MockDonatingQuoteVenue.quote` donates 1 wei on EVERY call, and
+        // `_probeVenue` makes two `_tryQuote` calls for a non-`IPropAMMFillable`
+        // venue that never returns a usable quote (once at `amountIn`, once at
+        // `amountIn / 2` — a venue quoting 0 at both points is neither
+        // saturated nor a live single point, so nothing short-circuits the
+        // second call). That is one wei per call, so `+ 2`, not `+ 1`: if a
+        // future change to the probe alters its call count, this assertion
+        // should fail loudly with an obvious cause rather than a silent
+        // mystery off-by-one.
         // NOTE: `MockSwapRouter02` deliberately does NOT pull `tokenIn` (see its
-        // NatSpec), so the router also still holds the 1000e18 it pulled. On top
-        // of that, `_probeVenue` quotes a non-`IPropAMMFillable` venue TWICE
-        // (once at `amountIn`, once at `amountIn / 2`) before giving up on a
-        // venue that never returns a usable quote, so `donor.quote()` runs
-        // twice and donates 2 wei, not 1. Do not "fix" this to `+ 1`.
+        // NatSpec), so the router also still holds the 1000e18 it pulled — the
+        // donation is the `+ 2` on top. Do not loosen this to `> 1000e18`: the
+        // exact figure is what pins the donation as inert rather than swapped.
         assertEq(tin.balanceOf(address(router)), 1000e18 + 2);
     }
 }
