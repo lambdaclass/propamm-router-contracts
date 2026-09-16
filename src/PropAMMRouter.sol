@@ -550,6 +550,53 @@ contract PropAMMRouter is
         );
     }
 
+    /// @inheritdoc IPropAMMRouter
+    /// @dev `amountOutMin` is a NET minimum and is grossed up by `fee.bps`
+    /// before planning, so the planner, the per-leg floors and the aggregate
+    /// check all work on one basis. Legs deliver to the router (`payTo`) so it
+    /// holds the gross to skim from; `swapFor` keeps the `Swapped` events
+    /// attributed to the real user.
+    ///
+    /// `_skimAndDisburse` receives the RAW net `amountOutMin`, not the grossed-up
+    /// figure — it enforces the minimum against what the recipient actually
+    /// received after the fee, matching the other `*WithFeeV1` call sites.
+    function swapSplitWithFeeV1(
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        address recipient,
+        uint256 deadline,
+        FrontendFee calldata fee
+    ) external payable whenNotPaused nonReentrant returns (uint256 amountOut) {
+        FrontendFees._validateFee(fee);
+        require(block.timestamp <= deadline, Expired());
+        _validateSplitParams(amountIn);
+
+        address[] memory venueSet = _collectVenues();
+        uint256 grossMin = FrontendFees._grossUp(amountOutMin, fee.bps);
+
+        (address tokenIn_, address tokenOut_) = _pullSplitFunds(tokenIn, tokenOut, amountIn);
+        Leg[] memory legs = _planSplit(venueSet, tokenIn_, tokenOut_, amountIn);
+
+        uint256 deliveredGross = _executeLegs(
+            legs,
+            LegRun({
+                tokenIn: tokenIn,
+                tokenIn_: tokenIn_,
+                tokenOut: tokenOut,
+                tokenOut_: tokenOut_,
+                totalIn: amountIn,
+                amountOutMin: grossMin,
+                payTo: address(this),
+                swapFor: recipient,
+                deadline: deadline
+            })
+        );
+
+        amountOut = FrontendFees._skimAndDisburse(tokenOut, deliveredGross, fee, recipient, amountOutMin);
+    }
+
     /// @dev `amountIn` is capped at uint128 because `SplitPlanner` compares
     /// rates by cross-multiplying quoted outputs with fills.
     function _validateSplitParams(uint256 amountIn) internal pure {
