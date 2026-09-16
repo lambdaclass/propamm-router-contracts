@@ -2,6 +2,7 @@
 pragma solidity ^0.8.35;
 
 import {Test, Vm} from "forge-std/Test.sol";
+import {console2} from "forge-std/console2.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
@@ -731,6 +732,38 @@ contract PropAMMRouterSplitTest is Test {
         // donation is the `+ 2` on top. Do not loosen this to `> 1000e18`: the
         // exact figure is what pins the donation as inert rather than swapped.
         assertEq(tin.balanceOf(address(router)), 1000e18 + 2);
+    }
+
+    /// @dev The §9.1 worst case: 12 venues, each saturating with 1 wei of
+    /// capacity, so every one burns its full two-point probe PLUS all 8
+    /// halvings before being declined — 12 x 10 = 120 venue quotes.
+    ///
+    /// This number is a LOWER BOUND, not the gate. Mock venues understate real
+    /// quote cost by 3.2-8.1x (see scripts/README.md / gas-analysis-findings),
+    /// and a Kipseli-style quote is a full simulated swap. Treat a comfortable
+    /// pass here as necessary but not sufficient; the fork measurement in
+    /// `test/PropAMMRouterSplitFork.t.sol` (`test_split_worstCaseProbeGasReal`)
+    /// is what decides.
+    function test_split_worstCaseProbeGas() public {
+        for (uint256 i = 0; i < 12; i++) {
+            MockSaturatingPropAMM v = new MockSaturatingPropAMM();
+            v.setCap(1);
+            v.setRateBps(10_100);
+            router.addVenue(address(v));
+        }
+        assertEq(router.whitelistedVenueCount(), 12);
+        assertTrue(router.isSplitAvailable());
+
+        _fund(1000e18);
+        uni.setAmountOut(990e18);
+
+        vm.prank(user);
+        uint256 g0 = gasleft();
+        router.swapSplitV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1);
+        uint256 used = g0 - gasleft();
+
+        console2.log(string.concat("RESULT|split_worst_case_probe_gas_mock|", vm.toString(used)));
+        assertLt(used, 30_000_000);
     }
 }
 
