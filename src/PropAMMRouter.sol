@@ -677,7 +677,7 @@ contract PropAMMRouter is
     {
         SplitPlanner.Candidate[] memory cands = _gatherCandidates(venueSet, tokenIn_, tokenOut_, amountIn);
         SplitPlanner.sortByRateDesc(cands);
-        legs = _waterfall(cands, amountIn);
+        legs = _waterfall(cands, tokenIn_, tokenOut_, amountIn);
     }
 
     /// @dev A single venue quote that reports failure as zero instead of
@@ -813,21 +813,73 @@ contract PropAMMRouter is
         }
     }
 
-    /// @dev Assigns up to `MAX_LEGS` prop legs in rate order; the remainder
-    /// becomes a Uniswap leg. The Uniswap reference cutoff arrives in Task 8.
-    /// Per-leg minimums are the pro-rata share of the RANKING quote, never a
-    /// fresh quote at the final leg size.
-    function _waterfall(SplitPlanner.Candidate[] memory cands, uint256 amountIn)
+    /// @dev Assigns up to `MAX_LEGS` prop legs in rate order, gated by a Uniswap
+    /// reference rate quoted ONCE at the residual lower bound. QuoterV2 gas grows
+    /// steeply with size (96k → 2.6M at 10M USDC), which is why it is quoted once
+    /// rather than per candidate.
+    ///
+    /// The `amountIn/100` floor on the reference size is best-effort: it stops a
+    /// dust residual from rounding the reference rate to zero. For an `amountIn`
+    /// under 100 wei the floor is itself zero-ish and Uniswap quotes 0, which
+    /// disables the cutoff entirely and lets every candidate through. That is the
+    /// same by-design behaviour as a fallback that cannot be priced at all, and it
+    /// is benign: each leg still carries its own pro-rata `minOut` and the
+    /// aggregate `amountOutMin` still gates the swap.
+    ///
+    /// On the FIRST contested candidate the reference is refined ONCE, at the true
+    /// prospective remainder. Uniswap's unit rate degrades with size, so the
+    /// refined cutoff is LOOSER — it can admit a candidate that only looked bad
+    /// against an under-sized reference, and can never reject a better one.
+    /// Candidates after the refinement are still compared against that reference,
+    /// sized for a residual LARGER than their own, which is likewise looser.
+    function _waterfall(SplitPlanner.Candidate[] memory cands, address tokenIn_, address tokenOut_, uint256 amountIn)
         internal
-        view
         returns (Leg[] memory legs)
     {
+        // Cached once: `_tryQuote` is an external call, so the optimizer cannot
+        // hold this across the reference quotes or the candidate loop.
         address fb = fallbackSwapRouter;
+        if (cands.length == 0) {
+            legs = new Leg[](1);
+            legs[0] = Leg({venue: fb, amountIn: amountIn, minOut: 0});
+            return legs;
+        }
+
+        // Only the fills the waterfall can actually place may be subtracted:
+        // `cands` is sorted by descending rate, so the first `MAX_LEGS` of them
+        // are exactly the ones it would take. Subtracting all of them instead
+        // understates the residual and drops `refSize` onto the floor, where a
+        // concave pool's unit rate is near-perfect — which overstates Uniswap
+        // and contests the first genuinely-better candidate.
+        uint256 placeable = cands.length < MAX_LEGS ? cands.length : MAX_LEGS;
+        uint256 residualLb = amountIn;
+        for (uint256 i = 0; i < placeable; i++) {
+            residualLb = cands[i].fill >= residualLb ? 0 : residualLb - cands[i].fill;
+        }
+        uint256 refSize = residualLb > amountIn / 100 ? residualLb : amountIn / 100;
+        if (refSize == 0) refSize = 1;
+        uint256 refOut = _tryQuote(fb, tokenIn_, tokenOut_, refSize);
+        // Clamped like the probe quotes so `refOut * fill` below is provably in
+        // range. The quoter is trusted admin config, so this is hygiene: a zero
+        // reference is already the "cannot price the fallback" path, which lets
+        // every candidate through the cutoff.
+        if (refOut > type(uint128).max) refOut = 0;
+
         Leg[] memory tmp = new Leg[](cands.length + 1);
         uint256 legCount = 0;
         uint256 remaining = amountIn;
+        bool refined = false;
 
         for (uint256 i = 0; i < cands.length && remaining > 0 && legCount < MAX_LEGS; i++) {
+            // contested: rate_v <= uniRate  <=>  out * refSize <= refOut * fill
+            if (cands[i].out * refSize <= refOut * cands[i].fill) {
+                if (refined) break;
+                refined = true;
+                refSize = remaining;
+                refOut = _tryQuote(fb, tokenIn_, tokenOut_, refSize);
+                if (refOut > type(uint128).max) refOut = 0;
+                if (cands[i].out * refSize <= refOut * cands[i].fill) break;
+            }
             uint256 leg = cands[i].fill >= remaining ? remaining : cands[i].fill;
             tmp[legCount++] = Leg({
                 venue: cands[i].venue, amountIn: leg, minOut: SplitPlanner.proRataMin(cands[i].out, cands[i].fill, leg)

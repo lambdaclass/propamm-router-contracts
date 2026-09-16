@@ -17,6 +17,7 @@ import {MockCappedPropAMM} from "./mocks/MockCappedPropAMM.sol";
 import {MockSaturatingPropAMM} from "./mocks/MockSaturatingPropAMM.sol";
 import {MockPropAMM} from "./mocks/MockPropAMM.sol";
 import {MockFillablePropAMM} from "./mocks/MockFillablePropAMM.sol";
+import {MockConcaveUniswap} from "./mocks/MockConcaveUniswap.sol";
 import {IPropAMMFillable} from "../src/interfaces/IPropAMMFillable.sol";
 import {ETH_SENTINEL, WETH} from "../src/libraries/Constants.sol";
 import "../src/libraries/Errors.sol";
@@ -510,6 +511,85 @@ contract PropAMMRouterSplitTest is Test {
         vm.prank(user);
         uint256 out = router.swapSplitV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1);
         assertEq(out, 990e18);
+    }
+
+    /// @dev Builds a router wired against a `MockConcaveUniswap` as BOTH the
+    /// fallback swap router and the fallback quoter, so `_waterfall`'s
+    /// reference cutoff is actually live (see the class doc for why the
+    /// shared harness's `MockQuoterV2` leaves it dormant for every other test
+    /// in this file).
+    function _concaveRouter() internal returns (PropAMMRouter r, MockConcaveUniswap c) {
+        c = new MockConcaveUniswap();
+        PropAMMRouter impl = new PropAMMRouter();
+        bytes memory initData = abi.encodeCall(PropAMMRouter.initialize, (address(c), address(c), address(manager)));
+        ERC1967Proxy proxy = new ERC1967Proxy(address(impl), initData);
+        r = PropAMMRouter(payable(address(proxy)));
+    }
+
+    /// @dev A venue priced BELOW the Uniswap reference is cut off and gets no
+    /// leg, even though it quoted successfully.
+    function test_split_belowMarketVenueIsCutOff() public {
+        (PropAMMRouter r, MockConcaveUniswap c) = _concaveRouter();
+        MockCappedPropAMM venue = new MockCappedPropAMM();
+        venue.setCap(type(uint256).max);
+        venue.setRateBps(5_000); // 0.5 — far below Uniswap's ~1.0
+        r.addVenue(address(venue));
+
+        tin.mint(user, 1000e18);
+        vm.prank(user);
+        tin.approve(address(r), 1000e18);
+
+        vm.prank(user);
+        uint256 out = r.swapSplitV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1);
+
+        // Whole order through Uniswap: 1_000_000 * 1000 / 1_001_000
+        assertEq(out, c.reserveOut() * 1000e18 / (c.reserveIn() + 1000e18));
+    }
+
+    /// @dev A venue that beats Uniswap keeps its leg.
+    function test_split_aboveMarketVenueKeepsItsLeg() public {
+        (PropAMMRouter r,) = _concaveRouter();
+        MockCappedPropAMM venue = new MockCappedPropAMM();
+        venue.setCap(type(uint256).max);
+        venue.setRateBps(20_000); // 2.0 — unambiguously better
+        r.addVenue(address(venue));
+
+        tin.mint(user, 1000e18);
+        vm.prank(user);
+        tin.approve(address(r), 1000e18);
+
+        vm.prank(user);
+        uint256 out = r.swapSplitV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1);
+        assertEq(out, 2000e18);
+    }
+
+    /// @dev Neither `test_split_belowMarketVenueIsCutOff` nor
+    /// `test_split_aboveMarketVenueKeepsItsLeg` actually reaches the
+    /// refinement branch: both venues resolve identically against the
+    /// under-sized floor reference (`amountIn/100`) and the refined
+    /// (`amountIn`) one, so a build that skipped refinement entirely (only
+    /// ever comparing against the floor reference) would still pass them.
+    /// This test picks a rate strictly between Uniswap's unit rate at the
+    /// floor size (10e18, ~0.99999) and at the true residual (1000e18,
+    /// ~0.999001) — contested against the former, NOT contested against the
+    /// latter — so it can only pass if the one-shot refinement actually reruns
+    /// the quote at the true remaining amount and re-admits the candidate.
+    function test_split_refinementAdmitsCandidateBetweenReferenceSizes() public {
+        (PropAMMRouter r,) = _concaveRouter();
+        MockCappedPropAMM venue = new MockCappedPropAMM();
+        venue.setCap(type(uint256).max);
+        venue.setRateBps(9_995); // between ~0.999001 (full ref) and ~0.99999 (floor ref)
+        r.addVenue(address(venue));
+
+        tin.mint(user, 1000e18);
+        vm.prank(user);
+        tin.approve(address(r), 1000e18);
+
+        vm.prank(user);
+        uint256 out = r.swapSplitV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1);
+
+        // Whole order through the venue at 0.9995, not through Uniswap.
+        assertEq(out, 1000e18 * 9_995 / 10_000);
     }
 }
 
