@@ -712,6 +712,25 @@ contract PropAMMRouter is
     {
         if (!_isVenue(venue)) return (0, 0);
 
+        if (ERC165Checker.supportsInterface(venue, type(IPropAMMFillable).interfaceId)) {
+            try IPropAMMFillable(venue).quoteFillable(tokenIn_, tokenOut_, amountIn) returns (
+                uint256 fillable, uint256 amountOut_
+            ) {
+                // A venue reporting more than it was offered has broken this
+                // interface's `fillableAmountIn <= amountIn` requirement.
+                // Clamping the fill while keeping `amountOut_` — quoted for the
+                // LARGER size — would read its rate as `amountOut_ / amountIn`,
+                // inflated by exactly the over-report, letting it sweep the
+                // ranking and starve honest venues before failing its own leg.
+                // A venue that breaks the requirement has told us its quote
+                // means nothing, so the candidate is discarded, not rescaled.
+                if (fillable > amountIn) return (0, 0);
+                return (fillable, amountOut_);
+            } catch {
+                return (0, 0);
+            }
+        }
+
         // An out-of-range quote is discarded HERE, before use: it feeds
         // `isSaturated`, whose `out * BPS` would overflow and revert the whole
         // split — a griefing vector any single whitelisted venue could aim at

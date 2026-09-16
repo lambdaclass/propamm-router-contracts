@@ -16,6 +16,8 @@ import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
 import {MockCappedPropAMM} from "./mocks/MockCappedPropAMM.sol";
 import {MockSaturatingPropAMM} from "./mocks/MockSaturatingPropAMM.sol";
 import {MockPropAMM} from "./mocks/MockPropAMM.sol";
+import {MockFillablePropAMM} from "./mocks/MockFillablePropAMM.sol";
+import {IPropAMMFillable} from "../src/interfaces/IPropAMMFillable.sol";
 import {ETH_SENTINEL, WETH} from "../src/libraries/Constants.sol";
 import "../src/libraries/Errors.sol";
 
@@ -382,6 +384,103 @@ contract PropAMMRouterSplitTest is Test {
         vm.prank(user);
         uint256 out = router.swapSplitV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1);
         assertEq(out, 1010e18); // whole order at 1.01
+    }
+
+    /// @dev A venue advertising the extension is priced in ONE call and can
+    /// declare a capacity far below the order size — something the blind probe
+    /// could not locate.
+    function test_split_extensionGivesExactCapacityInOneCall() public {
+        MockFillablePropAMM venue = new MockFillablePropAMM();
+        venue.setFillable(300e18);
+        venue.setOut(303e18); // 1.01 rate on the 300 it will take
+        venue.setAmountOut(303e18);
+        router.addVenue(address(venue));
+
+        _fund(1000e18);
+        uni.setAmountOut(693e18); // 700 remainder at 0.99
+
+        vm.prank(user);
+        uint256 out = router.swapSplitV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1);
+        assertEq(out, 996e18);
+    }
+
+    /// @dev A venue reporting MORE than it was offered has broken the interface.
+    /// The candidate is discarded, not clamped: clamping the fill while keeping
+    /// an `amountOut` quoted for the larger size would inflate its rate by
+    /// exactly the over-report and let it sweep the ranking.
+    function test_split_extensionOverReportIsDiscarded() public {
+        MockFillablePropAMM venue = new MockFillablePropAMM();
+        venue.setFillable(5000e18); // more than the 1000 offered
+        venue.setOut(5050e18);
+        venue.setAmountOut(5050e18);
+        router.addVenue(address(venue));
+
+        _fund(1000e18);
+        uni.setAmountOut(990e18);
+
+        vm.prank(user);
+        uint256 out = router.swapSplitV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1);
+        assertEq(out, 990e18); // venue ignored entirely
+    }
+
+    /// @dev An address that lies about supporting the interface but is NOT
+    /// whitelisted must never be called. Membership is checked before the
+    /// ERC-165 probe, so this yields no candidate. `vm.expectCall(..., 0)`
+    /// proves the router never touched the address at all — asserting only
+    /// the aggregate output would also pass if the rogue venue were called and
+    /// merely lost the ranking.
+    function test_split_nonWhitelistedFillableIsNeverCalled() public {
+        MockFillablePropAMM rogue = new MockFillablePropAMM();
+        rogue.setFillable(1000e18);
+        rogue.setOut(2000e18); // an unbeatable rate, if it were trusted
+        // deliberately NOT whitelisted
+
+        _fund(1000e18);
+        uni.setAmountOut(990e18);
+
+        vm.expectCall(address(rogue), abi.encodeWithSelector(IPropAMMFillable.quoteFillable.selector), 0);
+
+        vm.prank(user);
+        uint256 out = router.swapSplitV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1);
+        assertEq(out, 990e18);
+    }
+
+    /// @dev Six venues each declaring 200 of fillable capacity against a 1200
+    /// order. MAX_LEGS is 5, so only five get legs (1000 total) and the last
+    /// 200 falls to Uniswap. The extension is what makes this expressible: a
+    /// blind probe cannot locate a 200 cap inside a 1200 order.
+    function test_split_maxLegsBinds() public {
+        for (uint256 i = 0; i < 6; i++) {
+            MockFillablePropAMM v = new MockFillablePropAMM();
+            v.setFillable(200e18);
+            v.setOut(202e18); // 1.01
+            v.setAmountOut(202e18);
+            router.addVenue(address(v));
+        }
+        _fund(1200e18);
+        uni.setAmountOut(198e18); // the 200 remainder at 0.99
+
+        vm.prank(user);
+        uint256 out = router.swapSplitV1(address(tin), address(tout), 1200e18, 0, recipient, block.timestamp + 1);
+
+        // 5 legs * 202 = 1010, plus 198 from Uniswap.
+        assertEq(out, 1208e18);
+    }
+
+    /// @dev A venue whose extension reverts falls through to no candidate
+    /// rather than reverting the split.
+    function test_split_extensionZeroFillYieldsNoCandidate() public {
+        MockFillablePropAMM venue = new MockFillablePropAMM();
+        venue.setFillable(0);
+        venue.setOut(0);
+        router.addVenue(address(venue));
+
+        _fund(1000e18);
+        uni.setAmountOut(990e18);
+
+        vm.prank(user);
+        uint256 out = router.swapSplitV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1);
+        assertEq(out, 990e18);
     }
 }
 
