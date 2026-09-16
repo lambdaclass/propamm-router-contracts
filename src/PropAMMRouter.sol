@@ -703,13 +703,20 @@ contract PropAMMRouter is
     /// test picks full vs half.
     ///
     /// Membership is checked HERE rather than relying on `quoteVenueV1`'s gate,
-    /// because Task 7 adds an extension branch that calls the venue directly —
-    /// without this the router would execute arbitrary caller-reachable code
-    /// while holding the pulled funds.
+    /// because Task 7's extension branch calls the venue directly. Under the
+    /// current call graph this is defense-in-depth, not the primary gate: the
+    /// only caller (`_gatherCandidates`, fed by `_collectVenues`) already
+    /// builds its venue set by reading the whitelist `EnumerableSet` directly,
+    /// so a non-member can never reach this function today. The check stays so
+    /// that if `_probeVenue` is ever called with a caller-influenced address —
+    /// e.g. a future direct-call path — it cannot execute arbitrary code while
+    /// holding the pulled funds. Do not delete it as dead code.
     function _probeVenue(address venue, address tokenIn_, address tokenOut_, uint256 amountIn)
         internal
         returns (uint256 fill, uint256 out)
     {
+        // Defense-in-depth, not today's enforcement point — see the function
+        // comment above.
         if (!_isVenue(venue)) return (0, 0);
 
         if (ERC165Checker.supportsInterface(venue, type(IPropAMMFillable).interfaceId)) {

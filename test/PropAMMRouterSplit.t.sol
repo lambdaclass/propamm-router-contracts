@@ -423,13 +423,18 @@ contract PropAMMRouterSplitTest is Test {
         assertEq(out, 990e18); // venue ignored entirely
     }
 
-    /// @dev An address that lies about supporting the interface but is NOT
-    /// whitelisted must never be called. Membership is checked before the
-    /// ERC-165 probe, so this yields no candidate. `vm.expectCall(..., 0)`
-    /// proves the router never touched the address at all — asserting only
-    /// the aggregate output would also pass if the rogue venue were called and
-    /// merely lost the ranking.
-    function test_split_nonWhitelistedFillableIsNeverCalled() public {
+    /// @dev A non-whitelisted address advertising the extension with an
+    /// unbeatable rate never becomes a candidate and never receives a leg.
+    /// This is enforced by `_collectVenues`, which builds `venueSet` by reading
+    /// the whitelist `EnumerableSet` directly — a non-member can never appear
+    /// in it, so it never reaches `_probeVenue` at all. (The `_isVenue` check
+    /// inside `_probeVenue` is separate defense-in-depth for a direct-call path
+    /// that does not exist in this design; see its own comment. This test
+    /// cannot observe that check's position, only the end-to-end outcome.)
+    /// `vm.expectCall(..., 0)` proves the router never touched the address at
+    /// all — asserting only the aggregate output would also pass if the rogue
+    /// venue were called and merely lost the ranking.
+    function test_split_nonWhitelistedFillableNeverBecomesCandidate() public {
         MockFillablePropAMM rogue = new MockFillablePropAMM();
         rogue.setFillable(1000e18);
         rogue.setOut(2000e18); // an unbeatable rate, if it were trusted
@@ -467,12 +472,36 @@ contract PropAMMRouterSplitTest is Test {
         assertEq(out, 1208e18);
     }
 
-    /// @dev A venue whose extension reverts falls through to no candidate
-    /// rather than reverting the split.
-    function test_split_extensionZeroFillYieldsNoCandidate() public {
+    /// @dev A venue's extension declares ZERO fillable capacity. The candidate
+    /// is discarded by `_gatherCandidates`'s `fill == 0` filter, and the whole
+    /// order routes to Uniswap. The venue's blind-probe `quote` is set to a
+    /// rate the two-point probe would find live and attractive (1% better than
+    /// Uniswap) — if the extension branch were ever bypassed, this venue would
+    /// win a leg instead of being declined, so the assertion below proves the
+    /// decline comes from the extension saying "zero", not from the venue
+    /// being unreachable through the blind probe too.
+    function test_split_extensionZeroFillDeclinesDespiteAttractiveBlindProbeRate() public {
         MockFillablePropAMM venue = new MockFillablePropAMM();
         venue.setFillable(0);
         venue.setOut(0);
+        venue.setQuoteRateBps(10_100); // what the blind probe would see if consulted
+        venue.setAmountOut(1010e18); // what it would deliver if that leg ran
+        router.addVenue(address(venue));
+
+        _fund(1000e18);
+        uni.setAmountOut(990e18);
+
+        vm.prank(user);
+        uint256 out = router.swapSplitV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1);
+        assertEq(out, 990e18);
+    }
+
+    /// @dev A venue whose extension REVERTS is declined via the branch's
+    /// `catch` clause rather than reverting the whole split — realistic for a
+    /// venue that reverts when it has no inventory left.
+    function test_split_extensionRevertYieldsNoCandidate() public {
+        MockFillablePropAMM venue = new MockFillablePropAMM();
+        venue.setRevertOnQuoteFillable(true);
         router.addVenue(address(venue));
 
         _fund(1000e18);
