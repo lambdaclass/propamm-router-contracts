@@ -670,17 +670,126 @@ contract PropAMMRouter is
         }
     }
 
-    /// @dev Quote phase + planning. Replaced with real planning in Task 5.
-    /// Declared `view`: this trivial stub only reads `fallbackSwapRouter` and
-    /// performs no external calls or state writes. Task 5 removes `view` when
-    /// it adds real quoting.
-    function _planSplit(address[] memory, address, address, uint256 amountIn)
+    /// @dev Quote phase + planning.
+    function _planSplit(address[] memory venueSet, address tokenIn_, address tokenOut_, uint256 amountIn)
+        internal
+        returns (Leg[] memory legs)
+    {
+        SplitPlanner.Candidate[] memory cands = _gatherCandidates(venueSet, tokenIn_, tokenOut_, amountIn);
+        SplitPlanner.sortByRateDesc(cands);
+        legs = _waterfall(cands, amountIn);
+    }
+
+    /// @dev A single venue quote that reports failure as zero instead of
+    /// reverting. Routed through `this.quoteVenueV1` so the try/catch has an
+    /// external call boundary and every venue type is priced by the same code
+    /// as production quoting. Safe under `nonReentrant` because `quoteVenueV1`
+    /// carries no guard.
+    function _tryQuote(address venue, address tokenIn_, address tokenOut_, uint256 amount)
+        internal
+        returns (uint256 out)
+    {
+        try this.quoteVenueV1(venue, tokenIn_, tokenOut_, amount) returns (uint256 amountOut_, address) {
+            out = amountOut_;
+        } catch {
+            out = 0;
+        }
+    }
+
+    /// @dev Two-point probe for one venue at `p = amountIn` and `p/2`.
+    /// Failure legend: a reverting, zero, or oversized quote at a point is a
+    /// dead point; both dead → no candidate; one alive → that point; both alive
+    /// and EQUAL → saturated at both, resolved in Task 6; otherwise the τ-band
+    /// test picks full vs half.
+    ///
+    /// Membership is checked HERE rather than relying on `quoteVenueV1`'s gate,
+    /// because Task 7 adds an extension branch that calls the venue directly —
+    /// without this the router would execute arbitrary caller-reachable code
+    /// while holding the pulled funds.
+    function _probeVenue(address venue, address tokenIn_, address tokenOut_, uint256 amountIn)
+        internal
+        returns (uint256 fill, uint256 out)
+    {
+        if (!_isVenue(venue)) return (0, 0);
+
+        // An out-of-range quote is discarded HERE, before use: it feeds
+        // `isSaturated`, whose `out * BPS` would overflow and revert the whole
+        // split — a griefing vector any single whitelisted venue could aim at
+        // every other caller's split, including ones it is not part of.
+        uint256 p = amountIn;
+        uint256 outFull = _tryQuote(venue, tokenIn_, tokenOut_, p);
+        if (outFull > type(uint128).max) outFull = 0;
+        uint256 half = p / 2;
+        if (half == 0) return (p, outFull);
+        uint256 outHalf = _tryQuote(venue, tokenIn_, tokenOut_, half);
+        if (outHalf > type(uint128).max) outHalf = 0;
+
+        if (outFull == 0 && outHalf == 0) return (0, 0);
+        if (outFull == 0) return (half, outHalf);
+        if (outHalf == 0) return (p, outFull);
+        if (outFull == outHalf) return (0, 0); // Task 6 resolves this downward
+        if (SplitPlanner.isSaturated(outFull, outHalf)) return (half, outHalf);
+        return (p, outFull);
+    }
+
+    /// @dev One candidate per venue, deduped. Dead venues and absurd quotes
+    /// yield no candidate rather than reverting the split.
+    function _gatherCandidates(address[] memory venueSet, address tokenIn_, address tokenOut_, uint256 amountIn)
+        internal
+        returns (SplitPlanner.Candidate[] memory cands)
+    {
+        SplitPlanner.Candidate[] memory tmp = new SplitPlanner.Candidate[](venueSet.length);
+        uint256 count = 0;
+        for (uint256 i = 0; i < venueSet.length; i++) {
+            bool dup = false;
+            for (uint256 j = 0; j < i; j++) {
+                if (venueSet[j] == venueSet[i]) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (dup) continue;
+
+            (uint256 fill, uint256 out) = _probeVenue(venueSet[i], tokenIn_, tokenOut_, amountIn);
+            if (fill == 0 || out == 0 || out > type(uint128).max) continue;
+            tmp[count++] = SplitPlanner.Candidate({venue: venueSet[i], fill: fill, out: out});
+        }
+        cands = new SplitPlanner.Candidate[](count);
+        for (uint256 i = 0; i < count; i++) {
+            cands[i] = tmp[i];
+        }
+    }
+
+    /// @dev Assigns up to `MAX_LEGS` prop legs in rate order; the remainder
+    /// becomes a Uniswap leg. The Uniswap reference cutoff arrives in Task 8.
+    /// Per-leg minimums are the pro-rata share of the RANKING quote, never a
+    /// fresh quote at the final leg size.
+    function _waterfall(SplitPlanner.Candidate[] memory cands, uint256 amountIn)
         internal
         view
         returns (Leg[] memory legs)
     {
-        legs = new Leg[](1);
-        legs[0] = Leg({venue: fallbackSwapRouter, amountIn: amountIn, minOut: 0});
+        address fb = fallbackSwapRouter;
+        Leg[] memory tmp = new Leg[](cands.length + 1);
+        uint256 legCount = 0;
+        uint256 remaining = amountIn;
+
+        for (uint256 i = 0; i < cands.length && remaining > 0 && legCount < MAX_LEGS; i++) {
+            uint256 leg = cands[i].fill >= remaining ? remaining : cands[i].fill;
+            tmp[legCount++] = Leg({
+                venue: cands[i].venue, amountIn: leg, minOut: SplitPlanner.proRataMin(cands[i].out, cands[i].fill, leg)
+            });
+            remaining -= leg;
+        }
+
+        if (remaining > 0) {
+            tmp[legCount++] = Leg({venue: fb, amountIn: remaining, minOut: 0});
+        }
+
+        legs = new Leg[](legCount);
+        for (uint256 i = 0; i < legCount; i++) {
+            legs[i] = tmp[i];
+        }
     }
 
     //-------//

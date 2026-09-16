@@ -11,6 +11,7 @@ import {MockSwapRouter02} from "./mocks/MockSwapRouter02.sol";
 import {MockV3SwapRouter} from "./mocks/MockV3SwapRouter.sol";
 import {MockWETH} from "./mocks/MockWETH.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
+import {MockCappedPropAMM} from "./mocks/MockCappedPropAMM.sol";
 import {ETH_SENTINEL, WETH} from "../src/libraries/Constants.sol";
 import "../src/libraries/Errors.sol";
 
@@ -136,6 +137,56 @@ contract PropAMMRouterSplitTest is Test {
         vm.prank(user);
         vm.expectRevert(abi.encodeWithSelector(TooManyVenues.selector, 13));
         router.swapSplitV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1);
+    }
+
+    /// @dev Venue caps at 400 of a 1000 order. The probe finds 400 is quotable
+    /// (full 1000 reverts, half 500 reverts, so the downward search in Task 6
+    /// is NOT exercised here — instead cap the venue at exactly the half point).
+    function test_split_capacityConstrainedVenueTakesHalfAndUniswapTakesRest() public {
+        MockCappedPropAMM venue = new MockCappedPropAMM();
+        venue.setCap(500e18);
+        venue.setRateBps(10_100); // 1% better than Uniswap
+        router.addVenue(address(venue));
+
+        _fund(1000e18);
+        uni.setAmountOut(495e18); // Uniswap fills the 500 remainder at 0.99
+
+        vm.prank(user);
+        uint256 out = router.swapSplitV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1);
+
+        // 500 @ 1.01 = 505 from the venue, plus 495 from Uniswap.
+        assertEq(out, 1000e18);
+        assertEq(tout.balanceOf(recipient), 1000e18);
+    }
+
+    /// @dev A venue that reverts at both probe points yields no candidate, and
+    /// the split degrades to a pure Uniswap route rather than reverting.
+    function test_split_deadVenueIsSkipped() public {
+        MockCappedPropAMM venue = new MockCappedPropAMM();
+        venue.setCap(0); // reverts at every size
+        router.addVenue(address(venue));
+
+        _fund(1000e18);
+        uni.setAmountOut(990e18);
+
+        vm.prank(user);
+        uint256 out = router.swapSplitV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1);
+        assertEq(out, 990e18);
+    }
+
+    /// @dev A venue quoting zero is not a candidate.
+    function test_split_zeroQuoteVenueIsSkipped() public {
+        MockCappedPropAMM venue = new MockCappedPropAMM();
+        venue.setCap(type(uint256).max);
+        venue.setRateBps(0); // quotes 0
+        router.addVenue(address(venue));
+
+        _fund(1000e18);
+        uni.setAmountOut(990e18);
+
+        vm.prank(user);
+        uint256 out = router.swapSplitV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1);
+        assertEq(out, 990e18);
     }
 }
 
