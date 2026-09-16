@@ -48,10 +48,12 @@ from eth_utils import to_checksum_address
 from .._tls import ssl_context as _ssl_context
 from ..error import PricesError, TimeoutError
 
-DEFAULT_PRICE_LEVELS_RPC_URL = "https://rpc.titanbuilder.xyz"
+#: Default price-levels endpoint. Served from regional hosts (``eu.``,
+#: ``ap.``, ``us.``); override the URL to pick the nearest.
+DEFAULT_PRICE_LEVELS_RPC_URL = "https://eu.data.titanbuilder.xyz"
 #: Default price-levels stream endpoint. The stream is served from regional
 #: hosts (``eu.``, ``ap.``, ``us.``); override the URL to pick the nearest.
-DEFAULT_PRICE_LEVELS_WS_URL = "wss://eu.rpc.titanbuilder.xyz/ws/pamm_price_levels"
+DEFAULT_PRICE_LEVELS_WS_URL = "wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels"
 
 #: Whether a rung came from an EVM simulation or a spline interpolation.
 PriceVariant = Literal["Simulated", "Interpolated"]

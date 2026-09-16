@@ -92,12 +92,16 @@ export interface PriceLevelsSource {
   close?(): void;
 }
 
-export const DEFAULT_PRICE_LEVELS_RPC_URL = "https://rpc.titanbuilder.xyz";
+/**
+ * Default price-levels endpoint. Served from regional hosts (`eu.`, `ap.`,
+ * `us.`); override the URL to pick the nearest.
+ */
+export const DEFAULT_PRICE_LEVELS_RPC_URL = "https://eu.data.titanbuilder.xyz";
 /**
  * Default price-levels stream endpoint. The stream is served from regional
  * hosts (`eu.`, `ap.`, `us.`); override the URL to pick the nearest.
  */
-export const DEFAULT_PRICE_LEVELS_WS_URL = "wss://eu.rpc.titanbuilder.xyz/ws/pamm_price_levels";
+export const DEFAULT_PRICE_LEVELS_WS_URL = "wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels";
 
 export interface PriceLevelsOptions {
   /**

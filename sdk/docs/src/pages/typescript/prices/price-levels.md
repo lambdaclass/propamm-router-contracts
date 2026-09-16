@@ -20,7 +20,7 @@ const snapshot = await prices.getPriceLevels();
 
 // live stream
 const prices = new PriceLevels({
-  source: new PriceLevelsWsSource({ url: "wss://eu.rpc.titanbuilder.xyz/ws/pamm_price_levels" }),
+  source: new PriceLevelsWsSource({ url: "wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels" }),
 });
 const snapshot = await prices.getPriceLevels();
 prices.close();
@@ -82,7 +82,7 @@ Source the snapshot is pulled from. Pass a
 ### rpcUrl (optional)
 
 - **Type:** `string`
-- **Default:** `https://rpc.titanbuilder.xyz`
+- **Default:** `https://eu.data.titanbuilder.xyz`
 
 Titan JSON-RPC endpoint used by the quote helpers. Ignored when `source` is a
 [`PriceLevelsRpcSource`](/typescript/prices/rpc-source) (its URL is reused).
@@ -91,7 +91,7 @@ deployment so quotes go to the same host:
 
 ```ts
 const prices = new PriceLevels({
-  source: new PriceLevelsWsSource({ url: "wss://us.rpc.titanbuilder.xyz/ws/pamm_price_levels" }),
-  rpcUrl: "https://us.rpc.titanbuilder.xyz",
+  source: new PriceLevelsWsSource({ url: "wss://us.data.titanbuilder.xyz/ws/pamm_price_levels" }),
+  rpcUrl: "https://us.data.titanbuilder.xyz",
 });
 ```

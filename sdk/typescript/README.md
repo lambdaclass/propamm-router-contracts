@@ -157,7 +157,7 @@ their pushed state instead of the chain's.
 
 Two sources are available; both need no authentication:
 
-- `OverridesWsSource` — streams `wss://rpc.titanbuilder.xyz/ws/pamm_quote_stream`,
+- `OverridesWsSource` — streams `wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream`,
   caching per-pAMM entries across frames and reconnecting with backoff. This
   is the **default**: a router constructed without options creates one
   (connecting lazily on the first quote). The socket auto-closes after an
@@ -237,20 +237,20 @@ from regional hosts (`eu.`, `ap.`, `us.`); pick the nearest:
 import { PriceLevels, PriceLevelsWsSource } from "propamm/prices";
 
 const prices = new PriceLevels({
-  source: new PriceLevelsWsSource({ url: "wss://eu.rpc.titanbuilder.xyz/ws/pamm_price_levels" }),
+  source: new PriceLevelsWsSource({ url: "wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels" }),
 });
 const snapshot = await prices.getPriceLevels(); // served from the live stream
 prices.close(); // close the stream socket when done (no-op for the HTTP default)
 ```
 
 The quote helpers (`getQuote` / `getQuoteVenue`) are HTTP-only and default to
-`https://rpc.titanbuilder.xyz`. When pairing a `PriceLevelsWsSource` with a
+`https://eu.data.titanbuilder.xyz`. When pairing a `PriceLevelsWsSource` with a
 private or regional deployment, pass `rpcUrl` to route quotes to the same host:
 
 ```ts
 const prices = new PriceLevels({
-  source: new PriceLevelsWsSource({ url: "wss://us.rpc.titanbuilder.xyz/ws/pamm_price_levels" }),
-  rpcUrl: "https://us.rpc.titanbuilder.xyz",
+  source: new PriceLevelsWsSource({ url: "wss://us.data.titanbuilder.xyz/ws/pamm_price_levels" }),
+  rpcUrl: "https://us.data.titanbuilder.xyz",
 });
 ```
 

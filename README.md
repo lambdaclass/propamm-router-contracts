@@ -150,7 +150,7 @@ WETH_BAL_SLOT=$(cast index address $ROUTER 3)
 
 # 1. Fetch the venue's Titan overrides and fund the router with 10 WETH.
 #    (Skip this step for the Uniswap V3 fallback — QuoterV2 only needs on-chain state.)
-OVERRIDES=$(curl -s -X POST https://eu.rpc.titanbuilder.xyz \
+OVERRIDES=$(curl -s -X POST https://eu.data.titanbuilder.xyz \
     -H "Content-Type: application/json" \
     -d '{"jsonrpc":"2.0","id":1,"method":"titan_getPammStateOverrides","params":[]}' \
     | jq -c --arg pamm "$VENUE_ADDR" --arg weth "$WETH" --arg slot "$WETH_BAL_SLOT" '

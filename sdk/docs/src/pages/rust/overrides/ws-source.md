@@ -53,7 +53,7 @@ Immediate, permanent teardown.
 ### url
 
 - **Type:** `String`
-- **Default:** `wss://rpc.titanbuilder.xyz/ws/pamm_quote_stream`
+- **Default:** `wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream`
 
 Stream endpoint.
 

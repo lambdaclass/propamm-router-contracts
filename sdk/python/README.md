@@ -146,7 +146,7 @@ from regional hosts (`eu.`, `ap.`, `us.`); pick the nearest:
 from propamm import PriceLevels, PriceLevelsWsSource
 
 prices = PriceLevels(
-    PriceLevelsWsSource("wss://eu.rpc.titanbuilder.xyz/ws/pamm_price_levels")
+    PriceLevelsWsSource("wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels")
 )
 snapshot = await prices.get_price_levels()  # served from the live stream
 await prices.close()  # close the stream socket when done (no-op for the HTTP default)

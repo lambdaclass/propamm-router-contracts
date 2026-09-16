@@ -15,7 +15,7 @@ import { PriceLevels, PriceLevelsRpcSource } from "propamm/prices";
 
 // custom endpoint — snapshot and quotes both use it
 const prices = new PriceLevels({
-  source: new PriceLevelsRpcSource({ url: "https://us.rpc.titanbuilder.xyz" }),
+  source: new PriceLevelsRpcSource({ url: "https://us.data.titanbuilder.xyz" }),
 });
 ```
 
@@ -51,9 +51,10 @@ getQuoteVenue(venue: Address, tokenIn: Address, tokenOut: Address, amountIn: big
 ### url (optional)
 
 - **Type:** `string`
-- **Default:** `https://rpc.titanbuilder.xyz`
+- **Default:** `https://eu.data.titanbuilder.xyz`
 
-Titan JSON-RPC endpoint.
+Titan JSON-RPC endpoint. Served from regional hosts (`eu.`, `ap.`, `us.`);
+pick the nearest.
 
 ### fetch (optional)
 

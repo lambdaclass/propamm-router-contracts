@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 // custom endpoint — snapshot and quotes both use it
 let prices = PriceLevels::with_source(Arc::new(
-    PriceLevelsRpcSource::new("https://us.rpc.titanbuilder.xyz"),
+    PriceLevelsRpcSource::new("https://us.data.titanbuilder.xyz"),
 ));
 ```
 
