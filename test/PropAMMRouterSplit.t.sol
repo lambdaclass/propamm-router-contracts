@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.35;
 
-import {Test} from "forge-std/Test.sol";
+import {Test, Vm} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
+import {IPropAMMRouter} from "../src/interfaces/IPropAMMRouter.sol";
 import {PropAMMRouter} from "../src/PropAMMRouter.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockSwapRouter02} from "./mocks/MockSwapRouter02.sol";
@@ -12,6 +13,7 @@ import {MockV3SwapRouter} from "./mocks/MockV3SwapRouter.sol";
 import {MockWETH} from "./mocks/MockWETH.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
 import {MockCappedPropAMM} from "./mocks/MockCappedPropAMM.sol";
+import {MockPropAMM} from "./mocks/MockPropAMM.sol";
 import {ETH_SENTINEL, WETH} from "../src/libraries/Constants.sol";
 import "../src/libraries/Errors.sol";
 
@@ -65,6 +67,30 @@ contract PropAMMRouterSplitTest is Test {
         tin.mint(user, amt);
         vm.prank(user);
         tin.approve(address(router), amt);
+    }
+
+    /// @dev Asserts `logs` contains EXACTLY ONE `Swapped` event, naming
+    /// `expectedMarketMaker` and `expectedAmountIn`. Needed because with only
+    /// one venue in play, "no candidate at probe time" and "planned then
+    /// failed and absorbed into Uniswap" both produce the identical aggregate
+    /// output — the output alone cannot distinguish them, only the event trail
+    /// can.
+    function _assertSingleSwappedEvent(Vm.Log[] memory logs, address expectedMarketMaker, uint256 expectedAmountIn)
+        internal
+        pure
+    {
+        uint256 matchCount = 0;
+        address marketMaker;
+        uint256 amountIn;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics.length > 0 && logs[i].topics[0] == IPropAMMRouter.Swapped.selector) {
+                matchCount++;
+                (amountIn,,, marketMaker) = abi.decode(logs[i].data, (uint256, uint256, address, address));
+            }
+        }
+        require(matchCount == 1, "expected exactly one Swapped event");
+        require(marketMaker == expectedMarketMaker, "unexpected marketMaker on Swapped");
+        require(amountIn == expectedAmountIn, "unexpected amountIn on Swapped");
     }
 
     /// @dev With no whitelisted venues there are no candidates, so the whole
@@ -139,9 +165,13 @@ contract PropAMMRouterSplitTest is Test {
         router.swapSplitV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1);
     }
 
-    /// @dev Venue caps at 400 of a 1000 order. The probe finds 400 is quotable
-    /// (full 1000 reverts, half 500 reverts, so the downward search in Task 6
-    /// is NOT exercised here — instead cap the venue at exactly the half point).
+    /// @dev Venue caps at exactly half of a 1000 order (500). The full-point
+    /// probe (1000) reverts as over-cap; the half-point probe (500) SUCCEEDS
+    /// because it lands exactly on the cap — that success is the entire
+    /// mechanism under test. `_probeVenue` sees one dead point and one alive
+    /// point and takes the alive one directly; Task 6's downward search (for a
+    /// venue whose cap sits somewhere below the half point) is NOT exercised
+    /// here.
     function test_split_capacityConstrainedVenueTakesHalfAndUniswapTakesRest() public {
         MockCappedPropAMM venue = new MockCappedPropAMM();
         venue.setCap(500e18);
@@ -161,6 +191,12 @@ contract PropAMMRouterSplitTest is Test {
 
     /// @dev A venue that reverts at both probe points yields no candidate, and
     /// the split degrades to a pure Uniswap route rather than reverting.
+    /// Checked via the `Swapped` event set, not just the aggregate output:
+    /// with only one venue in play, "skipped at probe time" and "planned then
+    /// failed and absorbed" (`test_split_failedVenueLegIsAbsorbedIntoUniswap`)
+    /// produce the SAME total output here, since the venue would have absorbed
+    /// the whole 1000e18 either way — only the event trail (one Swapped, from
+    /// the fallback, for the full 1000e18) proves the venue was never planned.
     function test_split_deadVenueIsSkipped() public {
         MockCappedPropAMM venue = new MockCappedPropAMM();
         venue.setCap(0); // reverts at every size
@@ -169,12 +205,15 @@ contract PropAMMRouterSplitTest is Test {
         _fund(1000e18);
         uni.setAmountOut(990e18);
 
+        vm.recordLogs();
         vm.prank(user);
         uint256 out = router.swapSplitV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1);
         assertEq(out, 990e18);
+        _assertSingleSwappedEvent(vm.getRecordedLogs(), address(uni), 1000e18);
     }
 
-    /// @dev A venue quoting zero is not a candidate.
+    /// @dev A venue quoting zero is not a candidate. Same event-based proof as
+    /// `test_split_deadVenueIsSkipped`, and for the same reason.
     function test_split_zeroQuoteVenueIsSkipped() public {
         MockCappedPropAMM venue = new MockCappedPropAMM();
         venue.setCap(type(uint256).max);
@@ -184,9 +223,51 @@ contract PropAMMRouterSplitTest is Test {
         _fund(1000e18);
         uni.setAmountOut(990e18);
 
+        vm.recordLogs();
         vm.prank(user);
         uint256 out = router.swapSplitV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1);
         assertEq(out, 990e18);
+        _assertSingleSwappedEvent(vm.getRecordedLogs(), address(uni), 1000e18);
+    }
+
+    /// @dev A planned propAMM leg that under-delivers even 1 wei against its
+    /// own quoted `minOut` fails at execution and its input is absorbed into
+    /// the coalesced Uniswap leg rather than reverting the whole split. This
+    /// drives `_executeLegs`'s `catch` arm (src/PropAMMRouter.sol), which was
+    /// unreachable before this task planned any real propAMM leg. It is a
+    /// routine production path, not an edge case: `SplitPlanner.proRataMin`
+    /// returns the ranking quote EXACTLY (zero tolerance) whenever the leg
+    /// equals the full probed fill, so any venue whose delivery ever drifts
+    /// below its own quote takes this path.
+    ///
+    /// `amountIn = 1` is deliberate, not a shortcut for convenience:
+    /// `MockPropAMM.quote()` ignores the amount argument, so at any order
+    /// where the probe's half point is nonzero, both probe points would
+    /// return the identical value and `_probeVenue`'s equality guard would
+    /// discard the venue as ambiguous (deferred to Task 6's downward search)
+    /// — it would never become a candidate at all. `amountIn = 1` forces
+    /// `_probeVenue`'s `half == 0` shortcut, which takes the full-point quote
+    /// directly — the only way, before Task 6, to get a flat-quoting venue
+    /// into the candidate set. The order's size is incidental to what is
+    /// under test: a leg whose fill equals the full probed amount has a
+    /// zero-tolerance `minOut` regardless of how large that fill is.
+    function test_split_failedVenueLegIsAbsorbedIntoUniswap() public {
+        MockPropAMM venue = new MockPropAMM();
+        venue.setQuote(2); // wins the (uncontested) ranking
+        venue.setAmountOut(1); // delivers 1 wei under its own quote
+        router.addVenue(address(venue));
+
+        _fund(1);
+        uni.setAmountOut(1);
+
+        vm.recordLogs();
+        vm.prank(user);
+        uint256 out = router.swapSplitV1(address(tin), address(tout), 1, 0, recipient, block.timestamp + 1);
+
+        assertEq(out, 1);
+        assertEq(tout.balanceOf(recipient), 1);
+        assertEq(tin.balanceOf(address(venue)), 0, "the reverted leg must not retain the pulled tokenIn");
+        _assertSingleSwappedEvent(vm.getRecordedLogs(), address(uni), 1);
     }
 }
 
