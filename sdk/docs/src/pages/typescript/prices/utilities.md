@@ -50,5 +50,8 @@ the snapshot.
 
 ## Constants
 
-- `DEFAULT_PRICE_LEVELS_RPC_URL` — `https://rpc.titanbuilder.xyz`
-- `DEFAULT_PRICE_LEVELS_WS_URL` — `wss://eu.rpc.titanbuilder.xyz/ws/pamm_price_levels`
+- `DEFAULT_PRICE_LEVELS_RPC_URL` — `https://eu.data.titanbuilder.xyz`
+- `DEFAULT_PRICE_LEVELS_WS_URL` — `wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels`
+
+Both default to the EU region. Titan serves the same data from `eu.`, `ap.`
+and `us.` hosts — override the URL to pick the nearest.

@@ -10,7 +10,7 @@ reconnects with backoff, and auto-closes when idle.
 from propamm.prices import PriceLevels, PriceLevelsWsSource
 
 prices = PriceLevels(
-    source=PriceLevelsWsSource(url="wss://eu.rpc.titanbuilder.xyz/ws/pamm_price_levels"),
+    source=PriceLevelsWsSource(url="wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels"),
 )
 snapshot = await prices.get_price_levels()
 await prices.close()  # optional — idle timeout handles cleanup
@@ -53,7 +53,7 @@ handles that.
 
 ### url
 
-- **Default:** `wss://eu.rpc.titanbuilder.xyz/ws/pamm_price_levels`
+- **Default:** `wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels`
 
 Stream endpoint. The stream is served from regional hosts (`eu.`, `ap.`,
 `us.`); pick the nearest.

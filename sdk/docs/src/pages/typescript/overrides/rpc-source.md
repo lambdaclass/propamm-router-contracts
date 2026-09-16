@@ -37,9 +37,10 @@ endpoint. Throws on HTTP or JSON-RPC errors.
 ### url (optional)
 
 - **Type:** `string`
-- **Default:** `https://rpc.titanbuilder.xyz`
+- **Default:** `https://eu.data.titanbuilder.xyz`
 
-JSON-RPC endpoint.
+JSON-RPC endpoint. Served from regional hosts (`eu.`, `ap.`, `us.`);
+pick the nearest.
 
 ### fetch (optional)
 

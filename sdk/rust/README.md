@@ -73,7 +73,7 @@ state instead of the chain's.
 
 Two sources implement the `OverridesSource` trait; both need no authentication:
 
-- `OverridesWsSource` — streams `wss://rpc.titanbuilder.xyz/ws/pamm_quote_stream`,
+- `OverridesWsSource` — streams `wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream`,
   caching per-pAMM entries across frames and reconnecting with backoff. This
   is the **default**: a router built with `PropAmmRouter::new` creates one
   (connecting lazily on the first quote). The connection auto-closes after an
@@ -158,7 +158,7 @@ use std::sync::Arc;
 use propamm::prices::{PriceLevels, PriceLevelsWsSource, PriceLevelsWsSourceConfig};
 
 let ws = PriceLevelsWsSource::new(PriceLevelsWsSourceConfig {
-    url: "wss://eu.rpc.titanbuilder.xyz/ws/pamm_price_levels".into(),
+    url: "wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels".into(),
     ..Default::default()
 });
 let prices = PriceLevels::with_source(Arc::new(ws));

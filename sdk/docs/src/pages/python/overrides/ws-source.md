@@ -6,7 +6,7 @@ reconnects with backoff, and auto-closes when idle.
 
 ```python
 OverridesWsSource(
-    url: str = "wss://rpc.titanbuilder.xyz/ws/pamm_quote_stream",
+    url: str = "wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream",
     *,
     first_frame_timeout: float = 5.0,
     idle_timeout: float = 30.0
@@ -54,7 +54,7 @@ handles that.
 ### url (optional)
 
 - **Type:** `str`
-- **Default:** `wss://rpc.titanbuilder.xyz/ws/pamm_quote_stream`
+- **Default:** `wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream`
 
 Stream endpoint.
 

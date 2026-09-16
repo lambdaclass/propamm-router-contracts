@@ -14,7 +14,7 @@ snapshot = await prices.get_price_levels()
 
 # live stream
 prices = PriceLevels(
-    source=PriceLevelsWsSource(url="wss://eu.rpc.titanbuilder.xyz/ws/pamm_price_levels"),
+    source=PriceLevelsWsSource(url="wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels"),
 )
 snapshot = await prices.get_price_levels()
 await prices.close()
@@ -44,8 +44,8 @@ deployment so quotes go to the same host:
 
 ```python
 prices = PriceLevels(
-    source=PriceLevelsWsSource(url="wss://us.rpc.titanbuilder.xyz/ws/pamm_price_levels"),
-    rpc_url="https://us.rpc.titanbuilder.xyz",
+    source=PriceLevelsWsSource(url="wss://us.data.titanbuilder.xyz/ws/pamm_price_levels"),
+    rpc_url="https://us.data.titanbuilder.xyz",
 )
 ```
 

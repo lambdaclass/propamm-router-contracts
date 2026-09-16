@@ -10,7 +10,7 @@ for sporadic use.
 from propamm.prices import PriceLevels, PriceLevelsRpcSource
 
 # custom endpoint — snapshot and quotes both use it
-prices = PriceLevels(source=PriceLevelsRpcSource("https://us.rpc.titanbuilder.xyz"))
+prices = PriceLevels(source=PriceLevelsRpcSource("https://us.data.titanbuilder.xyz"))
 ```
 
 ## Constructor

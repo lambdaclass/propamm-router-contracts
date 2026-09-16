@@ -30,8 +30,12 @@ use crate::common::pamms::BEBOP;
 use crate::error::{Error, Result};
 use crate::ws::{WsConnection, WsHandler};
 
-pub const DEFAULT_OVERRIDES_RPC_URL: &str = "https://rpc.titanbuilder.xyz";
-pub const DEFAULT_OVERRIDES_WS_URL: &str = "wss://rpc.titanbuilder.xyz/ws/pamm_quote_stream";
+/// Default state-override endpoint. Served from regional hosts (`eu.`, `ap.`,
+/// `us.`); override the URL to pick the nearest.
+pub const DEFAULT_OVERRIDES_RPC_URL: &str = "https://eu.data.titanbuilder.xyz";
+/// Default state-override stream endpoint. Served from regional hosts (`eu.`,
+/// `ap.`, `us.`); override the URL to pick the nearest.
+pub const DEFAULT_OVERRIDES_WS_URL: &str = "wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream";
 
 /// Bebop prices from a single registry slot. When a snapshot carries no Bebop
 /// entry, [`to_state_override`] zeroes this slot by default so a stale

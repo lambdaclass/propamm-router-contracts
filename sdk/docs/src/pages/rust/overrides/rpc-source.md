@@ -45,4 +45,6 @@ endpoint. Fails on HTTP or JSON-RPC errors.
 
 ### OverridesRpcSource::default()
 
-Uses the public endpoint `https://rpc.titanbuilder.xyz`.
+Uses the public endpoint `https://eu.data.titanbuilder.xyz`. Titan serves the
+same data from `eu.`, `ap.` and `us.` hosts — use `new()` with an explicit URL
+to pick the nearest.
