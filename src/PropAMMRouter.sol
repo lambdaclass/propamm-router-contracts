@@ -727,9 +727,36 @@ contract PropAMMRouter is
         if (outFull == 0 && outHalf == 0) return (0, 0);
         if (outFull == 0) return (half, outHalf);
         if (outHalf == 0) return (p, outFull);
-        if (outFull == outHalf) return (0, 0); // Task 6 resolves this downward
+        if (outFull == outHalf) return _probeDownToFillable(venue, tokenIn_, tokenOut_, half, outFull);
         if (SplitPlanner.isSaturated(outFull, outHalf)) return (half, outHalf);
         return (p, outFull);
+    }
+
+    /// @dev Resolves a venue that quoted the SAME output at both probe points.
+    /// A flat quote across `[half, p]` means capacity lies below `half`, so
+    /// neither point is a usable leg size: a saturating venue ACCEPTS an
+    /// oversized input, delivers only its ceiling and keeps the difference.
+    /// `proRataMin` cannot catch that — the leg's floor would be derived from
+    /// the very quote that is flat.
+    ///
+    /// So halve down looking for a size that quotes STRICTLY below the ceiling.
+    /// Such a size is provably under capacity, which makes it a size the venue
+    /// fills in full. If the budget runs out the venue gets no candidate at all
+    /// — deliberately conservative: it forgoes an attractive-looking quote in
+    /// exchange for never handing a venue input it will not fill.
+    function _probeDownToFillable(address venue, address tokenIn_, address tokenOut_, uint256 from, uint256 ceiling)
+        internal
+        returns (uint256 fill, uint256 out)
+    {
+        uint256 size = from;
+        for (uint256 i = 0; i < SplitPlanner.MAX_SATURATION_STEPS; i++) {
+            size /= 2;
+            if (size == 0) return (0, 0);
+            uint256 outAt = _tryQuote(venue, tokenIn_, tokenOut_, size);
+            if (outAt == 0 || outAt > type(uint128).max) return (0, 0);
+            if (outAt < ceiling) return (size, outAt);
+        }
+        return (0, 0);
     }
 
     /// @dev One candidate per venue, deduped. Dead venues and absurd quotes

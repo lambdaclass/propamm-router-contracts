@@ -14,6 +14,7 @@ import {MockV3SwapRouter} from "./mocks/MockV3SwapRouter.sol";
 import {MockWETH} from "./mocks/MockWETH.sol";
 import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
 import {MockCappedPropAMM} from "./mocks/MockCappedPropAMM.sol";
+import {MockSaturatingPropAMM} from "./mocks/MockSaturatingPropAMM.sol";
 import {MockPropAMM} from "./mocks/MockPropAMM.sol";
 import {ETH_SENTINEL, WETH} from "../src/libraries/Constants.sol";
 import "../src/libraries/Errors.sol";
@@ -328,6 +329,59 @@ contract PropAMMRouterSplitTest is Test {
         assertEq(tout.balanceOf(recipient), 1);
         assertEq(tin.balanceOf(address(venue)), 0, "the reverted leg must not retain the pulled tokenIn");
         _assertSingleSwappedEvent(vm.getRecordedLogs(), address(uni), 1);
+    }
+
+    /// @dev Cap 200 inside a 1000 order. Probes at 1000 and 500 both return the
+    /// flat 200-ceiling, so neither is a fillable size. Halving from 500 gives
+    /// 250 (still saturated) then 125 (strictly below the ceiling) — which is
+    /// the size the venue actually fills.
+    function test_split_downwardProbeRecoversSaturatedVenue() public {
+        MockSaturatingPropAMM venue = new MockSaturatingPropAMM();
+        venue.setCap(200e18);
+        venue.setRateBps(10_100);
+        router.addVenue(address(venue));
+
+        _fund(1000e18);
+        uni.setAmountOut(875e18);
+
+        vm.prank(user);
+        uint256 out = router.swapSplitV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1);
+
+        // 125 @ 1.01 = 126.25 from the venue, 875 from Uniswap.
+        assertEq(out, 1001.25e18);
+    }
+
+    /// @dev Cap so far below the order that the halving budget is exhausted
+    /// before finding a fillable size. The venue is DECLINED rather than handed
+    /// input it will not fill, and the order routes wholly through Uniswap.
+    function test_split_saturatedVenueDeclinedWhenBudgetExhausted() public {
+        MockSaturatingPropAMM venue = new MockSaturatingPropAMM();
+        venue.setCap(1); // 1 wei of capacity against a 1000e18 order
+        venue.setRateBps(10_100);
+        router.addVenue(address(venue));
+
+        _fund(1000e18);
+        uni.setAmountOut(990e18);
+
+        vm.prank(user);
+        uint256 out = router.swapSplitV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1);
+        assertEq(out, 990e18);
+    }
+
+    /// @dev Drift inside the τ band is NOT saturation: the venue keeps its full
+    /// probe point rather than being halved.
+    function test_split_driftInsideToleranceKeepsFullPoint() public {
+        MockSaturatingPropAMM venue = new MockSaturatingPropAMM();
+        venue.setCap(type(uint256).max); // perfectly linear, never saturates
+        venue.setRateBps(10_100);
+        router.addVenue(address(venue));
+
+        _fund(1000e18);
+        uni.setAmountOut(0);
+
+        vm.prank(user);
+        uint256 out = router.swapSplitV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1);
+        assertEq(out, 1010e18); // whole order at 1.01
     }
 }
 
