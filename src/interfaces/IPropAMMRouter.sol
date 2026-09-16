@@ -237,4 +237,43 @@ interface IPropAMMRouter {
     function quoteSelectedVenuesV1(address[] calldata venues, address tokenIn, address tokenOut, uint256 amountIn)
         external
         returns (uint256 bestAmountOut, address bestVenue);
+
+    /// @notice Splits one exact-input swap across whitelisted propAMM venues,
+    /// planning the split ONCHAIN in this same transaction.
+    /// @dev Takes exactly the same arguments as `swapV1`. It returns only
+    /// `amountOut` — a split has no single executing venue, so there is nothing
+    /// to name.
+    ///
+    /// The router probes every whitelisted venue for capacity (one call if the
+    /// venue implements `IPropAMMFillable`, else a bounded quote probe), ranks
+    /// what it finds against a Uniswap V3 reference quote, places up to
+    /// `MAX_LEGS` propAMM legs and sends any remainder to Uniswap.
+    ///
+    /// A leg that fails at execution time has its input ABSORBED into that
+    /// Uniswap remainder, which is floored only by the aggregate shortfall
+    /// against `amountOutMin`. That shortfall is zero whenever the propAMM legs
+    /// that succeeded already clear `amountOutMin` — the normal outcome of
+    /// splitting into better-than-Uniswap venues — so the merged slice is
+    /// MEV-exposed in the common case. The user can never receive less than
+    /// `amountOutMin`, so the loss is bounded by their own stated tolerance,
+    /// but `amountOutMin` is the ONLY lever here and should be set tight.
+    ///
+    /// Reverts `TooManyVenues` once the whitelist exceeds `MAX_SPLIT_VENUES`;
+    /// check `isSplitAvailable()` before listing a venue. An EMPTY whitelist is
+    /// not an error — it routes the whole order through Uniswap V3.
+    /// @param tokenIn The token being sold (or the ETH sentinel).
+    /// @param tokenOut The token being bought (or the ETH sentinel).
+    /// @param amountIn The exact input to split. Bounded to `type(uint128).max`.
+    /// @param amountOutMin The minimum TOTAL `tokenOut` across every leg.
+    /// @param recipient The address that receives `tokenOut`.
+    /// @param deadline Unix timestamp after which the swap is no longer valid.
+    /// @return amountOut The total `tokenOut` delivered to `recipient`.
+    function swapSplitV1(
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        address recipient,
+        uint256 deadline
+    ) external payable returns (uint256 amountOut);
 }

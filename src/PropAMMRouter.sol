@@ -497,6 +497,174 @@ contract PropAMMRouter is
         return whitelistedVenueCount() <= MAX_SPLIT_VENUES;
     }
 
+    /// @dev Bundled `_executeLegs` inputs. A struct rather than positional
+    /// parameters: it keeps the function under the stack limit and names the two
+    /// distinct recipients so a call site cannot transpose them. `payTo` is
+    /// where legs deliver — the router itself for the fee variant, which must
+    /// hold the gross output to skim from it. `swapFor` is the user the swap is
+    /// for, used ONLY for `Swapped` events so an indexer attributing volume by
+    /// recipient sees the user, not the router.
+    struct LegRun {
+        address tokenIn; // caller-visible, may be the ETH sentinel
+        address tokenIn_; // the resolved ERC-20 the legs sell
+        address tokenOut; // caller-visible, may be the ETH sentinel
+        uint256 amountOutMin; // aggregate floor on the total delivered
+        address payTo;
+        address swapFor;
+        uint256 deadline;
+    }
+
+    /// @inheritdoc IPropAMMRouter
+    function swapSplitV1(
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOutMin,
+        address recipient,
+        uint256 deadline
+    ) external payable whenNotPaused nonReentrant returns (uint256 amountOut) {
+        require(block.timestamp <= deadline, Expired());
+        _validateSplitParams(amountIn);
+
+        address[] memory venueSet = _collectVenues();
+        (address tokenIn_, address tokenOut_) = _pullSplitFunds(tokenIn, tokenOut, amountIn);
+        Leg[] memory legs = _planSplit(venueSet, tokenIn_, tokenOut_, amountIn);
+
+        amountOut = _executeLegs(
+            legs,
+            LegRun({
+                tokenIn: tokenIn,
+                tokenIn_: tokenIn_,
+                tokenOut: tokenOut,
+                amountOutMin: amountOutMin,
+                payTo: recipient,
+                swapFor: recipient,
+                deadline: deadline
+            })
+        );
+    }
+
+    /// @dev `amountIn` is capped at uint128 because `SplitPlanner` compares
+    /// rates by cross-multiplying quoted outputs with fills.
+    function _validateSplitParams(uint256 amountIn) internal pure {
+        require(amountIn > 0, ZeroAmount());
+        require(amountIn <= type(uint128).max, AmountTooLarge(amountIn));
+    }
+
+    /// @dev Snapshots the whitelist into memory. Reverts past the cap rather
+    /// than truncating: `EnumerableSet` ordering shifts on removal, so "the
+    /// first twelve" would be nondeterministic across calls.
+    function _collectVenues() internal view returns (address[] memory venueSet) {
+        uint256 n = whitelistedVenueCount();
+        require(n <= MAX_SPLIT_VENUES, TooManyVenues(n));
+        venueSet = new address[](n);
+        for (uint256 i = 0; i < n; i++) {
+            venueSet[i] = whitelistedVenueAt(i);
+        }
+    }
+
+    /// @dev Pulls `amountIn` from the caller (wrapping ETH when `tokenIn` is the
+    /// sentinel) and returns the resolved ERC-20s the swap will sell and buy.
+    /// This is where `tokenIn == tokenOut` is rejected — the first point at
+    /// which BOTH sentinels are resolved, and deliberately BEFORE the transfer,
+    /// since checking it later would spend a full probe phase planning a route
+    /// for a pair no venue can fill.
+    function _pullSplitFunds(address tokenIn, address tokenOut, uint256 amountIn)
+        internal
+        returns (address tokenIn_, address tokenOut_)
+    {
+        tokenIn_ = tokenIn;
+        tokenOut_ = tokenOut == ETH_SENTINEL ? WETH : tokenOut;
+        require((tokenIn == ETH_SENTINEL ? WETH : tokenIn) != tokenOut_, IdenticalTokens());
+        if (tokenIn == ETH_SENTINEL) {
+            require(msg.value == amountIn, InvalidValue(amountIn, msg.value));
+            IWETH(WETH).deposit{value: msg.value}();
+            tokenIn_ = WETH;
+        } else {
+            require(msg.value == 0, InvalidValue(0, msg.value));
+            IERC20(tokenIn).safeTransferFrom(msg.sender, address(this), amountIn);
+        }
+    }
+
+    /// @dev Runs a list of legs with funds already held by this contract. Legs
+    /// naming the fallback router and legs whose venue FAILS are coalesced into
+    /// ONE Uniswap V3 swap, floored at the aggregate shortfall against
+    /// `amountOutMin`. That floor is best-effort: it is zero whenever the prop
+    /// legs that succeeded already clear the minimum. See `swapSplitV1`.
+    /// Emits one `Swapped` per executed leg, naming `swapFor`.
+    function _executeLegs(Leg[] memory legs, LegRun memory r) internal returns (uint256 delivered) {
+        address tokenOut_ = r.tokenOut;
+        address recipient_ = r.payTo;
+        if (r.tokenOut == ETH_SENTINEL) {
+            tokenOut_ = WETH;
+            recipient_ = address(this);
+        }
+        // Cached: the loop body makes an external call, so the optimizer cannot
+        // hold this across iterations and would re-SLOAD it once per leg.
+        address fb = fallbackSwapRouter;
+        uint256 fbAmount = 0;
+        for (uint256 i = 0; i < legs.length; i++) {
+            if (legs[i].venue == fb) {
+                fbAmount += legs[i].amountIn;
+                continue;
+            }
+            uint256 prevBal = IERC20(tokenOut_).balanceOf(recipient_);
+            try this._dispatchVenue(
+                legs[i].venue,
+                r.tokenIn_,
+                tokenOut_,
+                legs[i].amountIn,
+                legs[i].minOut,
+                // Paid from this contract's balance: the whole input was pulled
+                // before the quote phase, which R1 brackets holding it.
+                address(this),
+                recipient_,
+                r.deadline,
+                prevBal
+            ) returns (
+                uint256 legOut
+            ) {
+                delivered += legOut;
+                _emitSwapped(legs[i].venue, r.tokenIn, r.tokenOut, legs[i].amountIn, legOut, r.swapFor);
+            } catch {
+                fbAmount += legs[i].amountIn;
+            }
+        }
+
+        if (fbAmount > 0) {
+            uint256 uniMin = delivered >= r.amountOutMin ? 0 : r.amountOutMin - delivered;
+            uint256 prevBal = IERC20(tokenOut_).balanceOf(recipient_);
+            UniV3Router.swapExactIn(
+                r.tokenIn_, tokenOut_, resolvedFee(r.tokenIn_, tokenOut_), fbAmount, uniMin, recipient_, fb
+            );
+            uint256 fbOut = IERC20(tokenOut_).balanceOf(recipient_) - prevBal;
+            require(fbOut >= uniMin, InsufficientOutput(uniMin, fbOut));
+            delivered += fbOut;
+            _emitSwapped(fb, r.tokenIn, r.tokenOut, fbAmount, fbOut, r.swapFor);
+        }
+
+        require(delivered >= r.amountOutMin, InsufficientOutput(r.amountOutMin, delivered));
+
+        if (r.tokenOut == ETH_SENTINEL) {
+            // Unwrapped to `payTo`, not `swapFor`: the fee variant must receive
+            // the gross itself before disbursing.
+            _sendWrappedETH(r.payTo, delivered);
+        }
+    }
+
+    /// @dev Quote phase + planning. Replaced with real planning in Task 5.
+    /// Declared `view`: this trivial stub only reads `fallbackSwapRouter` and
+    /// performs no external calls or state writes. Task 5 removes `view` when
+    /// it adds real quoting.
+    function _planSplit(address[] memory, address, address, uint256 amountIn)
+        internal
+        view
+        returns (Leg[] memory legs)
+    {
+        legs = new Leg[](1);
+        legs[0] = Leg({venue: fallbackSwapRouter, amountIn: amountIn, minOut: 0});
+    }
+
     //-------//
     // Quote //
     //-------//
