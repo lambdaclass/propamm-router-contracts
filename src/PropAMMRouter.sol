@@ -1292,6 +1292,11 @@ contract PropAMMRouter is
     /// foot-gun: its `quote`/`swap` calls revert, so it is skipped by selection
     /// and, on an explicit swap, the reverting `_dispatchVenue` rolls back and the
     /// Uniswap fallback engages — no funds are stranded.
+    ///
+    /// Listing past `MAX_SPLIT_VENUES` disables `swapSplitV1` / `swapSplitWithFeeV1`
+    /// entirely (they start reverting `TooManyVenues`) without affecting this or any
+    /// other venue's use in `swapV1` / `quoteV1`. Check `isSplitAvailable()` first if
+    /// splitting should stay available.
     /// @param venue The venue address to whitelist.
     function addVenue(address venue) external restricted {
         _addVenue(venue);
