@@ -1015,4 +1015,50 @@ contract PropAMMRouterSplitEthTest is Test {
         assertEq(IERC20(WETH).balanceOf(address(router)), 0, "no WETH stranded in router");
         assertEq(address(router).balance, 0, "no ETH stranded in router");
     }
+
+    /// @dev Every other test in this contract whitelists no venues, so all
+    /// four run the fallback-only plan: `recipient_` is overridden to
+    /// `address(this)` for exactly one dispatch. Here a whitelisted venue
+    /// takes a partial (capped) prop leg AND the remainder coalesces to
+    /// Uniswap, so `_executeLegs` overrides `recipient_` to `address(this)`
+    /// TWICE — once for the prop leg's `_dispatchVenue`, once for the
+    /// coalesced fallback swap — each computing its OWN `prevBal` delta
+    /// against the router's growing WETH balance before a single unwrap
+    /// sends the summed total to the real recipient. Asserts the recipient's
+    /// ETH balance delta equals the sum of both legs' outputs, not just one.
+    function test_split_ethOut_propLegAndCoalescedRemainderSumCorrectly() public {
+        uint256 amountIn = 10e18;
+        uint256 venueOut = 5e18; // the capped venue's leg: 5e18 in, 1:1
+        uint256 fallbackOut = 4e18; // the coalesced 5e18 remainder's payout
+
+        MockCappedWethPropAMM venue = new MockCappedWethPropAMM();
+        venue.setCap(6e18); // forces the blind probe onto the HALF point (5e18)
+        venue.setRateBps(10_000); // 1:1
+        router.addVenue(address(venue));
+
+        // Fund the venue with WETH backed by real ETH, so its `safeTransfer`
+        // leg delivery has something to send.
+        vm.deal(address(venue), venueOut);
+        vm.prank(address(venue));
+        MockWETH(payable(WETH)).deposit{value: venueOut}();
+
+        // Fund the fallback the same way for the coalesced remainder.
+        vm.deal(address(fallbackRouter), fallbackOut);
+        vm.prank(address(fallbackRouter));
+        MockWETH(payable(WETH)).deposit{value: fallbackOut}();
+        fallbackRouter.setAmountOut(fallbackOut);
+
+        tin.mint(user, amountIn);
+        vm.prank(user);
+        tin.approve(address(router), amountIn);
+
+        uint256 recipientBefore = recipient.balance;
+
+        vm.prank(user);
+        uint256 out = router.swapSplitV1(address(tin), ETH_SENTINEL, amountIn, 0, recipient, block.timestamp + 1);
+
+        assertEq(out, venueOut + fallbackOut);
+        assertEq(recipient.balance - recipientBefore, venueOut + fallbackOut);
+        assertEq(IERC20(WETH).balanceOf(address(router)), 0, "no WETH stranded in router");
+    }
 }
