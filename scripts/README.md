@@ -31,6 +31,8 @@ tools shell out to Foundry's `cast` (and `solc` for one helper).
 | `solc` 0.8.29 | `direct_sim.py` | compiles the helper (auto, or pass bytecode) |
 | `ETH_RPC_URL` | the gas tools | **archive** node with `debug_traceTransaction` + state overrides (e.g. `ethereum-rpc.publicnode.com`) |
 | `ETH_RPC_URL` + `PK` | `execute_swaps.sh` | any mainnet RPC that accepts `eth_sendRawTransaction`; `PK` is a **funded** sender — these are real txs that cost gas |
+| `RPC_URL` | `gas/split_gas.py` | any mainnet RPC (**not** archive — it forks one block back); `anvil` and `forge` must be on `PATH` |
+| Network access to `rpc.titanbuilder.xyz` | `gas/split_gas.py`, `gas/titan_overrides.py` | pAMM state overrides, over WebSocket or JSON-RPC |
 
 Quick capability check for the RPC:
 
@@ -261,3 +263,84 @@ unavailable (recorded in the `method` column).
 > ℹ️ **Idle venues.** Any of the three named PropAMMs the router did not route to
 > within the window is emitted as an explicit "checked: no router routing … in
 > window" row in both CSVs, so the absence is documented rather than silent.
+
+---
+
+## 6. Split gas against live propAMMs — `gas/split_gas.py` + `gas/titan_overrides.py`
+
+The realistic answer to "what does `swapSplitV1` cost over 2 or 3 venues". Every
+number it prints is the `gasUsed` of a **real transaction receipt** — intrinsic
+cost and calldata included — executed against real router bytecode, a real
+ERC1967 proxy, the real SwapRouter02/QuoterV2, and the real propAMM venues. No
+mocks, and no `vm.store` lane patching.
+
+```bash
+RPC_URL=<mainnet rpc> python3 scripts/gas/split_gas.py           # stream, RPC fallback
+python3 scripts/gas/split_gas.py --source rpc                    # skip the stream
+python3 scripts/gas/split_gas.py --max-venues 6 --port 8600
+python3 scripts/gas/titan_overrides.py                           # just: what is Titan publishing now?
+```
+
+Writes `scripts/gas/split_gas_<runId>.csv` (one row per measured transaction) and
+emits `RESULT|…` lines for a harvester. Takes roughly 20 minutes.
+
+### Why this is not another forward-patched rig
+
+Earlier rigs in this repo made several venues quotable at one block by patching
+each venue's lane timestamp *forward* with `vm.store`. That keeps gas honest but
+makes prices meaningless — a stale price wearing a fresh timestamp. This tool
+instead consumes the **real** state Titan publishes for the block it is building
+(`wss://rpc.titanbuilder.xyz/ws/pamm_quote_stream`, or
+`titan_getPammStateOverrides`), the same data the SDKs attach to quote
+`eth_call`s. Gas *and* prices are honest in the same run.
+
+`eth_call` state overrides last one call, which is why `forge test` cannot use
+them. `titan_overrides.py` replays the identical diffs into an anvil fork with
+`anvil_setStorageAt` / `anvil_setBalance` / `anvil_setNonce`, making them ordinary
+fork state that real transactions execute against. Gas accounting is unchanged:
+EIP-2929 charges on access pattern, not on where a slot's value came from.
+
+### Three facts the rig depends on, all established empirically
+
+1. **Titan's `blockNumber` is head + 1** — the block it is *building*, which no
+   public node has yet, so forking at it fails outright. Fork at `blockNumber - 1`
+   and execute as `blockNumber`. This is what the SDKs mean by
+   `blockOverrides{number: N}` against `latest` state.
+2. **The timestamp pin is load-bearing.** Venues check `block.timestamp` against
+   the lane they published, so the fork is pinned to the slot's canonical time,
+   `1606824023 + slot * 12`. Without it Fermi does not merely go inactive — it
+   reverts with an arithmetic underflow inside its own staleness math.
+3. **A frozen clock is what makes a multi-transaction run possible.**
+   `anvil_setBlockTimestampInterval(0)` holds the timestamp across every later
+   block. anvil's default +1s per block expires the lanes partway through a run
+   and quietly turns a split measurement into a study of the Uniswap fallback.
+
+### Measurement discipline
+
+- `evm_snapshot` / `evm_revert` wrap **every** measurement, so each shape runs at
+  the same block, against the same clock, against venue inventory no earlier
+  measurement has drained. (A warm-up run consuming real venue inventory already
+  produced one wrong published number in this repo.)
+- Order size is held constant while venue count varies, so a per-venue marginal
+  means something. A delta is only quoted as a probe cost when the executed leg
+  shape `(propAMM legs, total legs)` is identical on both sides.
+- `Swapped` legs are split into propAMM legs and the coalesced Uniswap remainder
+  by the event's `marketMaker` field; conflating the two is a documented trap.
+
+### Lanes are size-specific — probe a ladder, not a point
+
+A venue quoting 10k USDC may revert at both 1k and 100k, so a single probe size
+understates how many venues are reachable. Step 5 sweeps every venue across the
+whole ladder and prints the matrix, and the measurement phase then whitelists
+"live venues first, padded from the stale ones", so `n=2/3/4` always exists and
+the `live_venue_count` column records how many of those `n` could actually quote
+that size. A whitelisted-but-stale venue still costs a probe — that is the point
+of `n`.
+
+> ⚠️ **Availability is the volatile input, not gas.** Which venues are live, and
+> up to what size, changes between blocks. Re-run the sweep before quoting any
+> economic conclusion; the gas figures are far more stable than the prices.
+
+> ⚠️ **The stream rate-limits reconnects** and answers `403` for a while after a
+> burst, so a single refusal means nothing. The fetcher retries with backoff and
+> `--source auto` falls back to the RPC twin, which returns every pAMM at once.
