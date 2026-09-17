@@ -294,4 +294,12 @@ interface IPropAMMRouter {
         uint256 deadline,
         FrontendFee calldata fee
     ) external payable returns (uint256 amountOut);
+
+    /// @notice False once the whitelist has outgrown `MAX_SPLIT_VENUES`, i.e.
+    /// once `swapSplitV1` / `swapSplitWithFeeV1` would revert `TooManyVenues`.
+    /// Every other entrypoint is unaffected. Check this before calling
+    /// `addVenue` if splitting must stay available.
+    /// @return True if the whitelist is small enough for `swapSplitV1` /
+    /// `swapSplitWithFeeV1` to plan over it.
+    function isSplitAvailable() external view returns (bool);
 }

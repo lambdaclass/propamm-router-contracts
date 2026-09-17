@@ -491,8 +491,7 @@ contract PropAMMRouter is
         uint256 minOut;
     }
 
-    /// @notice False once the whitelist has outgrown `MAX_SPLIT_VENUES`, i.e.
-    /// once `swapSplitV1` reverts. Every other entrypoint is unaffected.
+    /// @inheritdoc IPropAMMRouter
     function isSplitAvailable() external view returns (bool) {
         return whitelistedVenueCount() <= MAX_SPLIT_VENUES;
     }
