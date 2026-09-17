@@ -54,8 +54,16 @@ export interface OverridesSource {
   close?(): void;
 }
 
-export const DEFAULT_OVERRIDES_RPC_URL = "https://rpc.titanbuilder.xyz";
-export const DEFAULT_OVERRIDES_WS_URL = "wss://rpc.titanbuilder.xyz/ws/pamm_quote_stream";
+/**
+ * Default state-override endpoint. Served from regional hosts (`eu.`, `ap.`,
+ * `us.`); override the URL to pick the nearest.
+ */
+export const DEFAULT_OVERRIDES_RPC_URL = "https://eu.data.titanbuilder.xyz";
+/**
+ * Default state-override stream endpoint. Served from regional hosts (`eu.`,
+ * `ap.`, `us.`); override the URL to pick the nearest.
+ */
+export const DEFAULT_OVERRIDES_WS_URL = "wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream";
 
 /**
  * Bebop prices from a single registry slot. When a snapshot carries no Bebop

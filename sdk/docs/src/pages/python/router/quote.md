@@ -87,10 +87,10 @@ from propamm import QuoteOptions
 from propamm.overrides import OverridesRpcSource, OverridesWsSource
 
 # a streaming WebSocket source…
-overrides = OverridesWsSource(url="wss://rpc.titanbuilder.xyz/ws/pamm_quote_stream")
+overrides = OverridesWsSource(url="wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream")
 
 # …or a fetch-on-demand JSON-RPC source:
-overrides = OverridesRpcSource(url="https://rpc.titanbuilder.xyz")
+overrides = OverridesRpcSource(url="https://eu.data.titanbuilder.xyz")
 
 quote = await router.quote(
     ETH_SENTINEL, USDC, parse_ether("1"), QuoteOptions(overrides=overrides)

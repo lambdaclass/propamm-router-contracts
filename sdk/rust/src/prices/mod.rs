@@ -43,10 +43,12 @@ use crate::common::helpers::parse_address;
 use crate::error::{Error, Result};
 use crate::ws::{WsConnection, WsHandler};
 
-pub const DEFAULT_PRICE_LEVELS_RPC_URL: &str = "https://rpc.titanbuilder.xyz";
+/// Default price-levels endpoint. Served from regional hosts (`eu.`, `ap.`,
+/// `us.`); override the URL to pick the nearest.
+pub const DEFAULT_PRICE_LEVELS_RPC_URL: &str = "https://eu.data.titanbuilder.xyz";
 /// Default price-levels stream endpoint. The stream is served from regional
 /// hosts (`eu.`, `ap.`, `us.`); override the URL to pick the nearest.
-pub const DEFAULT_PRICE_LEVELS_WS_URL: &str = "wss://eu.rpc.titanbuilder.xyz/ws/pamm_price_levels";
+pub const DEFAULT_PRICE_LEVELS_WS_URL: &str = "wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels";
 
 /// Whether a rung came from an EVM simulation or a spline interpolation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

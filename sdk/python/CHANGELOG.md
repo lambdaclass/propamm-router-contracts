@@ -2,6 +2,24 @@
 
 All notable changes to the Python SDK (`propamm`) are documented here.
 
+## [1.4.0] - 2026-09-16
+
+### Changed
+
+- **Titan moved the state-override and price-level endpoints to dedicated
+  infrastructure.** Every default now points at `eu.data.titanbuilder.xyz`
+  instead of `rpc.titanbuilder.xyz`:
+  - `DEFAULT_OVERRIDES_RPC_URL` — `https://eu.data.titanbuilder.xyz`
+  - `DEFAULT_OVERRIDES_WS_URL` — `wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream`
+  - `DEFAULT_PRICE_LEVELS_RPC_URL` — `https://eu.data.titanbuilder.xyz`
+  - `DEFAULT_PRICE_LEVELS_WS_URL` — `wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels`
+
+  Titan serves the same data from `eu.`, `ap.` and `us.` hosts; the old `rpc.`
+  hosts still respond but are deprecated. Callers that pass an explicit URL are
+  unaffected — update it to the matching `*.data.titanbuilder.xyz` host. Callers
+  on the defaults outside the EU should now set the URL explicitly, since the
+  previous non-regional default has no `data.` equivalent.
+
 ## [1.3.0] - 2026-09-07
 
 ### Added

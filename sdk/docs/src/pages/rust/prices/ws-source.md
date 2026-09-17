@@ -11,7 +11,7 @@ use propamm::prices::{PriceLevels, PriceLevelsWsSource, PriceLevelsWsSourceConfi
 use std::sync::Arc;
 
 let source = PriceLevelsWsSource::new(PriceLevelsWsSourceConfig {
-    url: "wss://eu.rpc.titanbuilder.xyz/ws/pamm_price_levels".into(),
+    url: "wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels".into(),
     ..Default::default()
 });
 let prices = PriceLevels::with_source(Arc::new(source));
@@ -70,7 +70,7 @@ pub struct PriceLevelsWsSourceConfig {
 
 ### url
 
-- **Default:** `wss://eu.rpc.titanbuilder.xyz/ws/pamm_price_levels`
+- **Default:** `wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels`
 
 Stream endpoint. The stream is served from regional hosts (`eu.`, `ap.`,
 `us.`); pick the nearest.

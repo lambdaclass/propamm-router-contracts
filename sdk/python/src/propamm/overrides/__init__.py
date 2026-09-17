@@ -32,8 +32,12 @@ from ..common.pamms import BEBOP
 from ..error import OverridesError, TimeoutError
 from eth_utils import to_checksum_address
 
-DEFAULT_OVERRIDES_RPC_URL = "https://rpc.titanbuilder.xyz"
-DEFAULT_OVERRIDES_WS_URL = "wss://rpc.titanbuilder.xyz/ws/pamm_quote_stream"
+#: Default state-override endpoint. Served from regional hosts (``eu.``,
+#: ``ap.``, ``us.``); override the URL to pick the nearest.
+DEFAULT_OVERRIDES_RPC_URL = "https://eu.data.titanbuilder.xyz"
+#: Default state-override stream endpoint. Served from regional hosts (``eu.``,
+#: ``ap.``, ``us.``); override the URL to pick the nearest.
+DEFAULT_OVERRIDES_WS_URL = "wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream"
 
 
 #: Bebop prices from a single registry slot. When a snapshot carries no Bebop

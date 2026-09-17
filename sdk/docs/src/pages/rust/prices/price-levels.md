@@ -18,7 +18,7 @@ let snapshot = prices.get_price_levels().await?;
 // live stream
 let prices = PriceLevels::with_source(Arc::new(PriceLevelsWsSource::new(
     PriceLevelsWsSourceConfig {
-        url: "wss://eu.rpc.titanbuilder.xyz/ws/pamm_price_levels".into(),
+        url: "wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels".into(),
         ..Default::default()
     },
 )));
@@ -64,10 +64,10 @@ use std::sync::Arc;
 
 let prices = PriceLevels::with_source_and_rpc_url(
     Arc::new(PriceLevelsWsSource::new(PriceLevelsWsSourceConfig {
-        url: "wss://us.rpc.titanbuilder.xyz/ws/pamm_price_levels".into(),
+        url: "wss://us.data.titanbuilder.xyz/ws/pamm_price_levels".into(),
         ..Default::default()
     })),
-    "https://us.rpc.titanbuilder.xyz",
+    "https://us.data.titanbuilder.xyz",
 );
 ```
 

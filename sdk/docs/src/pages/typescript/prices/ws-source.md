@@ -14,7 +14,7 @@ new PriceLevelsWsSource(options?: PriceLevelsWsSourceOptions)
 import { PriceLevels, PriceLevelsWsSource } from "propamm/prices";
 
 const prices = new PriceLevels({
-  source: new PriceLevelsWsSource({ url: "wss://eu.rpc.titanbuilder.xyz/ws/pamm_price_levels" }),
+  source: new PriceLevelsWsSource({ url: "wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels" }),
 });
 const snapshot = await prices.getPriceLevels();
 prices.close(); // optional — idle timeout handles cleanup
@@ -47,7 +47,7 @@ handles that.
 ### url (optional)
 
 - **Type:** `string`
-- **Default:** `wss://eu.rpc.titanbuilder.xyz/ws/pamm_price_levels`
+- **Default:** `wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels`
 
 Stream endpoint. The stream is served from regional hosts (`eu.`, `ap.`,
 `us.`); pick the nearest.
