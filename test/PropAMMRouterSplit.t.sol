@@ -18,8 +18,11 @@ import {MockCappedPropAMM} from "./mocks/MockCappedPropAMM.sol";
 import {MockSaturatingPropAMM} from "./mocks/MockSaturatingPropAMM.sol";
 import {MockPropAMM} from "./mocks/MockPropAMM.sol";
 import {MockFillablePropAMM} from "./mocks/MockFillablePropAMM.sol";
+import {MockMalformedFillable} from "./mocks/MockMalformedFillable.sol";
 import {MockConcaveUniswap} from "./mocks/MockConcaveUniswap.sol";
 import {MockThievingQuoteVenue} from "./mocks/MockThievingQuoteVenue.sol";
+import {MockStepFallback} from "./mocks/MockStepFallback.sol";
+import {MockCappedWethPropAMM} from "./mocks/MockCappedWethPropAMM.sol";
 import {MockDonatingQuoteVenue} from "./mocks/MockDonatingQuoteVenue.sol";
 import {IPropAMMFillable} from "../src/interfaces/IPropAMMFillable.sol";
 import {ETH_SENTINEL, WETH} from "../src/libraries/Constants.sol";
@@ -506,6 +509,43 @@ contract PropAMMRouterSplitTest is Test {
     function test_split_extensionRevertYieldsNoCandidate() public {
         MockFillablePropAMM venue = new MockFillablePropAMM();
         venue.setRevertOnQuoteFillable(true);
+        router.addVenue(address(venue));
+
+        _fund(1000e18);
+        uni.setAmountOut(990e18);
+
+        vm.prank(user);
+        uint256 out = router.swapSplitV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1);
+        assertEq(out, 990e18);
+    }
+
+    /// @dev A whitelisted venue truthfully advertises `IPropAMMFillable` but
+    /// `quoteFillable` returns 32 bytes on success instead of the 64 the
+    /// interface promises — modeling a proxy whose implementation was
+    /// swapped or unset. Solidity's `try/catch` only catches a revert INSIDE
+    /// the callee; decoding malformed-but-successful returndata happens in
+    /// the CALLER's frame and is NOT caught there. Without routing the decode
+    /// through a self-call (`_quoteFillableUnchecked`), this reverts the
+    /// whole split for every caller rather than merely declining this one
+    /// venue. The split must still succeed, routing wholly to Uniswap.
+    function test_split_extensionMalformedReturndataIsDiscarded() public {
+        MockMalformedFillable venue = new MockMalformedFillable();
+        router.addVenue(address(venue));
+
+        _fund(1000e18);
+        uni.setAmountOut(990e18);
+
+        vm.prank(user);
+        uint256 out = router.swapSplitV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1);
+        assertEq(out, 990e18);
+    }
+
+    /// @dev Same as above, but `quoteFillable` returns 0 bytes on success —
+    /// what an unset/empty proxy implementation returns. Covers the other
+    /// malformed-length extreme.
+    function test_split_extensionEmptyReturndataIsDiscarded() public {
+        MockMalformedFillable venue = new MockMalformedFillable();
+        venue.setReturnEmpty(true);
         router.addVenue(address(venue));
 
         _fund(1000e18);

@@ -775,6 +775,30 @@ contract PropAMMRouter is
         }
     }
 
+    /// @dev Puts the decode of `IPropAMMFillable.quoteFillable`'s returndata
+    /// inside a frame `_probeVenue`'s `try/catch` can absorb. Solidity's
+    /// `try/catch` only catches a revert INSIDE the callee; when the callee's
+    /// call itself succeeds but returns data that doesn't fit the expected
+    /// `(uint256, uint256)` shape, the ABI decode happens in the CALLER's own
+    /// frame and is NOT caught by that `try/catch`. A venue whose
+    /// `supportsInterface` truthfully answers `true` but whose
+    /// `quoteFillable` returns malformed data on success — e.g. a proxy whose
+    /// implementation was swapped or unset, which returns empty data
+    /// successfully — would otherwise revert `_probeVenue` with nothing
+    /// between there and `swapSplitV1`/`swapSplitWithFeeV1` to catch it,
+    /// bricking the split for every caller until governance de-lists it.
+    /// Exists for exactly the reason `_tryQuote` does for the blind-probe
+    /// path; the discard policy (`fillable > amountIn`) stays in
+    /// `_probeVenue`'s `try` arm, not here — this wrapper only relays the
+    /// venue's raw return, it does not decide candidate policy.
+    function _quoteFillableUnchecked(address venue, address tokenIn_, address tokenOut_, uint256 amountIn)
+        external
+        returns (uint256 fillable, uint256 amountOut_)
+    {
+        require(msg.sender == address(this), OnlySelf());
+        return IPropAMMFillable(venue).quoteFillable(tokenIn_, tokenOut_, amountIn);
+    }
+
     /// @dev Two-point probe for one venue at `p = amountIn` and `p/2`.
     /// Failure legend: a reverting, zero, or oversized quote at a point is a
     /// dead point; both dead → no candidate; one alive → that point; both alive
@@ -799,7 +823,7 @@ contract PropAMMRouter is
         if (!_isVenue(venue)) return (0, 0);
 
         if (ERC165Checker.supportsInterface(venue, type(IPropAMMFillable).interfaceId)) {
-            try IPropAMMFillable(venue).quoteFillable(tokenIn_, tokenOut_, amountIn) returns (
+            try this._quoteFillableUnchecked(venue, tokenIn_, tokenOut_, amountIn) returns (
                 uint256 fillable, uint256 amountOut_
             ) {
                 // A venue reporting more than it was offered has broken this
