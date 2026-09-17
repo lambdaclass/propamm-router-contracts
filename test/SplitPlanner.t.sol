@@ -32,6 +32,15 @@ contract SplitPlannerTest is Test {
         assertTrue(SplitPlanner.isSaturated(197e18, 100e18));
     }
 
+    /// @dev Pins the exact τ boundary: 198e18 == 2*100e18*(10000-100)/10000,
+    /// so the predicate's strict `<` must NOT fire. Neither 199e18 (inside
+    /// the band) nor 197e18 (past it) exercises this — both sit strictly on
+    /// one side, so flipping `<` to `<=` in `isSaturated` would survive them
+    /// but must fail here.
+    function test_isSaturated_exactTauBoundaryIsNotSaturated() public pure {
+        assertFalse(SplitPlanner.isSaturated(198e18, 100e18));
+    }
+
     // --- betterThan / sortByRateDesc ----------------------------------------
 
     function test_betterThan_higherRateWins() public pure {
