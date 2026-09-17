@@ -906,7 +906,24 @@ contract PropAMMRouter is
             }
             if (dup) continue;
 
+            // If an admin ever whitelists the fallback address itself, it must
+            // not become a candidate: `_waterfall` quotes it at the much
+            // smaller `refSize` as the REFERENCE, so a full-size probe of the
+            // same venue is essentially always "contested" against its own
+            // reference and, once ranked, triggers the one-shot refinement's
+            // `break` — silently truncating every candidate ranked below it.
+            if (venueSet[i] == fallbackSwapRouter) continue;
+
             (uint256 fill, uint256 out) = _probeVenue(venueSet[i], tokenIn_, tokenOut_, amountIn);
+            // NOT redundant with the clamps inside `_probeVenue`: those sit on
+            // the BLIND-probe path only (after `outFull`, after `outHalf`, and
+            // inside `_probeDownToFillable`). The `IPropAMMFillable` EXTENSION
+            // branch returns `amountOut_` completely unclamped — it only
+            // checks `fillable > amountIn` — so for an extension venue, this
+            // filter is the ONLY bound on a venue-supplied `out`. Removing it
+            // lets a venue reporting `type(uint256).max` reach
+            // `SplitPlanner.betterThan`, where `a.out * b.fill` overflow-reverts
+            // the whole split.
             if (fill == 0 || out == 0 || out > type(uint128).max) continue;
             tmp[count++] = SplitPlanner.Candidate({venue: venueSet[i], fill: fill, out: out});
         }

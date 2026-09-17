@@ -569,6 +569,61 @@ contract PropAMMRouterSplitTest is Test {
         r = PropAMMRouter(payable(address(proxy)));
     }
 
+    /// @dev Builds a router wired against a `MockStepFallback` as BOTH the
+    /// fallback swap router and the fallback quoter.
+    function _stepRouter() internal returns (PropAMMRouter r, MockStepFallback s) {
+        s = new MockStepFallback();
+        PropAMMRouter impl = new PropAMMRouter();
+        bytes memory initData = abi.encodeCall(PropAMMRouter.initialize, (address(s), address(s), address(manager)));
+        ERC1967Proxy proxy = new ERC1967Proxy(address(impl), initData);
+        r = PropAMMRouter(payable(address(proxy)));
+    }
+
+    /// @dev If an admin ever whitelists `fallbackSwapRouter` itself as a
+    /// venue, `_gatherCandidates` must exclude it rather than let it become a
+    /// candidate: `_waterfall`'s Uniswap reference is quoted through the SAME
+    /// address, so a fallback-as-venue candidate is (per `MockStepFallback`'s
+    /// class doc) essentially always "contested" against that reference —
+    /// and if it ranks ahead of a genuinely better propAMM candidate, it
+    /// burns the ONE-SHOT reference refinement on itself and `break`s,
+    /// discarding every candidate ranked after it, INCLUDING ones that would
+    /// have cleared the reference on their own. `venueA` ranks first (clearly
+    /// beats the reference, always admitted); the whitelisted fallback ranks
+    /// second; `venueZ` ranks third and is exactly the sort of legitimate,
+    /// reference-beating candidate this bug silently drops. The assertion
+    /// checks `venueZ` was actually dispatched its leg (received `tin`),
+    /// which only happens if it survived to get a `Leg` in `_waterfall`.
+    function test_split_fallbackWhitelistedAsVenueDoesNotTruncateOtherLegs() public {
+        (PropAMMRouter r, MockStepFallback s) = _stepRouter();
+
+        MockFillablePropAMM venueA = new MockFillablePropAMM();
+        venueA.setFillable(300e18);
+        venueA.setOut(315e18); // rate 1.05
+        venueA.setAmountOut(315e18);
+        r.addVenue(address(venueA));
+
+        MockFillablePropAMM venueZ = new MockFillablePropAMM();
+        venueZ.setFillable(150e18);
+        venueZ.setOut(142.5e18); // rate 0.95
+        venueZ.setAmountOut(142.5e18);
+        r.addVenue(address(venueZ));
+
+        // The misconfiguration under test: the fallback itself, whitelisted.
+        r.addVenue(address(s));
+
+        tin.mint(user, 1000e18);
+        vm.prank(user);
+        tin.approve(address(r), 1000e18);
+
+        vm.prank(user);
+        r.swapSplitV1(address(tin), address(tout), 1000e18, 0, recipient, block.timestamp + 1);
+
+        // venueZ only receives `tin` if `_waterfall` actually placed a leg for
+        // it — the very thing the fallback-as-candidate's spurious `break`
+        // would otherwise have discarded.
+        assertEq(tin.balanceOf(address(venueZ)), 150e18);
+    }
+
     /// @dev A venue priced BELOW the Uniswap reference is cut off and gets no
     /// leg, even though it quoted successfully.
     function test_split_belowMarketVenueIsCutOff() public {
