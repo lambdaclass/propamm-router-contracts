@@ -32,7 +32,7 @@ tools shell out to Foundry's `cast` (and `solc` for one helper).
 | `ETH_RPC_URL` | the gas tools | **archive** node with `debug_traceTransaction` + state overrides (e.g. `ethereum-rpc.publicnode.com`) |
 | `ETH_RPC_URL` + `PK` | `execute_swaps.sh` | any mainnet RPC that accepts `eth_sendRawTransaction`; `PK` is a **funded** sender — these are real txs that cost gas |
 | `RPC_URL` | `gas/split_gas.py` | any mainnet RPC (**not** archive — it forks one block back); `anvil` and `forge` must be on `PATH` |
-| Network access to `rpc.titanbuilder.xyz` | `gas/split_gas.py`, `gas/titan_overrides.py` | pAMM state overrides, over WebSocket or JSON-RPC |
+| Network access to `eu.data.titanbuilder.xyz` | `gas/split_gas.py`, `gas/titan_overrides.py` | pAMM state overrides, over WebSocket or JSON-RPC |
 
 Quick capability check for the RPC:
 
@@ -290,7 +290,7 @@ Earlier rigs in this repo made several venues quotable at one block by patching
 each venue's lane timestamp *forward* with `vm.store`. That keeps gas honest but
 makes prices meaningless — a stale price wearing a fresh timestamp. This tool
 instead consumes the **real** state Titan publishes for the block it is building
-(`wss://rpc.titanbuilder.xyz/ws/pamm_quote_stream`, or
+(`wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream`, or
 `titan_getPammStateOverrides`), the same data the SDKs attach to quote
 `eth_call`s. Gas *and* prices are honest in the same run.
 

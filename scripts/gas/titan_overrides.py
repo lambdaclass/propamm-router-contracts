@@ -4,10 +4,10 @@ The propAMMs price off-chain liquidity that mainnet state does not reflect, so a
 plain `eth_call` against committed state sees stale lanes and most venues revert.
 Titan publishes the missing state two ways, both consumed here:
 
-  * a WebSocket stream, `wss://rpc.titanbuilder.xyz/ws/pamm_quote_stream`, one
-    frame per pAMM update;
-  * a pull-based twin, `titan_getPammStateOverrides` on `https://rpc.titanbuilder.xyz`,
-    which returns every pAMM in a single payload.
+  * a WebSocket stream, `wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream`,
+    one frame per pAMM update;
+  * a pull-based twin, `titan_getPammStateOverrides` on
+    `https://eu.data.titanbuilder.xyz`, which returns every pAMM in one payload.
 
 Both share one shape -- top-level metadata plus one entry per pAMM::
 
@@ -53,8 +53,11 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any
 
-DEFAULT_OVERRIDES_RPC_URL = "https://rpc.titanbuilder.xyz"
-DEFAULT_OVERRIDES_WS_URL = "wss://rpc.titanbuilder.xyz/ws/pamm_quote_stream"
+#: Served from regional hosts (``eu.``, ``ap.``, ``us.``); pass a different URL
+#: to pick the nearest. Kept in step with the SDKs' own defaults --
+#: `sdk/python/src/propamm/overrides/__init__.py`, and its TS/Rust mirrors.
+DEFAULT_OVERRIDES_RPC_URL = "https://eu.data.titanbuilder.xyz"
+DEFAULT_OVERRIDES_WS_URL = "wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream"
 
 #: Mainnet beacon-chain genesis time and slot length. A block's canonical
 #: timestamp is `genesis + slot * 12`. Mirrors `sdk/python/src/propamm/overrides`.
