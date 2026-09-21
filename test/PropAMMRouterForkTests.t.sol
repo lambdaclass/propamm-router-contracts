@@ -26,15 +26,6 @@ contract PropAMMRouterForkTests is Test {
 
     /// @dev The Kipseli PAMM whitelisted (via `addVenue`) on the live demo router.
     address constant NEW_KIPSELI_PAMM = 0x71e790dd841c8A9061487cb3E78C288E75cE0B3d;
-    address constant NEW_FERMI_ROUTER = 0x5979458912F80B96d30D4220af8E2e4925A33320;
-    /// @dev Fermi's live pricing contract: the account that calls `getState`
-    /// while quoting, which is what scopes the registry lane. Fermi rotates
-    /// it when it redeploys; see `_updateFermiPrice` for how to refresh it.
-    address constant FERMI_PRICER = 0x5B56042558012d21Fd3578C8b1d4519196517241;
-    /// @dev The inventory account `NEW_FERMI_ROUTER` pays tokenOut from, via
-    /// `transferFrom`. Found as the `from` of that call inside Fermi's `swap`
-    /// in `forge test -vvvv`.
-    address constant FERMI_VAULT = 0x585d44727129B9C69791B10238Ca605932938B4F;
 
     /// @dev Block of mainnet tx
     /// 0x7c3cb5e32867d724a51cbaede51c165454cbc59324511ff3470b983acaa705f0, a
@@ -89,41 +80,6 @@ contract PropAMMRouterForkTests is Test {
         _runSwapViaVenueV1(NEW_KIPSELI_PAMM);
     }
 
-    /// @dev Calls the `swapViaVenueV1` function passing Fermi as venue,
-    /// and asserts the swap was actually executed by Fermi (didn't fallback to Uniswap).
-    /// It updates the price before sending the swap transaction.
-    ///
-    /// SKIPS rather than fails when Fermi cannot quote at the fork block. This
-    /// test runs against the LIVE venue at the latest block, and whether Fermi
-    /// prices a given pair is its own operational state, not a property of this
-    /// repo. The rig already restores the two pieces it can (`_updateFermiPrice`
-    /// republishes the price lane, `_approveFermiVault` restores the vault
-    /// allowance), but everything else about Fermi is whatever mainnet says at
-    /// the moment CI runs, and its quote path has reverted with a different
-    /// reason on each occasion: `fj(` (2026-08-14), `SP` (2026-09-16 onward),
-    /// plus a settle-side `Too little received` (2026-09-07) that the vault
-    /// allowance now covers. A red X for any of those means "Fermi is not
-    /// quoting today", which is indistinguishable from market movement and tells
-    /// a reviewer nothing about the change under review.
-    ///
-    /// The gate is deliberately narrow: it skips ONLY when the venue cannot
-    /// produce a quote at all. Once Fermi quotes, every assertion below runs for
-    /// real, including that the swap settled through Fermi and did not fall back
-    /// to Uniswap, so a genuine routing regression still fails. A venue that
-    /// quotes but then fails to settle is also still a red X, deliberately:
-    /// that is the case worth surfacing.
-    function test_swapViaVenueV1Fermi() public {
-        _updateFermiPrice();
-        _approveFermiVault();
-
-        if (!_isQuotable(NEW_FERMI_ROUTER)) {
-            emit log_named_address("skipping: venue not quotable at this block", NEW_FERMI_ROUTER);
-            vm.skip(true);
-        }
-
-        _runSwapViaVenueV1(NEW_FERMI_ROUTER);
-    }
-
     /// @dev Calls the `swapViaVenueV1` function passing Uniswap (fallback) as venue.
     function test_swapViaVenueV1Fallback() public {
         _runSwapViaVenueV1(UNISWAP_ROUTER_02);
@@ -154,52 +110,6 @@ contract PropAMMRouterForkTests is Test {
         _updateRegistryState(priceTarget, laneIndex, slots);
     }
 
-    /// @dev Republishes Fermi's pricing lane in the `PrioUpdateRegistry`,
-    /// mirroring the mainnet updater transaction so the venue can quote and
-    /// settle the swap. Same flow as `_updateNewKipseliPrice`: authorize this
-    /// test contract as the lane's updater (pranked as the lane target), then
-    /// write the target, lane, and single price slot the real transaction used.
-    /// The update timestamp is set to the current fork block time so it lands
-    /// inside the registry's freshness window regardless of the fork block.
-    function _updateFermiPrice() internal {
-        // Lane and price slot taken from the mainnet updater tx
-        // 0x774c15474849b646ae2feab49379c7b178c1a32b4944e04aef842bb6823c6146.
-        // Unlike Kipseli's lane 0, the lane index is a full 32-byte key.
-        //
-        // `priceTarget` is Fermi's live pricing contract — the account that
-        // calls `getState` while quoting, which is what scopes the lane. It is
-        // NOT the target from the tx above: Fermi rotates this contract when it
-        // redeploys, and publishing to a rotated-out target leaves the lane the
-        // venue actually reads empty, so `getState` reverts with `0x666a2814`
-        // and the whole quote fails. When that happens, refresh this address
-        // from the `getState` caller in `forge test -vvvv`.
-        address priceTarget = FERMI_PRICER;
-        uint256 laneIndex = 0x2eec03b8999af9793df60f1395a1b41c29e22b324ea3200ca21bc692979b9d46;
-        // Single packed price slot; replayed verbatim, the timestamp is
-        // restamped to fork time in `_updateRegistryState`.
-        uint256 priceSlot0 = 0x0000000000000000000000000000000000000000000000000000002779853ea0;
-
-        uint256[] memory slots = new uint256[](1);
-        slots[0] = priceSlot0;
-        _updateRegistryState(priceTarget, laneIndex, slots);
-    }
-
-    /// @dev Grants `NEW_FERMI_ROUTER` a max WETH allowance from `FERMI_VAULT`.
-    ///
-    /// Fermi settles a swap by `transferFrom`-ing tokenOut out of the vault to
-    /// the recipient, so its router needs the vault's allowance. On
-    /// mainnet the vault currently has it at zero (Fermi is not publishing
-    /// prices either, so the venue is idle), which makes Fermi's `swap`
-    /// revert; the router then falls back to Uniswap V3, whose output is below
-    /// the replayed Fermi quote, and the swap dies with "Too little received".
-    /// The test wants to exercise the router's propAMM dispatch, not Fermi's
-    /// operational state, so the allowance is restored in the fork the same
-    /// way the price lane is republished above. The vault does hold the WETH.
-    function _approveFermiVault() internal {
-        vm.prank(FERMI_VAULT);
-        IERC20(WETH).approve(NEW_FERMI_ROUTER, type(uint256).max);
-    }
-
     function _updateRegistryState(address target, uint256 laneIndex, uint256[] memory slots) internal {
         IPrioUpdateRegistry registry = IPrioUpdateRegistry(PRIO_UPDATE_REGISTRY);
 
@@ -227,25 +137,6 @@ contract PropAMMRouterForkTests is Test {
         vm.store(token, slot, bytes32(type(uint256).max));
 
         assertEq(IERC20(token).allowance(owner, spender), type(uint256).max, "allowance set failed");
-    }
-
-    /// @dev True when `venue` can price `AMOUNT_IN` USDC into WETH right now.
-    ///
-    /// Used to tell "this venue is idle at this block" apart from "the router is
-    /// broken". A live propAMM answers a quote only while its market maker is
-    /// publishing prices and holds inventory for the pair, and it signals the
-    /// absence either by reverting (the venue's own revert bubbles through
-    /// `quoteVenueV1`) or by quoting zero. Both are caught here, so callers can
-    /// skip the lane instead of failing the suite.
-    ///
-    /// The call is wrapped in `try`/`catch` because `quoteVenueV1` has no
-    /// zero-on-failure mode: it surfaces the venue's revert to the caller.
-    function _isQuotable(address venue) internal returns (bool) {
-        try router.quoteVenueV1(venue, USDC, WETH, AMOUNT_IN) returns (uint256 amountOut, address) {
-            return amountOut > 0;
-        } catch {
-            return false;
-        }
     }
 
     /// @dev Calls the `swapViaVenueV1` function, passing the given venue.
