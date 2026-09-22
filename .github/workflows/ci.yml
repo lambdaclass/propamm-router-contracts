@@ -27,10 +27,16 @@ jobs:
       - name: Check formatting
         run: forge fmt --check
 
+      # Fork suites are deliberately OFF the PR gate. They read live propAMM
+      # state, and most lanes are stale at any given block, so a red X here
+      # would mean "the market moved", not "you broke something". They run
+      # daily instead -- see fork-tests.yml.
+      #
+      # Both halves matter: `ForkGate` runs a suite only when RPC_URL is set,
+      # so leaving it unset is the primary guard and `--no-match-path` is the
+      # backstop for any suite that reaches the network another way.
       - name: Run tests
-        env:
-          RPC_URL: https://ethereum-rpc.publicnode.com
-        run: forge test
+        run: forge test --no-match-path '*Fork*'
 
   sdk:
     name: SDK (typecheck / lint / format)
