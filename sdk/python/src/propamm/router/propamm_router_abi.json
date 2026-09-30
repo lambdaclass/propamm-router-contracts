@@ -10,6 +10,32 @@
   },
   {
     "type": "function",
+    "name": "MAX_LEGS",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "MAX_SPLIT_VENUES",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "UPGRADE_INTERFACE_VERSION",
     "inputs": [],
     "outputs": [
@@ -74,6 +100,45 @@
     "outputs": [
       {
         "name": "amountOut",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "_quoteFillableUnchecked",
+    "inputs": [
+      {
+        "name": "venue",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "tokenIn_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "tokenOut_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amountIn",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "fillable",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "amountOut_",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -248,6 +313,19 @@
         "name": "",
         "type": "bytes4",
         "internalType": "bytes4"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isSplitAvailable",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
       }
     ],
     "stateMutability": "view"
@@ -573,6 +651,111 @@
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "swapSplitV1",
+    "inputs": [
+      {
+        "name": "tokenIn",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "tokenOut",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amountIn",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "amountOutMin",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "recipient",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "deadline",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "amountOut",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "swapSplitWithFeeV1",
+    "inputs": [
+      {
+        "name": "tokenIn",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "tokenOut",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amountIn",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "amountOutMin",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "recipient",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "deadline",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "fee",
+        "type": "tuple",
+        "internalType": "struct IPropAMMRouter.FrontendFee",
+        "components": [
+          {
+            "name": "bps",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "recipient",
+            "type": "address",
+            "internalType": "address"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "amountOut",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "payable"
   },
   {
     "type": "function",
@@ -1326,6 +1509,17 @@
   },
   {
     "type": "error",
+    "name": "AmountTooLarge",
+    "inputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "ArrayLengthMismatch",
     "inputs": []
   },
@@ -1456,6 +1650,11 @@
   },
   {
     "type": "error",
+    "name": "QuoteBalanceInvariantViolated",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "ReentrancyGuardReentrantCall",
     "inputs": []
   },
@@ -1467,6 +1666,33 @@
         "name": "token",
         "type": "address",
         "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "SplitAllocationMismatch",
+    "inputs": [
+      {
+        "name": "amountIn",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "allocated",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TooManyVenues",
+    "inputs": [
+      {
+        "name": "count",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ]
   },
@@ -1521,6 +1747,11 @@
   {
     "type": "error",
     "name": "ZeroAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ZeroAmount",
     "inputs": []
   }
 ]

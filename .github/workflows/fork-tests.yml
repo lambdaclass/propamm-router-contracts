@@ -1,0 +1,60 @@
+name: Fork tests
+
+# Live-venue coverage, kept OFF the PR gate on purpose.
+#
+# These suites read real propAMM state at whatever block the runner lands on.
+# Most lanes are stale at any given block, so a failure here usually means the
+# market moved rather than that someone broke the router -- which is exactly
+# why it must not gate a pull request. It runs on a schedule instead, where a
+# red run is a prompt to look rather than a block on merging.
+#
+# `ci.yml` is the PR gate and excludes everything matching `*Fork*`.
+
+on:
+  schedule:
+    # 05:17 UTC daily. Off the hour, because the top of the hour is when
+    # GitHub's scheduler is most congested and jobs get delayed the longest.
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: fork-tests
+  # Never cancel a run in flight: these are slow and hit a rate-limited RPC,
+  # and a half-finished run tells you nothing.
+  cancel-in-progress: false
+
+jobs:
+  fork-tests:
+    name: Fork tests (live mainnet)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      # `ForkGate` SKIPS a suite when RPC_URL is empty rather than failing, so
+      # a missing secret would make this job pass having run nothing at all --
+      # green with zero coverage, which is worse than red. Fail loudly instead.
+      - name: Require an RPC endpoint
+        env:
+          MAINNET_RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
+        run: |
+          if [ -z "$MAINNET_RPC_URL" ]; then
+            echo "::error::secrets.MAINNET_RPC_URL is not set. Fork tests would skip silently and report success, so this job fails instead."
+            exit 1
+          fi
+
+      # Selects test/PropAMMRouterForkTests.t.sol and
+      # test/PropAMMRouterSplitFork.t.sol. Only RPC_URL is set, so any suite
+      # gated on ARCHIVE_RPC_URL instead skips by design -- those want a true
+      # archive node and run for hours, so they need their own workflow and a
+      # far longer timeout rather than a place in this one.
+      #
+      # -vv surfaces the `RESULT|<key>|<value>` lines the fork suites emit.
+      - name: Run fork tests
+        env:
+          RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
+        run: forge test --match-path 'test/*Fork*.t.sol' -vv

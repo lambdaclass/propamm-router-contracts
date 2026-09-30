@@ -46,3 +46,26 @@ error UnexpectedETHSender();
 /// @notice Thrown when a swap's input and output resolve to the same token
 /// (including `ETH_SENTINEL` against `WETH`), which no venue can fill.
 error IdenticalTokens();
+
+/// @notice Thrown when an amount that must be non-zero is zero.
+error ZeroAmount();
+/// @notice Thrown when `swapSplitV1`'s `amountIn` exceeds `type(uint128).max`,
+/// the bound that keeps the planner's cross-multiplied rate comparisons
+/// overflow-free.
+error AmountTooLarge(uint256 amount);
+/// @notice Thrown when the whitelist has grown past `MAX_SPLIT_VENUES`. Silent
+/// truncation is not an option: `EnumerableSet` ordering is unstable across
+/// removals, so probing "the first twelve" would be nondeterministic.
+error TooManyVenues(uint256 count);
+/// @notice Thrown when the router's `tokenIn` balance FELL during the split's
+/// quote phase — some venue's quote consumed in-flight user funds (R1).
+error QuoteBalanceInvariantViolated();
+/// @notice Thrown when `_executeLegs` is handed a plan whose legs do not sum
+/// exactly to the amount pulled from the caller — including an empty plan,
+/// which sums to zero. This is the split's custody invariant: every unit
+/// pulled from the user must be assigned to exactly one leg before any leg
+/// executes, so a mis-planned allocation is caught before funds move rather
+/// than stranding or overspending the router's balance.
+/// @param amountIn The amount pulled from the caller (`LegRun.totalIn`).
+/// @param allocated The sum of `legs[i].amountIn` across the plan.
+error SplitAllocationMismatch(uint256 amountIn, uint256 allocated);
