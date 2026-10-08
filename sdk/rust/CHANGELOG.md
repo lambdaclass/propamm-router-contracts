@@ -2,6 +2,23 @@
 
 All notable changes to the Rust SDK (`propamm`) are documented here.
 
+## [Unreleased]
+
+### Added
+
+- `STELAXIS` venue constant in `common::pamms`, plus its `stelaxis` entry in
+  `PAMMS` (whose length goes from 7 to 8).
+
+### Changed
+
+- **`BEBOP` now points at `0xB09AAA8933626d7E4C48D65dAd2D77021CFBCA9a`** and
+  **`TAURUSFI` at `0x3ce2672Aa806138585920421406Bf0dEcB8130Cb`**, the current
+  deployments. The previous addresses are no longer whitelisted on the router,
+  so naming them in `venues` selected nothing. Code that hardcoded either old
+  address must be updated.
+- The Bebop default slot that `to_state_override` zeroes now lands on the new
+  `BEBOP` address, which is the key Titan serves Bebop's overrides under.
+
 ## [1.4.0] - 2026-09-16
 
 ### Changed
