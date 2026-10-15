@@ -6,9 +6,10 @@ export const BEBOP: Address = "0xB09AAA8933626d7E4C48D65dAd2D77021CFBCA9a";
 export const KIPSELI: Address = "0x71e790dd841c8A9061487cb3E78C288E75cE0B3d";
 export const TEMPEST: Address = "0x00000003f1ec2379e79F58E12EC6C4F51Ee92149";
 export const TAURUSFI: Address = "0x3ce2672Aa806138585920421406Bf0dEcB8130Cb";
-export const METRIC: Address = "0xE715Dc29d2c273D0FC5A03e5Cca9CcB0Abb1dCDB";
+export const METRIC: Address = "0x99Ab7c1C5eab47801F7937075998527a550fbA8a";
 export const EL_ZORRO: Address = "0xCF211B4dD0D2be5C173Ea57Bcf938FC61d1d3bd3";
 export const STELAXIS: Address = "0x77047Af6CD8f7f84d96A020a2833d24916b75FDE";
+export const GOLIATH: Address = "0x4367985A63063fc970b009c6E599e9225181f551";
 
 /**
  * Curated propAMM name → venue address mapping, for the `venues` option of
@@ -26,6 +27,7 @@ export const PAMMS = {
   metric: METRIC,
   elzorro: EL_ZORRO,
   stelaxis: STELAXIS,
+  goliath: GOLIATH,
 } as const satisfies Record<string, Address>;
 
 export type PammName = keyof typeof PAMMS;

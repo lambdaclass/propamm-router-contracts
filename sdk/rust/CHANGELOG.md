@@ -2,6 +2,21 @@
 
 All notable changes to the Rust SDK (`propamm`) are documented here.
 
+## [1.6.0] - 2026-10-15
+
+### Added
+
+- `GOLIATH` venue constant in `common::pamms`, plus its `goliath` entry in
+  `PAMMS` (whose length goes from 8 to 9).
+
+### Changed
+
+- **`METRIC` now points at `0x99Ab7c1C5eab47801F7937075998527a550fbA8a`**,
+  Metric's new adapter over its own pool factory, whitelisted on 2026-10-15.
+  The previous address is no longer whitelisted on the router, so naming it in
+  `venues` selected nothing. Code that hardcoded the old address must be
+  updated.
+
 ## [1.5.0] - 2026-10-08
 
 ### Added
