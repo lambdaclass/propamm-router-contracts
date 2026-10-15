@@ -7,16 +7,17 @@ pub const BEBOP: Address = H160(hex!("B09AAA8933626d7E4C48D65dAd2D77021CFBCA9a")
 pub const KIPSELI: Address = H160(hex!("71e790dd841c8A9061487cb3E78C288E75cE0B3d"));
 pub const TEMPEST: Address = H160(hex!("00000003f1ec2379e79F58E12EC6C4F51Ee92149"));
 pub const TAURUSFI: Address = H160(hex!("3ce2672Aa806138585920421406Bf0dEcB8130Cb"));
-pub const METRIC: Address = H160(hex!("E715Dc29d2c273D0FC5A03e5Cca9CcB0Abb1dCDB"));
+pub const METRIC: Address = H160(hex!("99Ab7c1C5eab47801F7937075998527a550fbA8a"));
 pub const EL_ZORRO: Address = H160(hex!("CF211B4dD0D2be5C173Ea57Bcf938FC61d1d3bd3"));
 pub const STELAXIS: Address = H160(hex!("77047Af6CD8f7f84d96A020a2833d24916b75FDE"));
+pub const GOLIATH: Address = H160(hex!("4367985A63063fc970b009c6E599e9225181f551"));
 
 /// Curated propAMM name → venue address mapping, for the `venues` option of
 /// quotes and swaps.
 ///
 /// The Uniswap V3 fallback is intentionally absent: its address is router
 /// configuration, read it via `PropAmmRouter::fallback_swap_router`.
-pub const PAMMS: [(&str, Address); 8] = [
+pub const PAMMS: [(&str, Address); 9] = [
     ("fermi", FERMI),
     ("bebop", BEBOP),
     ("kipseli", KIPSELI),
@@ -25,6 +26,7 @@ pub const PAMMS: [(&str, Address); 8] = [
     ("metric", METRIC),
     ("elzorro", EL_ZORRO),
     ("stelaxis", STELAXIS),
+    ("goliath", GOLIATH),
 ];
 
 #[cfg(test)]
@@ -148,7 +150,7 @@ mod tests {
     /// individual constants and carry no duplicates.
     #[test]
     fn pamms_is_consistent() {
-        assert_eq!(PAMMS.len(), 8);
+        assert_eq!(PAMMS.len(), 9);
         for (name, address) in PAMMS {
             assert_ne!(address, Address::zero(), "{name} is the zero address");
             assert_eq!(
