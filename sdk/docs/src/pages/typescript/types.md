@@ -236,13 +236,14 @@ One rung of a pair's order book.
 interface PriceLevel {
   amountIn: bigint;
   amountOut: bigint;
-  variant: "Simulated" | "Interpolated";
+  variant?: "Simulated" | "Interpolated";
 }
 ```
 
 - `amountIn` / `amountOut` — amounts in atomic units.
-- `variant` — `"Simulated"` means the rung came from an EVM simulation;
-  `"Interpolated"` from a linear spline between simulated rungs.
+- `variant` — only set when parsing the deprecated v1 payload: `"Simulated"`
+  means the rung came from an EVM simulation, `"Interpolated"` from a linear
+  spline between simulated rungs. The v2 feed doesn't say.
 
 ## TitanQuote
 

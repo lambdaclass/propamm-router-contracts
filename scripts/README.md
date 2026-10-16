@@ -290,8 +290,8 @@ Earlier rigs in this repo made several venues quotable at one block by patching
 each venue's lane timestamp *forward* with `vm.store`. That keeps gas honest but
 makes prices meaningless — a stale price wearing a fresh timestamp. This tool
 instead consumes the **real** state Titan publishes for the block it is building
-(`wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream`, or
-`titan_getPammStateOverrides`), the same data the SDKs attach to quote
+(`wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream_v2`, or
+`titan_getPammVenues`), the same data the SDKs attach to quote
 `eth_call`s. Gas *and* prices are honest in the same run.
 
 `eth_call` state overrides last one call, which is why `forge test` cannot use

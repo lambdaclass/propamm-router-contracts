@@ -112,9 +112,15 @@ block number/timestamp, so venues price fresh off-chain liquidity. Pass
 Alongside the raw state overrides, Titan publishes prices it has *already
 quoted*, grouped per pAMM: for each pair, an `order_book` of rungs mapping an
 input amount to the output it would receive. This lets a taker read prices
-across a range of trade sizes without an `eth_call` per size. Rungs are either
-`Simulated` (from an EVM simulation) or `Interpolated` (a linear spline between
-simulated rungs, for finer granularity).
+across a range of trade sizes without an `eth_call` per size.
+
+Titan's v2 feed sends prices and sizes as decimal numbers; the SDK turns them
+back into exact base-unit amounts (a rebuilt amount can be a few base units off,
+from Titan's float rounding), using the decimals of each token. Tokens Titan
+lists today are built in (`TOKEN_DECIMALS`); for any other token, pass its
+decimals or an Ethereum RPC URL to read them on chain, or that token's books
+are skipped. Books are filed under the router venue address
+(`QUOTE_ADDRESS_VENUES` maps Titan's publishing address where they differ).
 
 The `PriceLevels` client wraps it, mirroring `PropAmmRouter`: a single class
 with a default snapshot source you can override.
@@ -127,7 +133,7 @@ from propamm.common.tokens import USDC, WETH
 prices = PriceLevels()  # default: one-shot HTTP snapshot source
 
 snapshot = await prices.get_price_levels()
-# snapshot.pamms[i].pairs[j].order_book -> [PriceLevel(amount_in, amount_out, variant), ...]
+# snapshot.pamms[i].pairs[j].order_book -> [PriceLevel(amount_in, amount_out), ...]
 
 # Quote helpers are served from Titan's latest snapshot over HTTP, skipping the
 # on-chain eth_call that router.quote runs.
@@ -137,7 +143,7 @@ pinned = await prices.get_quote_venue(best.pamm, USDC, WETH, parse_units("1000",
 ```
 
 The snapshot source defaults to a `PriceLevelsRpcSource` (one
-`titan_getPammPriceLevels` call per `get_price_levels`). For a live feed, pass a
+`titan_getPammBooks` call per `get_price_levels`). For a live feed, pass a
 `PriceLevelsWsSource` instead — it streams complete snapshots, reconnects with
 backoff, and idle auto-closes, like `OverridesWsSource`. The stream is served
 from regional hosts (`eu.`, `ap.`, `us.`); pick the nearest:
@@ -146,7 +152,7 @@ from regional hosts (`eu.`, `ap.`, `us.`); pick the nearest:
 from propamm import PriceLevels, PriceLevelsWsSource
 
 prices = PriceLevels(
-    PriceLevelsWsSource("wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels")
+    PriceLevelsWsSource("wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels_v2")
 )
 snapshot = await prices.get_price_levels()  # served from the live stream
 await prices.close()  # close the stream socket when done (no-op for the HTTP default)

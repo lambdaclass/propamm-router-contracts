@@ -1,6 +1,6 @@
 # PriceLevelsRpcSource
 
-Fetch-on-demand source for pAMM price levels: one `titan_getPammPriceLevels`
+Fetch-on-demand source for pAMM price levels: one `titan_getPammBooks`
 call per `get_price_levels`. Also exposes the quote helpers directly. Simplest
 for sporadic use.
 
@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 // custom endpoint — snapshot and quotes both use it
 let prices = PriceLevels::with_source(Arc::new(
-    PriceLevelsRpcSource::new("https://us.data.titanbuilder.xyz"),
+    PriceLevelsRpcSource::new("https://us.data.titanbuilder.xyz/data"),
 ));
 ```
 
@@ -42,7 +42,7 @@ Implements [`PriceLevelsSource`](/rust/types#pricelevelsource).
 async fn get_price_levels(&self) -> Result<Arc<PriceLevelsSnapshot>>
 ```
 
-Fresh snapshot via `titan_getPammPriceLevels`. Errors on HTTP or JSON-RPC failure.
+Fresh snapshot via `titan_getPammBooks`. Errors on HTTP or JSON-RPC failure.
 
 ### get_quote()
 

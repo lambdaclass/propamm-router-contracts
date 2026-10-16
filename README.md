@@ -1,23 +1,25 @@
 # PropAMMRouter
 
-Single-hop router that quotes and executes swaps against a proprietary AMM (FermiSwap, Kipseli, Bebop, Tempest, TaurusFi, Metric, or El Zorro) or directly against Uniswap V3, and falls back to Uniswap V3 when the chosen proprietary venue cannot fill the swap.
+Single-hop router that quotes and executes swaps against a proprietary AMM (FermiSwap, Kipseli, Bebop, Tempest, TaurusFi, Metric, El Zorro, Stelaxis, or Goliath) or directly against Uniswap V3, and falls back to Uniswap V3 when the chosen proprietary venue cannot fill the swap.
 
 ## Deployed Contracts
 
 The Prop AMM router contract is deployed on mainnet at `0x4ddf368080cd7946db5b459ad591c350158175e1`.
 
 The PropAMMs the router interacts with are deployed at:
-- Bebop: `0xB09AaA5614916d7AEb59C295C52c92ca82aDdD76`
+- Bebop: `0xB09AAA8933626d7E4C48D65dAd2D77021CFBCA9a`
 - Fermi: `0x5979458912f80b96d30d4220af8e2e4925a33320`
 - Kipseli: `0x71e790dd841c8a9061487cb3e78c288e75ce0b3d`
 - Tempest: `0x00000003f1ec2379e79F58E12EC6C4F51Ee92149`
-- TaurusFi: `0x217d58931A8549ca539426AA8152E33dAfc3d95A`
-- Metric: `0xE715Dc29d2c273D0FC5A03e5Cca9CcB0Abb1dCDB`
+- TaurusFi: `0x20861433D9119B866EEB398cb1ad46652A3cF953`
+- Metric: `0x99Ab7c1C5eab47801F7937075998527a550fbA8a`
 - El Zorro: `0xCF211B4dD0D2be5C173Ea57Bcf938FC61d1d3bd3`
+- Stelaxis: `0x77047Af6CD8f7f84d96A020a2833d24916b75FDE`
+- Goliath: `0x4367985A63063fc970b009c6E599e9225181f551`
 
 ## Overview
 
-Venues are identified **by address**: the proprietary AMM routers (FermiSwap, Kipseli, Bebop, Tempest, TaurusFi, Metric, El Zorro) plus the Uniswap V3 fallback, denoted by the SwapRouter02 address wired in at deployment. The router exposes the following external functions (see `src/interfaces/IPropAMMRouter.sol` for the full NatSpec and the [rationale](https://github.com/lambdaclass/propamm-router-contracts/blob/main/docs/rationale.md) document with some design decisions):
+Venues are identified **by address**: the proprietary AMM routers (FermiSwap, Kipseli, Bebop, Tempest, TaurusFi, Metric, El Zorro, Stelaxis, Goliath) plus the Uniswap V3 fallback, denoted by the SwapRouter02 address wired in at deployment. The router exposes the following external functions (see `src/interfaces/IPropAMMRouter.sol` for the full NatSpec and the [rationale](https://github.com/lambdaclass/propamm-router-contracts/blob/main/docs/rationale.md) document with some design decisions):
 
 - `swapV1(tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline)`: pulls `amountIn` of `tokenIn` from `msg.sender`, routes through the best-quoting venue, and falls back to Uniswap V3 if that venue reverts or under-delivers. Returns `(amountOut, executedVenue)`, where `executedVenue` is the proprietary venue that filled or the SwapRouter02 address when the fallback ran. Routes to Uniswap V3 if the best propAMM quote is below `amountOutMin`, and checks `amountOutMin` against the measured balance delta of `recipient` after execution (`InsufficientOutput`). Reverts when the contract is paused (see [Pausing the contract](#pausing-the-contract)); quote functions remain callable.
 - `swapViaVenueV1(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline)`: attempts the caller-specified `venue` first. A proprietary venue still falls back to Uniswap V3 if it fails to fill; naming the Uniswap V3 SwapRouter02 address routes directly to Uniswap V3 (it *is* the fallback, so there is nothing further to fall back to). Reverts `UnknownVenue` if `venue` is neither a whitelisted proprietary AMM nor the SwapRouter02 address.
@@ -213,23 +215,29 @@ forge clean && forge script scripts/Deploy.s.sol \
 
 ### Quoting with Titan state overrides
 
-The proprietary AMMs maintain off-chain liquidity that is not reflected by mainnet state, so a plain `eth_call` to `PropAMMRouter.quoteV1` against the anvil fork only sees stale liquidity. To get accurate quotes, Titan exposes the JSON-RPC method `titan_getPammStateOverrides`, whose result is passed as the third parameter of `eth_call`.
-The Titan endpoint only serves `titan_getPammStateOverrides`. The `eth_call` itself is sent to the anvil fork.
+The proprietary AMMs maintain off-chain liquidity that is not reflected by mainnet state, so a plain `eth_call` to `PropAMMRouter.quoteV1` against the anvil fork only sees stale liquidity. To get accurate quotes, Titan exposes the JSON-RPC method `titan_getPammVenues` on `https://eu.data.titanbuilder.xyz/data`, whose state overrides are passed as the third parameter of `eth_call`, together with the block number and time they target as the fourth (block overrides).
+The Titan endpoint only serves the overrides. The `eth_call` itself is sent to the anvil fork.
 
-The response is keyed by proprietary AMM router address, with one entry per venue:
+The response carries one entry per maker quote address:
 
 ```json
 {
   "result": {
-    "blockNumber": "0x...",
-    "0x5979458912f80b96d30d4220af8e2e4925a33320": { "stateOverride": { ... } },
-    "0xb09aaa5614916d7aeb59c295c52c92ca82addd76": { "stateOverride": { ... } },
-    "0x71e790dd841c8a9061487cb3e78c288e75ce0b3d": { "stateOverride": { ... } }
+    "venues": [
+      {
+        "maker": "Metric",
+        "quoteAddress": "0xe844701934d9c6085b292e428f41b911cc0b3872",
+        "pricedAddresses": ["0xe844701934d9c6085b292e428f41b911cc0b3872", "0x99ab7c1c5eab47801f7937075998527a550fba8a", "..."],
+        "slot": 15445995,
+        "blockNumber": 26206948,
+        "stateOverride": { ... }
+      }
+    ]
   }
 }
 ```
 
-The keys are propAMM router addresses — above, FermiSwap, Bebop, and Kipseli respectively. A snapshot only carries the venues Titan has fresh state for, so the set of keys varies between calls. When calling `quoteVenueV1(venue, ...)`, pick the entry matching the venue address you want to quote. Kipseli additionally requires the router to hold `tokenIn`, since `simulateKipseliSwap` transfers it to Kipseli; we fund it with a `stateDiff` over the token contract's `_balances` slot for the router. The other venues ignore the balance override, so the same snippet works for every proprietary venue (only the venue address needs to change). For the Uniswap V3 fallback (naming the SwapRouter02 address) the Titan overrides aren't needed at all — QuoterV2 only reads on-chain pool state — so you can skip the `titan_getPammStateOverrides` call entirely and pass an empty state override (or omit the third `eth_call` parameter).
+A snapshot only carries the venues Titan has fresh state for, so the set of entries varies between calls. A maker's quote address is not always its router venue (Kipseli publishes under `0xc9a956b5…`, Metric under two addresses, and Metric's venue only quotes with both), so the example below merges every entry's `stateOverride` (a deep merge: two makers can write to the same contract), which serves any venue. `blockNumber` is the block Titan is building, and venues check `block.timestamp` against the state they published, so the call pins both: the time is the slot's, `1606824023 + 12 * slot`. Kipseli additionally requires the router to hold `tokenIn`, since `simulateKipseliSwap` transfers it to Kipseli; we fund it with a `stateDiff` over the token contract's `_balances` slot for the router. The other venues ignore the balance override, so the same snippet works for every proprietary venue (only the venue address needs to change). For the Uniswap V3 fallback (naming the SwapRouter02 address) the Titan overrides aren't needed at all — QuoterV2 only reads on-chain pool state — so you can skip the `titan_getPammVenues` call entirely and pass an empty state override (or omit the third and fourth `eth_call` parameters).
 
 **Example: quote 1 WETH for USDC against the deployed router on the anvil fork.**
 
@@ -248,15 +256,19 @@ VENUE_ADDR=0x71e790dd841c8a9061487cb3e78c288e75ce0b3d    # Kipseli
 # balanceOf[ROUTER] lives at keccak256(abi.encode(ROUTER, 3)).
 WETH_BAL_SLOT=$(cast index address $ROUTER 3)
 
-# 1. Fetch the venue's Titan overrides and fund the router with 10 WETH.
+# 1. Fetch Titan's overrides, merge every maker's entry, and fund the router with
+#    10 WETH; then pin the block number and time they target.
 #    (Skip this step for the Uniswap V3 fallback — QuoterV2 only needs on-chain state.)
-OVERRIDES=$(curl -s -X POST https://eu.data.titanbuilder.xyz \
+TITAN=$(curl -s -X POST https://eu.data.titanbuilder.xyz/data \
     -H "Content-Type: application/json" \
-    -d '{"jsonrpc":"2.0","id":1,"method":"titan_getPammStateOverrides","params":[]}' \
-    | jq -c --arg pamm "$VENUE_ADDR" --arg weth "$WETH" --arg slot "$WETH_BAL_SLOT" '
-          .result[$pamm].stateOverride
-        + { ($weth): { stateDiff: { ($slot): "0x0000000000000000000000000000000000000000000000008ac7230489e80000" } } }
-      ')
+    -d '{"jsonrpc":"2.0","id":1,"method":"titan_getPammVenues","params":[]}')
+OVERRIDES=$(echo "$TITAN" | jq -c --arg weth "$WETH" --arg slot "$WETH_BAL_SLOT" '
+      reduce .result.venues[].stateOverride as $o ({}; . * $o)
+    * { ($weth): { stateDiff: { ($slot): "0x0000000000000000000000000000000000000000000000008ac7230489e80000" } } }
+  ')
+NUMBER=$(echo "$TITAN" | jq '.result.venues | max_by(.slot) | .blockNumber')
+SLOT=$(echo "$TITAN" | jq '.result.venues | max_by(.slot) | .slot')
+BLOCK="{\"number\":\"$(cast to-hex $NUMBER)\",\"time\":\"$(cast to-hex $((1606824023 + 12 * SLOT)))\"}"
 
 # 2. eth_call PropAMMRouter.quoteVenueV1(venue, WETH, USDC, 1e18) with the overrides.
 #    The Uniswap V3 fallback always prices at the configured `fallbackFee` tier
@@ -264,7 +276,7 @@ OVERRIDES=$(curl -s -X POST https://eu.data.titanbuilder.xyz \
 DATA=$(cast calldata "quoteVenueV1(address,address,address,uint256)" $VENUE_ADDR $WETH $USDC 1000000000000000000)
 
 curl -s -X POST $RPC_URL -H "Content-Type: application/json" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"$ROUTER\",\"data\":\"$DATA\"},\"latest\",$OVERRIDES]}" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"$ROUTER\",\"data\":\"$DATA\"},\"latest\",$OVERRIDES,$BLOCK]}" \
     | jq -r .result \
     | xargs cast --abi-decode "f()(uint256)"
 ```
@@ -276,11 +288,13 @@ This prints `amountOut`, e.g. `2115659878` (≈ 2115.66 USDC for 1 WETH, with US
 | Uniswap V3 fallback (SwapRouter02) | `0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45` — skip the Titan call |
 | FermiSwap | `0x5979458912f80b96d30d4220af8e2e4925a33320` |
 | Kipseli | `0x71e790dd841c8a9061487cb3e78c288e75ce0b3d` |
-| Bebop | `0xB09AaA5614916d7AEb59C295C52c92ca82aDdD76` |
+| Bebop | `0xB09AAA8933626d7E4C48D65dAd2D77021CFBCA9a` |
 | Tempest | `0x00000003f1ec2379e79F58E12EC6C4F51Ee92149` |
-| TaurusFi | `0x217d58931A8549ca539426AA8152E33dAfc3d95A` |
-| Metric | `0xE715Dc29d2c273D0FC5A03e5Cca9CcB0Abb1dCDB` |
+| TaurusFi | `0x20861433D9119B866EEB398cb1ad46652A3cF953` |
+| Metric | `0x99Ab7c1C5eab47801F7937075998527a550fbA8a` |
 | El Zorro | `0xCF211B4dD0D2be5C173Ea57Bcf938FC61d1d3bd3` |
+| Stelaxis | `0x77047Af6CD8f7f84d96A020a2833d24916b75FDE` |
+| Goliath | `0x4367985A63063fc970b009c6E599e9225181f551` |
 
 ### Pausing the contract
 

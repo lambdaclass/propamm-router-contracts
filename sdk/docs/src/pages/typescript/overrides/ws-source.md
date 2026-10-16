@@ -49,7 +49,7 @@ timeout handles that.
 ### url (optional)
 
 - **Type:** `string`
-- **Default:** `wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream`
+- **Default:** `wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream_v2`
 
 Stream endpoint.
 

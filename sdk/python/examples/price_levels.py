@@ -67,8 +67,7 @@ async def main() -> None:
     )
     for level in pair.order_book:
         print(
-            f"  {_fmt(level.amount_in, pair.token_in)} -> "
-            f"{_fmt(level.amount_out, pair.token_out)}  [{level.variant}]"
+            f"  {_fmt(level.amount_in, pair.token_in)} -> {_fmt(level.amount_out, pair.token_out)}"
         )
 
     # 2. Quote helpers, for that pair and a mid-ladder size. `get_quote` returns
