@@ -2,6 +2,15 @@
 
 All notable changes to the Rust SDK (`propamm`) are documented here.
 
+## [Unreleased]
+
+### Fixed
+
+- A v2 price rung whose amounts overflow a `U256` is dropped, instead of
+  panicking the parse (and, for `PriceLevelsWsSource`, the stream's handler
+  task). So is a rung whose input rounds to zero base units, which read as a
+  free fill.
+
 ## [1.7.0] - 2026-10-16
 
 ### Changed

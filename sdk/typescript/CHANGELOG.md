@@ -2,6 +2,14 @@
 
 All notable changes to the TypeScript SDK (`propamm`) are documented here.
 
+## [Unreleased]
+
+### Fixed
+
+- A v2 price rung whose amounts don't fit a uint256 is dropped instead of being
+  returned. So is a rung whose input rounds to zero base units, which read as a
+  free fill.
+
 ## [1.8.0] - 2026-10-16
 
 ### Changed

@@ -41,7 +41,7 @@
  * parsed, for sources pointed at the deprecated endpoints.
  */
 
-import { createPublicClient, erc20Abi, http, numberToHex, type Address } from "viem";
+import { createPublicClient, erc20Abi, http, maxUint256, numberToHex, type Address } from "viem";
 import { QUOTE_ADDRESS_VENUES } from "../common/pamms.js";
 import { TOKEN_DECIMALS } from "../common/tokens.js";
 import { WsSource } from "../ws-source.js";
@@ -312,15 +312,13 @@ function parseBooks(
     byPamm.set(pamm, pairs);
 
     // Bids: sell cumVolume of token1, receive cumVolume*price of token2.
-    const bids = parseRungs(book["bids"], (volume, quote) => ({
-      amountIn: toBaseUnits(volume, d1),
-      amountOut: toBaseUnits(quote, d2),
-    }));
+    const bids = toLevels(parseRungs(book["bids"]), d1, d2);
     // Asks: pay cumVolume*price of token2, receive cumVolume of token1.
-    const asks = parseRungs(book["asks"], (volume, quote) => ({
-      amountIn: toBaseUnits(quote, d2),
-      amountOut: toBaseUnits(volume, d1),
-    }));
+    const asks = toLevels(
+      parseRungs(book["asks"]).map(([volume, quote]) => [quote, volume]),
+      d2,
+      d1,
+    );
     // Two quote addresses can map to one venue (Metric); the first book for a
     // pair is kept.
     if (bids.length > 0 && !pairs.has(`${t1}:${t2}`))
@@ -343,19 +341,37 @@ interface Decimal {
   scale: number;
 }
 
-function parseRungs(
-  value: unknown,
-  toLevel: (volume: Decimal, quote: Decimal) => PriceLevel,
-): PriceLevel[] {
+/** `[cumVolume, cumVolume * price]` per well-formed rung, as exact decimals. */
+function parseRungs(value: unknown): [Decimal, Decimal][] {
   if (!Array.isArray(value)) return [];
-  const levels: PriceLevel[] = [];
+  const rungs: [Decimal, Decimal][] = [];
   for (const entry of value) {
     const record = entry as Record<string, unknown> | null;
     const volume = toDecimal(record?.["cumVolume"]);
     const price = toDecimal(record?.["price"]);
     if (!volume || !price) continue;
-    const quote = { digits: volume.digits * price.digits, scale: volume.scale + price.scale };
-    levels.push(toLevel(volume, quote));
+    rungs.push([
+      volume,
+      { digits: volume.digits * price.digits, scale: volume.scale + price.scale },
+    ]);
+  }
+  return rungs;
+}
+
+/**
+ * `[amountIn, amountOut]` rungs as base-unit levels, dropping any that overflow
+ * a uint256 or take no input (a zero `amountIn` reads as a free fill).
+ */
+function toLevels(
+  rungs: [Decimal, Decimal][],
+  decimalsIn: number,
+  decimalsOut: number,
+): PriceLevel[] {
+  const levels: PriceLevel[] = [];
+  for (const [amountIn, amountOut] of rungs) {
+    const baseIn = toBaseUnits(amountIn, decimalsIn);
+    const baseOut = toBaseUnits(amountOut, decimalsOut);
+    if (baseIn && baseOut !== undefined) levels.push({ amountIn: baseIn, amountOut: baseOut });
   }
   return levels;
 }
@@ -371,12 +387,17 @@ function toDecimal(value: unknown): Decimal | undefined {
   return { digits: BigInt(whole! + fraction), scale: fraction.length - Number(exponent) };
 }
 
-/** Round `value * 10^decimals` to the nearest integer (half up). */
-function toBaseUnits(value: Decimal, decimals: number): bigint {
+/** Round `value * 10^decimals` to the nearest integer (half up), or `undefined` past a uint256. */
+function toBaseUnits(value: Decimal, decimals: number): bigint | undefined {
   const shift = decimals - value.scale;
-  if (shift >= 0) return value.digits * 10n ** BigInt(shift);
-  const divisor = 10n ** BigInt(-shift);
-  return (value.digits + divisor / 2n) / divisor;
+  let units: bigint;
+  if (shift >= 0) {
+    units = value.digits * 10n ** BigInt(shift);
+  } else {
+    const divisor = 10n ** BigInt(-shift);
+    units = (value.digits + divisor / 2n) / divisor;
+  }
+  return units <= maxUint256 ? units : undefined;
 }
 
 function parsePamm(entry: unknown): PammPriceLevels | undefined {

@@ -44,8 +44,8 @@ import abc
 import asyncio
 import json
 from dataclasses import dataclass, field
-from decimal import ROUND_HALF_UP, Context, Decimal
-from typing import Any, Literal
+from decimal import ROUND_HALF_UP, Context, Decimal, InvalidOperation
+from typing import Any, Iterable, Literal
 
 import aiohttp
 import websockets
@@ -210,15 +210,9 @@ def _parse_books(raw: dict, decimals: dict[str, int]) -> PriceLevelsSnapshot:
             continue
         pairs = by_pamm.setdefault(pamm, {})
         # Bids: sell cumVolume of token1, receive cumVolume*price of token2.
-        bids = [
-            PriceLevel(amount_in=_base_units(volume, d1), amount_out=_base_units(quote, d2))
-            for volume, quote in _rungs(book.get("bids"))
-        ]
+        bids = _levels(_rungs(book.get("bids")), d1, d2)
         # Asks: pay cumVolume*price of token2, receive cumVolume of token1.
-        asks = [
-            PriceLevel(amount_in=_base_units(quote, d2), amount_out=_base_units(volume, d1))
-            for volume, quote in _rungs(book.get("asks"))
-        ]
+        asks = _levels(((q, v) for v, q in _rungs(book.get("asks"))), d2, d1)
         # Two quote addresses can map to one venue (Metric); the first book for a
         # pair is kept.
         if bids and (token1, token2) not in pairs:
@@ -238,6 +232,7 @@ def _parse_books(raw: dict, decimals: dict[str, int]) -> PriceLevelsSnapshot:
 
 
 _EXACT = Context(prec=100)
+_MAX_UINT256 = 2**256 - 1
 
 
 def _rungs(value: Any) -> list[tuple[Decimal, Decimal]]:
@@ -265,8 +260,27 @@ def _decimal(value: Any) -> Decimal | None:
     return result if result.is_finite() and result >= 0 else None
 
 
-def _base_units(value: Decimal, decimals: int) -> int:
-    return int(value.scaleb(decimals, _EXACT).quantize(Decimal(1), ROUND_HALF_UP, _EXACT))
+def _levels(
+    rungs: Iterable[tuple[Decimal, Decimal]], decimals_in: int, decimals_out: int
+) -> list[PriceLevel]:
+    """``(amount_in, amount_out)`` rungs as base-unit levels, dropping any that
+    overflow a uint256 or take no input (a zero ``amount_in`` reads as a free fill)."""
+    levels = []
+    for amount_in, amount_out in rungs:
+        base_in = _base_units(amount_in, decimals_in)
+        base_out = _base_units(amount_out, decimals_out)
+        if base_in and base_out is not None:
+            levels.append(PriceLevel(amount_in=base_in, amount_out=base_out))
+    return levels
+
+
+def _base_units(value: Decimal, decimals: int) -> int | None:
+    """``value * 10**decimals`` rounded half up, or None past a uint256."""
+    try:
+        units = int(value.scaleb(decimals, _EXACT).quantize(Decimal(1), ROUND_HALF_UP, _EXACT))
+    except InvalidOperation:  # past the context's 100 digits
+        return None
+    return units if units <= _MAX_UINT256 else None
 
 
 class _TokenDecimals:

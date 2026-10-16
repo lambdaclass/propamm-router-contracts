@@ -2,6 +2,14 @@
 
 All notable changes to the Python SDK (`propamm`) are documented here.
 
+## [Unreleased]
+
+### Fixed
+
+- A v2 price rung whose amounts don't fit a uint256 is dropped, instead of
+  raising `decimal.InvalidOperation` (past 100 digits) or being returned. So is
+  a rung whose input rounds to zero base units, which read as a free fill.
+
 ## [1.7.0] - 2026-10-16
 
 ### Changed
