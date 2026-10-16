@@ -336,8 +336,10 @@ contract PropAMMRouter is
                 }
 
                 return (amountOut_, venue);
-            } catch {
-                // Fall through to the Uniswap V3 fallback below.
+            } catch (bytes memory reason) {
+                // Fall through to the Uniswap V3 fallback below, but say why first:
+                // this is the only moment the venue's revert exists anywhere.
+                emit VenueCallFailed(venue, tokenIn_, tokenOut_, amountIn, msg.sig, _truncate(reason));
             }
         }
 
@@ -416,6 +418,19 @@ contract PropAMMRouter is
         require(amountOut >= amountOutMin, InsufficientOutput(amountOutMin, amountOut));
 
         return amountOut;
+    }
+
+    /// @dev Caps the revert data copied into `VenueCallFailed`. A venue controls how
+    ///      many bytes it reverts with, and the log is paid for per byte.
+    uint256 private constant VENUE_REVERT_LOG_BYTES = 100;
+
+    /// @dev First `VENUE_REVERT_LOG_BYTES` of `data`, or all of it when shorter.
+    function _truncate(bytes memory data) private pure returns (bytes memory out) {
+        uint256 n = data.length < VENUE_REVERT_LOG_BYTES ? data.length : VENUE_REVERT_LOG_BYTES;
+        out = new bytes(n);
+        for (uint256 i; i < n; ++i) {
+            out[i] = data[i];
+        }
     }
 
     /// @notice Unwrap `amount` WETH into ETH and send it to `to`.
