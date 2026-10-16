@@ -215,18 +215,22 @@ fn parse_books(
 
         // Bids: sell cumVolume of token1, receive cumVolume*price of token2.
         let bids: Vec<PriceLevel> = rungs(book.get("bids"))
-            .map(|(volume, quote)| PriceLevel {
-                amount_in: volume.base_units(d1),
-                amount_out: quote.base_units(d2),
-                variant: None,
+            .filter_map(|(volume, quote)| {
+                Some(PriceLevel {
+                    amount_in: volume.base_units(d1)?,
+                    amount_out: quote.base_units(d2)?,
+                    variant: None,
+                })
             })
             .collect();
         // Asks: pay cumVolume*price of token2, receive cumVolume of token1.
         let asks: Vec<PriceLevel> = rungs(book.get("asks"))
-            .map(|(volume, quote)| PriceLevel {
-                amount_in: quote.base_units(d2),
-                amount_out: volume.base_units(d1),
-                variant: None,
+            .filter_map(|(volume, quote)| {
+                Some(PriceLevel {
+                    amount_in: quote.base_units(d2)?,
+                    amount_out: volume.base_units(d1)?,
+                    variant: None,
+                })
             })
             .collect();
 
@@ -287,25 +291,42 @@ impl Decimal {
         })
     }
 
-    fn times(self, other: Self) -> Self {
-        Self {
-            digits: self.digits * other.digits,
+    /// The exact product, or `None` when its digits overflow a `U256`.
+    fn times(self, other: Self) -> Option<Self> {
+        Some(Self {
+            digits: self.digits.checked_mul(other.digits)?,
             scale: self.scale + other.scale,
-        }
+        })
     }
 
-    /// `self * 10^decimals`, rounded to the nearest integer (half up).
-    fn base_units(self, decimals: u8) -> U256 {
+    /// `self * 10^decimals`, rounded to the nearest integer (half up), or
+    /// `None` when it overflows a `U256`.
+    fn base_units(self, decimals: u8) -> Option<U256> {
         let decimals = u32::from(decimals);
         if decimals >= self.scale {
-            return self.digits * U256::exp10((decimals - self.scale) as usize);
+            return self.digits.checked_mul(pow10(decimals - self.scale)?);
         }
-        let divisor = U256::exp10((self.scale - decimals) as usize);
-        (self.digits + divisor / 2) / divisor
+        // A divisor past `U256::MAX` is over twice any `digits`: rounds to zero.
+        let Some(divisor) = pow10(self.scale - decimals) else {
+            return Some(U256::zero());
+        };
+        let (quotient, remainder) = (self.digits / divisor, self.digits % divisor);
+        // `remainder * 2 >= divisor`, without the overflow.
+        Some(if remainder >= divisor - remainder {
+            quotient + 1
+        } else {
+            quotient
+        })
     }
 }
 
-/// `(cumVolume, cumVolume * price)` per well-formed rung.
+/// `10^exponent`, or `None` past `U256::MAX`.
+fn pow10(exponent: u32) -> Option<U256> {
+    U256::from(10u8).checked_pow(U256::from(exponent))
+}
+
+/// `(cumVolume, cumVolume * price)` per well-formed rung whose product fits a
+/// `U256`.
 fn rungs(value: Option<&Value>) -> impl Iterator<Item = (Decimal, Decimal)> + '_ {
     value
         .and_then(Value::as_array)
@@ -314,7 +335,7 @@ fn rungs(value: Option<&Value>) -> impl Iterator<Item = (Decimal, Decimal)> + '_
         .filter_map(|rung| {
             let volume = rung.get("cumVolume").and_then(Decimal::from_json)?;
             let price = rung.get("price").and_then(Decimal::from_json)?;
-            Some((volume, volume.times(price)))
+            Some((volume, volume.times(price)?))
         })
 }
 
@@ -1088,6 +1109,25 @@ mod tests {
         let raw = serde_json::json!({ "books": [unknown] });
         let snapshot = parse_price_levels_message_with(&raw, &decimals).unwrap();
         assert_eq!(snapshot.pamms[0].pairs.len(), 2);
+    }
+
+    #[test]
+    fn parse_v2_books_drops_rungs_past_u256_instead_of_panicking() {
+        let mut book = v2_book("0x00000003f1ec2379e79f58e12ec6c4f51ee92149");
+        book["bids"] = serde_json::json!([
+            // cumVolume * price overflows a U256.
+            { "price": 1e40, "cumVolume": 1e40 },
+            // Fits as a decimal, but not once scaled to 18 decimals.
+            { "price": 1.0, "cumVolume": 1e70 },
+            { "price": 2431.1554, "cumVolume": 0.005 },
+        ]);
+        // Small enough that 10^scale overflows; it rounds to zero base units.
+        book["asks"] = serde_json::json!([{ "price": 1e-90, "cumVolume": 1.0 }]);
+        let raw = serde_json::json!({ "books": [book] });
+
+        let pairs = &parse_price_levels_message(&raw).unwrap().pamms[0].pairs;
+        assert_eq!(rungs(&pairs[0]), vec![(5_000_000_000_000_000, 12_155_777)]);
+        assert_eq!(rungs(&pairs[1]), vec![(0, 1_000_000_000_000_000_000)]);
     }
 
     #[test]

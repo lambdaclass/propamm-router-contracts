@@ -235,3 +235,21 @@ def test_parse_v2_books_skips_unknown_tokens_and_empty_sides():
         {"0x6b175474e89094c44da98b954eedeac495271d0f": 18, _USDT: 6},
     )
     assert len(with_dai.pamms[0].pairs) == 2
+
+
+def test_parse_v2_books_drops_rungs_past_100_digits_instead_of_raising():
+    book = {
+        **_V2_BOOK,
+        "bids": [
+            # 1e300 WETH is 319 digits of wei: past the exact context.
+            {"price": 1.0, "cumVolume": 1e300},
+            {"price": 2431.1554, "cumVolume": 0.005},
+        ],
+        "asks": [{"price": 1e300, "cumVolume": 1.0}],
+    }
+    snapshot = parse_price_levels_message({"books": [book]})
+
+    pamm = _V2_BOOK["quoteAddress"]
+    assert _rungs(snapshot, pamm, _WETH, _USDT) == [(5000000000000000, 12155777)]
+    # The ask side lost its only rung, so it isn't listed at all.
+    assert len(snapshot.pamms[0].pairs) == 1
