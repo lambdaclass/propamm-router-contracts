@@ -6,7 +6,7 @@ pub const FERMI: Address = H160(hex!("5979458912F80B96d30D4220af8E2e4925A33320")
 pub const BEBOP: Address = H160(hex!("B09AAA8933626d7E4C48D65dAd2D77021CFBCA9a"));
 pub const KIPSELI: Address = H160(hex!("71e790dd841c8A9061487cb3E78C288E75cE0B3d"));
 pub const TEMPEST: Address = H160(hex!("00000003f1ec2379e79F58E12EC6C4F51Ee92149"));
-pub const TAURUSFI: Address = H160(hex!("3ce2672Aa806138585920421406Bf0dEcB8130Cb"));
+pub const TAURUSFI: Address = H160(hex!("20861433D9119B866EEB398cb1ad46652A3cF953"));
 pub const METRIC: Address = H160(hex!("99Ab7c1C5eab47801F7937075998527a550fbA8a"));
 pub const EL_ZORRO: Address = H160(hex!("CF211B4dD0D2be5C173Ea57Bcf938FC61d1d3bd3"));
 pub const STELAXIS: Address = H160(hex!("77047Af6CD8f7f84d96A020a2833d24916b75FDE"));
@@ -28,6 +28,36 @@ pub const PAMMS: [(&str, Address); 9] = [
     ("stelaxis", STELAXIS),
     ("goliath", GOLIATH),
 ];
+
+/// Titan publishes each maker's data under the maker's quote address, which for
+/// some makers is not the venue address the router whitelists. This maps those
+/// quote addresses to the router venue; makers absent here publish under the
+/// venue address itself. Source: the stream-address table in Titan's takers
+/// docs.
+pub const QUOTE_ADDRESS_VENUES: [(Address, Address); 3] = [
+    // Kipseli
+    (
+        H160(hex!("c9a956b5196dfe110debe8781857bc8b97d32091")),
+        KIPSELI,
+    ),
+    // Metric publishes under two quote addresses; its venue needs both.
+    (
+        H160(hex!("e844701934d9c6085b292e428f41b911cc0b3872")),
+        METRIC,
+    ),
+    (
+        H160(hex!("30a88bf894d1b806125a23ebf23d715496fd7102")),
+        METRIC,
+    ),
+];
+
+/// The router venue Titan's `quote_address` stands for.
+pub fn venue_for_quote_address(quote_address: Address) -> Address {
+    QUOTE_ADDRESS_VENUES
+        .iter()
+        .find(|(quote, _)| *quote == quote_address)
+        .map_or(quote_address, |(_, venue)| *venue)
+}
 
 #[cfg(test)]
 mod tests {

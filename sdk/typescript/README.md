@@ -157,14 +157,14 @@ their pushed state instead of the chain's.
 
 Two sources are available; both need no authentication:
 
-- `OverridesWsSource` — streams `wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream`,
+- `OverridesWsSource` — streams `wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream_v2`,
   caching per-pAMM entries across frames and reconnecting with backoff. This
   is the **default**: a router constructed without options creates one
   (connecting lazily on the first quote). The socket auto-closes after an
   idle window without quotes (`idleTimeoutMs`, default 30s; `0` closes after
   each quote, `Infinity` never) and reconnects transparently, so no teardown
   is needed — `close()` exists for immediate, permanent shutdown.
-- `OverridesRpcSource` — calls `titan_getPammStateOverrides` over HTTP on
+- `OverridesRpcSource` — calls `titan_getPammVenues` over HTTP on
   each quote. No connection to manage.
 
 ```ts
@@ -203,9 +203,15 @@ await client.write({
 Alongside the raw state overrides, Titan publishes prices it has _already
 quoted_, grouped per pAMM: for each pair, an `orderBook` of rungs mapping an
 input amount to the output it would receive. This lets a taker read prices
-across a range of trade sizes without an `eth_call` per size. Rungs are either
-`Simulated` (from an EVM simulation) or `Interpolated` (a linear spline between
-simulated rungs, for finer granularity).
+across a range of trade sizes without an `eth_call` per size.
+
+Titan's v2 feed sends prices and sizes as decimal numbers; the SDK turns them
+back into exact base-unit amounts (a rebuilt amount can be a few base units off,
+from Titan's float rounding), using the decimals of each token. Tokens Titan
+lists today are built in (`TOKEN_DECIMALS`); for any other token, pass its
+decimals or an Ethereum RPC URL to read them on chain, or that token's books
+are skipped. Books are filed under the router venue address
+(`QUOTE_ADDRESS_VENUES` maps Titan's publishing address where they differ).
 
 The `PriceLevels` client wraps it, mirroring `PropAmmRouter`: a single class
 with a default snapshot source you can override in the constructor.
@@ -218,7 +224,7 @@ import { parseUnits } from "propamm/common/helpers";
 const prices = new PriceLevels(); // default: one-shot HTTP snapshot source
 
 const snapshot = await prices.getPriceLevels();
-// snapshot.pamms[i].pairs[j].orderBook -> [{ amountIn, amountOut, variant }, ...]
+// snapshot.pamms[i].pairs[j].orderBook -> [{ amountIn, amountOut }, ...]
 
 // Quote helpers are served from Titan's latest snapshot over HTTP, skipping the
 // on-chain eth_call that router.quote runs.
@@ -228,7 +234,7 @@ const pinned = await prices.getQuoteVenue(best.pamm, USDC, WETH, parseUnits("100
 ```
 
 The snapshot source defaults to a `PriceLevelsRpcSource` (one
-`titan_getPammPriceLevels` call per `getPriceLevels`). For a live feed, pass a
+`titan_getPammBooks` call per `getPriceLevels`). For a live feed, pass a
 `PriceLevelsWsSource` instead — it streams complete snapshots, reconnects with
 backoff, and idle auto-closes, like `OverridesWsSource`. The stream is served
 from regional hosts (`eu.`, `ap.`, `us.`); pick the nearest:
@@ -237,20 +243,24 @@ from regional hosts (`eu.`, `ap.`, `us.`); pick the nearest:
 import { PriceLevels, PriceLevelsWsSource } from "propamm/prices";
 
 const prices = new PriceLevels({
-  source: new PriceLevelsWsSource({ url: "wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels" }),
+  source: new PriceLevelsWsSource({
+    url: "wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels_v2",
+  }),
 });
 const snapshot = await prices.getPriceLevels(); // served from the live stream
 prices.close(); // close the stream socket when done (no-op for the HTTP default)
 ```
 
 The quote helpers (`getQuote` / `getQuoteVenue`) are HTTP-only and default to
-`https://eu.data.titanbuilder.xyz`. When pairing a `PriceLevelsWsSource` with a
+`https://eu.data.titanbuilder.xyz/data`. When pairing a `PriceLevelsWsSource` with a
 private or regional deployment, pass `rpcUrl` to route quotes to the same host:
 
 ```ts
 const prices = new PriceLevels({
-  source: new PriceLevelsWsSource({ url: "wss://us.data.titanbuilder.xyz/ws/pamm_price_levels" }),
-  rpcUrl: "https://us.data.titanbuilder.xyz",
+  source: new PriceLevelsWsSource({
+    url: "wss://us.data.titanbuilder.xyz/ws/pamm_price_levels_v2",
+  }),
+  rpcUrl: "https://us.data.titanbuilder.xyz/data",
 });
 ```
 

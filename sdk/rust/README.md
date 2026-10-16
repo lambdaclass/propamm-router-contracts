@@ -73,13 +73,13 @@ state instead of the chain's.
 
 Two sources implement the `OverridesSource` trait; both need no authentication:
 
-- `OverridesWsSource` — streams `wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream`,
+- `OverridesWsSource` — streams `wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream_v2`,
   caching per-pAMM entries across frames and reconnecting with backoff. This
   is the **default**: a router built with `PropAmmRouter::new` creates one
   (connecting lazily on the first quote). The connection auto-closes after an
   idle window without quotes (`idle_timeout`, default 30s) and reconnects
   transparently, so no teardown is needed.
-- `OverridesRpcSource` — calls `titan_getPammStateOverrides` over HTTP on
+- `OverridesRpcSource` — calls `titan_getPammVenues` over HTTP on
   each quote. No connection to manage.
 
 ```rust
@@ -123,9 +123,15 @@ let hash = client.send(router_address, calldata, None).await?;
 Alongside the raw state overrides, Titan publishes prices it has *already
 quoted*, grouped per pAMM: for each pair, an `order_book` of rungs mapping an
 input amount to the output it would receive. This lets a taker read prices
-across a range of trade sizes without an `eth_call` per size. Rungs are either
-`Simulated` (from an EVM simulation) or `Interpolated` (a linear spline between
-simulated rungs, for finer granularity).
+across a range of trade sizes without an `eth_call` per size.
+
+Titan's v2 feed sends prices and sizes as decimal numbers; the SDK turns them
+back into exact base-unit amounts (a rebuilt amount can be a few base units off,
+from Titan's float rounding), using the decimals of each token. Tokens Titan
+lists today are built in (`TOKEN_DECIMALS`); for any other token, pass its
+decimals or an Ethereum RPC URL to read them on chain, or that token's books
+are skipped. Books are filed under the router venue address
+(`QUOTE_ADDRESS_VENUES` maps Titan's publishing address where they differ).
 
 The `PriceLevels` client wraps it, mirroring `PropAmmRouter`: a single type with
 a default snapshot source you can override.
@@ -138,7 +144,7 @@ use propamm::prices::PriceLevels;
 let prices = PriceLevels::new(); // default: one-shot HTTP snapshot source
 
 let snapshot = prices.get_price_levels().await?;
-// snapshot.pamms[i].pairs[j].order_book -> [{ amount_in, amount_out, variant }, ...]
+// snapshot.pamms[i].pairs[j].order_book -> [{ amount_in, amount_out }, ...]
 
 // Quote helpers are served from Titan's latest snapshot over HTTP, skipping the
 // on-chain eth_call that router.quote runs.
@@ -148,7 +154,7 @@ let pinned = prices.get_quote_venue(best.pamm, USDC, WETH, parse_units("1000", 6
 ```
 
 The snapshot source defaults to a `PriceLevelsRpcSource` (one
-`titan_getPammPriceLevels` call per `get_price_levels`). For a live feed, pass a
+`titan_getPammBooks` call per `get_price_levels`). For a live feed, pass a
 `PriceLevelsWsSource` instead — it streams complete snapshots, reconnects with
 backoff, and idle auto-closes, like `OverridesWsSource`. The stream is served
 from regional hosts (`eu.`, `ap.`, `us.`); pick the nearest:
@@ -158,7 +164,7 @@ use std::sync::Arc;
 use propamm::prices::{PriceLevels, PriceLevelsWsSource, PriceLevelsWsSourceConfig};
 
 let ws = PriceLevelsWsSource::new(PriceLevelsWsSourceConfig {
-    url: "wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels".into(),
+    url: "wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels_v2".into(),
     ..Default::default()
 });
 let prices = PriceLevels::with_source(Arc::new(ws));

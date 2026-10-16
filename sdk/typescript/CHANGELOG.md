@@ -2,6 +2,47 @@
 
 All notable changes to the TypeScript SDK (`propamm`) are documented here.
 
+## [1.8.0] - 2026-10-16
+
+### Changed
+
+- **Titan's v2 pAMM feeds are the default.** Titan deprecated
+  `/ws/pamm_quote_stream` and `/ws/pamm_price_levels` (they may stop after
+  2026-10-23). `OverridesWsSource` now defaults to
+  `wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream_v2` and `PriceLevelsWsSource` to
+  `wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels_v2`; `OverridesRpcSource` calls
+  `titan_getPammVenues` and `PriceLevelsRpcSource` calls `titan_getPammBooks` instead of
+  the undocumented `titan_getPammStateOverrides` / `titan_getPammPriceLevels`.
+  The default JSON-RPC URL is now `https://eu.data.titanbuilder.xyz/data`, the
+  path Titan documents. Both parsers still accept the v1 payloads.
+- **v2 price levels are rebuilt into the same base-unit order books.** The v2
+  feed sends one book per maker and pair with float `price`/`cumVolume` bids
+  and asks; each side becomes a `token_in -> token_out` order book of base-unit
+  amounts, as before. Titan's floats can leave an amount a few base units off
+  the exact simulated value. Books are filed under the router venue address
+  (`QUOTE_ADDRESS_VENUES` in `common/pamms` maps Kipseli's and Metric's
+  publishing addresses), and a book quoting a token without known decimals is
+  skipped.
+- `PriceLevel.variant` is now optional (`variant?`): the v2 feed doesn't say whether a rung was simulated or
+  interpolated, so it is only set for v1 payloads.
+- `toStateOverride`'s `pamms` option now also matches an entry whose priced addresses or mapped router
+  venue include the listed address, so `METRIC` selects both of Metric's
+  entries and `KIPSELI` selects Kipseli's.
+- **`TAURUSFI` now points at `0x20861433D9119B866EEB398cb1ad46652A3cF953`**,
+  TaurusFi's new contract. The previous address no longer receives price
+  updates, so quoting it reverts with `StaleUpdate()`. Code that hardcoded the
+  old address must be updated.
+
+### Added
+
+- `TOKEN_DECIMALS` in `common/tokens`: decimals of the tokens Titan's price
+  levels quote today, read from each token's `decimals()`.
+- `decimals` and `ethRpcUrl` options on `PriceLevels`, `PriceLevelsRpcSource` and `PriceLevelsWsSource`: extra decimals, and an Ethereum RPC URL to read the
+  `decimals()` of any other token once and cache it.
+- `OverridesSnapshot.pricedAddresses`: the addresses priced from each entry, from the v2 payload.
+- `parsePriceLevelsMessage` takes an optional decimals table.
+- `QUOTE_ADDRESS_VENUES` in `common/pamms`.
+
 ## [1.7.0] - 2026-10-15
 
 ### Added

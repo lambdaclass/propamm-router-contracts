@@ -1,7 +1,7 @@
 # OverridesRpcSource
 
 Fetch-on-demand source for pAMM state overrides: one
-`titan_getPammStateOverrides` HTTP call per `getOverrides()`. Nothing to
+`titan_getPammVenues` HTTP call per `getOverrides()`. Nothing to
 manage; simplest for sporadic quoting.
 
 ```ts
@@ -37,7 +37,7 @@ endpoint. Throws on HTTP or JSON-RPC errors.
 ### url (optional)
 
 - **Type:** `string`
-- **Default:** `https://eu.data.titanbuilder.xyz`
+- **Default:** `https://eu.data.titanbuilder.xyz/data`
 
 JSON-RPC endpoint. Served from regional hosts (`eu.`, `ap.`, `us.`);
 pick the nearest.

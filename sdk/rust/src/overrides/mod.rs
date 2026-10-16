@@ -8,14 +8,23 @@
 //! number/timestamp overrides so venues that check block context don't
 //! revert).
 //!
-//! Both payloads share one shape — top-level metadata plus one entry per pAMM:
+//! Both payloads (a `pamm_quote_stream_v2` frame and the `titan_getPammVenues`
+//! result) share one shape — one entry per maker quote address:
 //!
 //! ```json
 //! {
-//!   "blockNumber": 24285034,
-//!   "0x<pamm>": { "stateOverride": { "0x<contract>": { "stateDiff": { "0x<slot>": "0x<value>" } } } }
+//!   "venues": [{
+//!     "maker": "Goliath",
+//!     "quoteAddress": "0x<quote address>",
+//!     "pricedAddresses": ["0x<quote address>", "0x<pool priced from it>"],
+//!     "slot": 15436468, "blockNumber": 26197444, "timestamp": 1792061637827365465,
+//!     "stateOverride": { "0x<contract>": { "stateDiff": { "0x<slot>": "0x<value>" } } }
+//!   }]
 //! }
 //! ```
+//!
+//! The v1 shape (top-level metadata plus `"0x<pamm>": { "stateOverride": … }`
+//! entries) is still parsed, for sources pointed at the deprecated endpoints.
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
@@ -26,16 +35,16 @@ use rex_sdk::client::eth::StateOverrideSet;
 use serde_json::Value;
 
 use crate::common::helpers::parse_address;
-use crate::common::pamms::BEBOP;
+use crate::common::pamms::{BEBOP, venue_for_quote_address};
 use crate::error::{Error, Result};
 use crate::ws::{WsConnection, WsHandler};
 
 /// Default state-override endpoint. Served from regional hosts (`eu.`, `ap.`,
 /// `us.`); override the URL to pick the nearest.
-pub const DEFAULT_OVERRIDES_RPC_URL: &str = "https://eu.data.titanbuilder.xyz";
+pub const DEFAULT_OVERRIDES_RPC_URL: &str = "https://eu.data.titanbuilder.xyz/data";
 /// Default state-override stream endpoint. Served from regional hosts (`eu.`,
 /// `ap.`, `us.`); override the URL to pick the nearest.
-pub const DEFAULT_OVERRIDES_WS_URL: &str = "wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream";
+pub const DEFAULT_OVERRIDES_WS_URL: &str = "wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream_v2";
 
 /// Bebop prices from a single registry slot. When a snapshot carries no Bebop
 /// entry, [`to_state_override`] zeroes this slot by default so a stale
@@ -65,8 +74,11 @@ pub struct OverridesSnapshot {
     pub slot: Option<u64>,
     /// Generation time in nanoseconds since epoch.
     pub timestamp_ns: Option<u64>,
-    /// pAMM address → contract address → slot diffs.
+    /// pAMM quote address → contract address → slot diffs.
     pub per_pamm: HashMap<Address, ContractDiffs>,
+    /// pAMM quote address → the addresses priced from it (the quote address
+    /// plus any pools). Only the v2 payload carries this.
+    pub priced_addresses: HashMap<Address, Vec<Address>>,
 }
 
 impl OverridesSnapshot {
@@ -94,13 +106,16 @@ pub trait OverridesSource: Send + Sync {
 
 const META_KEYS: [&str; 4] = ["slot", "blockNumber", "block_number", "timestamp"];
 
-/// Parse a raw overrides payload (a WS frame or the JSON-RPC `result`) into a
-/// snapshot: metadata keys are split out and pAMMs/contracts with empty
-/// `stateDiff`s are dropped.
+/// Parse a raw overrides payload (a WS frame or the JSON-RPC `result`, v2 or
+/// v1 shape) into a snapshot: pAMMs/contracts with empty `stateDiff`s are
+/// dropped.
 pub fn parse_overrides_message(raw: &Value) -> Result<OverridesSnapshot> {
     let object = raw
         .as_object()
         .ok_or_else(|| Error::Overrides("overrides message is not a JSON object".into()))?;
+    if let Some(venues) = object.get("venues").and_then(Value::as_array) {
+        return Ok(parse_venues(venues));
+    }
 
     let mut per_pamm = HashMap::new();
     for (key, payload) in object {
@@ -123,7 +138,58 @@ pub fn parse_overrides_message(raw: &Value) -> Result<OverridesSnapshot> {
         slot: object.get("slot").and_then(parse_block_number),
         timestamp_ns: object.get("timestamp").and_then(Value::as_u64),
         per_pamm,
+        priced_addresses: HashMap::new(),
     })
+}
+
+/// v2: block context sits on every entry; entries of one payload agree on it,
+/// and the newest is kept should they not.
+fn parse_venues(venues: &[Value]) -> OverridesSnapshot {
+    let mut snapshot = OverridesSnapshot::default();
+    for venue in venues {
+        let Some(Ok(quote_address)) = venue
+            .get("quoteAddress")
+            .and_then(Value::as_str)
+            .map(parse_address)
+        else {
+            continue;
+        };
+        let Some(contracts) = parse_contract_diffs(venue) else {
+            continue;
+        };
+        snapshot.per_pamm.insert(quote_address, contracts);
+        let priced = venue
+            .get("pricedAddresses")
+            .and_then(Value::as_array)
+            .map(|list| {
+                list.iter()
+                    .filter_map(|a| a.as_str().and_then(|s| parse_address(s).ok()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        snapshot.priced_addresses.insert(quote_address, priced);
+
+        let block_number = venue.get("blockNumber").and_then(parse_block_number);
+        snapshot.block_number = snapshot.block_number.max(block_number);
+        let slot = venue.get("slot").and_then(parse_block_number);
+        snapshot.slot = snapshot.slot.max(slot);
+        let timestamp = venue.get("timestamp").and_then(Value::as_u64);
+        snapshot.timestamp_ns = snapshot.timestamp_ns.max(timestamp);
+    }
+    snapshot
+}
+
+fn entry_selected(
+    snapshot: &OverridesSnapshot,
+    quote_address: Address,
+    selected: &[Address],
+) -> bool {
+    selected.contains(&quote_address)
+        || selected.contains(&venue_for_quote_address(quote_address))
+        || snapshot
+            .priced_addresses
+            .get(&quote_address)
+            .is_some_and(|priced| priced.iter().any(|a| selected.contains(a)))
 }
 
 fn parse_contract_diffs(payload: &Value) -> Option<ContractDiffs> {
@@ -176,7 +242,10 @@ fn parse_block_number(value: &Value) -> Option<u64> {
 /// Options for [`to_state_override`].
 #[derive(Debug, Clone, Default)]
 pub struct ToStateOverrideOptions {
-    /// Restrict to these pAMM entries (default: all in the snapshot).
+    /// Restrict to the entries for these pAMMs (default: all in the snapshot).
+    /// An entry is kept when its quote address, an address priced from it, or
+    /// the router venue its quote address maps to is listed, so router venue
+    /// addresses such as `METRIC` select every entry that venue needs.
     pub pamms: Option<Vec<Address>>,
     /// Skip injecting the Bebop default slot when no Bebop entry is present.
     pub skip_bebop_default: bool,
@@ -192,7 +261,11 @@ pub fn to_state_override(
     let mut merged: HashMap<Address, SlotDiffs> = HashMap::new();
     let mut bebop_present = false;
     for (pamm, contracts) in &snapshot.per_pamm {
-        if options.pamms.as_ref().is_some_and(|s| !s.contains(pamm)) {
+        if options
+            .pamms
+            .as_ref()
+            .is_some_and(|s| !entry_selected(snapshot, *pamm, s))
+        {
             continue;
         }
         if *pamm == BEBOP {
@@ -220,7 +293,7 @@ pub fn to_state_override(
     set
 }
 
-/// Fetch-on-demand source: one `titan_getPammStateOverrides` call per
+/// Fetch-on-demand source: one `titan_getPammVenues` call per
 /// [`OverridesSource::get_overrides`].
 #[derive(Debug, Clone)]
 pub struct OverridesRpcSource {
@@ -252,7 +325,7 @@ impl OverridesSource for OverridesRpcSource {
             .json(&serde_json::json!({
                 "jsonrpc": "2.0",
                 "id": 1,
-                "method": "titan_getPammStateOverrides",
+                "method": "titan_getPammVenues",
                 "params": [],
             }))
             .send()
@@ -274,7 +347,7 @@ impl OverridesSource for OverridesRpcSource {
     }
 }
 
-/// Parse a `titan_getPammStateOverrides` JSON-RPC response body into a snapshot.
+/// Parse a `titan_getPammVenues` JSON-RPC response body into a snapshot.
 ///
 /// A present-but-null `"error"` is treated as success: many JSON-RPC servers
 /// send `{"result": {...}, "error": null}`, and the field's mere presence must
@@ -335,6 +408,7 @@ impl WsHandler for OverridesWsHandler {
         // A frame only carries the pAMMs it updates; entries for other pAMMs
         // stay cached from earlier frames.
         s.per_pamm.extend(frame.per_pamm);
+        s.priced_addresses.extend(frame.priced_addresses);
         if frame.block_number.is_some() {
             s.block_number = frame.block_number;
         }
@@ -459,6 +533,7 @@ mod tests {
             slot: None,
             timestamp_ns: None,
             per_pamm,
+            priced_addresses: HashMap::new(),
         }
     }
 
@@ -560,6 +635,71 @@ mod tests {
             },
         );
         assert!(!set.0.contains_key(&BEBOP));
+    }
+
+    fn v2_venue(quote_address: &str, contract: &str, priced: &[&str], value: u64) -> Value {
+        serde_json::json!({
+            "maker": "M",
+            "quoteAddress": quote_address,
+            "pricedAddresses": priced,
+            "slot": 10 + value, "blockNumber": 20 + value, "timestamp": 1792166394410832280u64,
+            "stateOverride": { contract: { "stateDiff": { "0x1": format!("{value:#x}") } } },
+        })
+    }
+
+    #[test]
+    fn parse_v2_venues_reads_entries_and_block_context() {
+        let raw = serde_json::json!({ "venues": [
+            v2_venue("0x00000000000000000000000000000000000000aa", "0x1111111111111111111111111111111111111111", &[], 1),
+            v2_venue("0x00000000000000000000000000000000000000bb", "0x2222222222222222222222222222222222222222", &[], 2),
+        ]});
+        let snapshot = parse_overrides_message(&raw).unwrap();
+        assert_eq!(snapshot.per_pamm.len(), 2);
+        // The newest block context across entries.
+        assert_eq!(snapshot.slot, Some(12));
+        assert_eq!(snapshot.block_number, Some(22));
+        assert_eq!(snapshot.timestamp_ns, Some(1_792_166_394_410_832_280));
+    }
+
+    #[test]
+    fn to_state_override_selects_every_entry_a_router_venue_needs() {
+        use crate::common::pamms::{KIPSELI, METRIC};
+        let metric = format!("{METRIC:#x}");
+        let (metric_a, metric_b, kipseli) = (
+            "0xe844701934d9c6085b292e428f41b911cc0b3872",
+            "0x30a88bf894d1b806125a23ebf23d715496fd7102",
+            "0xc9a956b5196dfe110debe8781857bc8b97d32091",
+        );
+        let (c1, c2, c3) = (
+            "0x1111111111111111111111111111111111111111",
+            "0x2222222222222222222222222222222222222222",
+            "0x3333333333333333333333333333333333333333",
+        );
+        let raw = serde_json::json!({ "venues": [
+            // Metric lists its router venue among the priced addresses.
+            v2_venue(metric_a, c1, &[metric_a, &metric], 1),
+            v2_venue(metric_b, c2, &[metric_b, &metric], 2),
+            // Kipseli doesn't; its quote address is mapped to the venue instead.
+            v2_venue(kipseli, c3, &[kipseli], 3),
+        ]});
+        let snapshot = parse_overrides_message(&raw).unwrap();
+        let contracts = |pamm: Address| {
+            let options = ToStateOverrideOptions {
+                pamms: Some(vec![pamm]),
+                skip_bebop_default: true,
+            };
+            let mut keys: Vec<Address> = to_state_override(&snapshot, &options)
+                .0
+                .into_keys()
+                .collect();
+            keys.sort();
+            keys
+        };
+        assert_eq!(
+            contracts(METRIC),
+            vec![parse_address(c1).unwrap(), parse_address(c2).unwrap()]
+        );
+        assert_eq!(contracts(KIPSELI), vec![parse_address(c3).unwrap()]);
     }
 
     #[test]

@@ -7,12 +7,21 @@ here consume either one and produce snapshots that the router's quote calls
 attach to ``eth_call`` (third parameter, plus a block-number/timestamp override
 so venues that check block context don't revert).
 
-Both payloads share one shape — top-level metadata plus one entry per pAMM::
+Both payloads (a ``pamm_quote_stream_v2`` frame and the ``titan_getPammVenues``
+result) share one shape — one entry per maker quote address::
 
     {
-      "blockNumber": 24285034,
-      "0x<pamm>": {"stateOverride": {"0x<contract>": {"stateDiff": {"0x<slot>": "0x<value>"}}}}
+      "venues": [{
+        "maker": "Goliath",
+        "quoteAddress": "0x<quote address>",
+        "pricedAddresses": ["0x<quote address>", "0x<pool priced from it>"],
+        "slot": 15436468, "blockNumber": 26197444, "timestamp": 1792061637827365465,
+        "stateOverride": {"0x<contract>": {"stateDiff": {"0x<slot>": "0x<value>"}}}
+      }]
     }
+
+The v1 shape (top-level metadata plus ``"0x<pamm>": {"stateOverride": ...}``
+entries) is still parsed, for sources pointed at the deprecated endpoints.
 """
 
 from __future__ import annotations
@@ -28,16 +37,16 @@ import aiohttp
 import websockets
 
 from .._tls import ssl_context as _ssl_context
-from ..common.pamms import BEBOP
+from ..common.pamms import BEBOP, QUOTE_ADDRESS_VENUES
 from ..error import OverridesError, TimeoutError
 from eth_utils import to_checksum_address
 
 #: Default state-override endpoint. Served from regional hosts (``eu.``,
 #: ``ap.``, ``us.``); override the URL to pick the nearest.
-DEFAULT_OVERRIDES_RPC_URL = "https://eu.data.titanbuilder.xyz"
+DEFAULT_OVERRIDES_RPC_URL = "https://eu.data.titanbuilder.xyz/data"
 #: Default state-override stream endpoint. Served from regional hosts (``eu.``,
 #: ``ap.``, ``us.``); override the URL to pick the nearest.
-DEFAULT_OVERRIDES_WS_URL = "wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream"
+DEFAULT_OVERRIDES_WS_URL = "wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream_v2"
 
 
 #: Bebop prices from a single registry slot. When a snapshot carries no Bebop
@@ -71,8 +80,11 @@ class OverridesSnapshot:
     slot: int | None = None
     #: Generation time in nanoseconds since epoch.
     timestamp_ns: int | None = None
-    #: pAMM address (lowercased) -> contract address (lowercased) -> slot diffs.
+    #: pAMM quote address (lowercased) -> contract address (lowercased) -> slot diffs.
     per_pamm: dict[str, ContractDiffs] = field(default_factory=dict)
+    #: pAMM quote address (lowercased) -> the addresses priced from it (the quote
+    #: address plus any pools, lowercased). Only the v2 payload carries this.
+    priced_addresses: dict[str, list[str]] = field(default_factory=dict)
 
     def copy(self) -> OverridesSnapshot:
         """A deep-ish copy so a later frame can't mutate a handed-out snapshot."""
@@ -84,6 +96,7 @@ class OverridesSnapshot:
                 pamm: {contract: dict(slots) for contract, slots in contracts.items()}
                 for pamm, contracts in self.per_pamm.items()
             },
+            priced_addresses={pamm: list(a) for pamm, a in self.priced_addresses.items()},
         )
 
 
@@ -139,13 +152,15 @@ def _parse_contract_diffs(payload: Any) -> ContractDiffs | None:
 
 
 def parse_overrides_message(raw: Any) -> OverridesSnapshot:
-    """Parse a raw overrides payload (a WS frame or the JSON-RPC ``result``).
+    """Parse a raw overrides payload (a WS frame or the JSON-RPC ``result``, v2 or v1).
 
-    Metadata keys are split out, addresses and slots are lowercased, and
-    pAMMs/contracts with empty ``stateDiff``s are dropped.
+    Addresses and slots are lowercased, and pAMMs/contracts with empty
+    ``stateDiff``s are dropped.
     """
     if not isinstance(raw, dict):
         raise OverridesError("overrides message is not a JSON object")
+    if isinstance(raw.get("venues"), list):
+        return _parse_venues(raw["venues"])
 
     per_pamm: dict[str, ContractDiffs] = {}
     for key, payload in raw.items():
@@ -163,6 +178,47 @@ def parse_overrides_message(raw: Any) -> OverridesSnapshot:
     )
 
 
+def _parse_venues(venues: list) -> OverridesSnapshot:
+    # v2: block context sits on every entry; entries of one payload agree on it,
+    # and the newest is kept should they not.
+    snapshot = OverridesSnapshot()
+    for venue in venues:
+        if not isinstance(venue, dict) or not isinstance(venue.get("quoteAddress"), str):
+            continue
+        contracts = _parse_contract_diffs(venue)
+        if not contracts:
+            continue
+        key = venue["quoteAddress"].lower()
+        snapshot.per_pamm[key] = contracts
+        priced = venue.get("pricedAddresses")
+        snapshot.priced_addresses[key] = [
+            a.lower() for a in (priced if isinstance(priced, list) else []) if isinstance(a, str)
+        ]
+        snapshot.block_number = _max(
+            snapshot.block_number, _parse_block_number(venue.get("blockNumber"))
+        )
+        snapshot.slot = _max(snapshot.slot, _parse_block_number(venue.get("slot")))
+        timestamp = venue.get("timestamp")
+        if isinstance(timestamp, int) and not isinstance(timestamp, bool):
+            snapshot.timestamp_ns = _max(snapshot.timestamp_ns, timestamp)
+    return snapshot
+
+
+def _max(current: int | None, new: int | None) -> int | None:
+    if new is None:
+        return current
+    return new if current is None or new > current else current
+
+
+def _entry_selected(snapshot: OverridesSnapshot, quote_address: str, selected: set[str]) -> bool:
+    if quote_address in selected:
+        return True
+    venue = QUOTE_ADDRESS_VENUES.get(quote_address)
+    if venue is not None and venue.lower() in selected:
+        return True
+    return any(a in selected for a in snapshot.priced_addresses.get(quote_address, []))
+
+
 def _word(value: int) -> str:
     return "0x" + format(value, "064x")
 
@@ -176,7 +232,10 @@ def to_state_override(
     """Merge a snapshot's per-pAMM diffs into the ``eth_call`` state-override map.
 
     Diffs are merged at slot level when multiple pAMM entries touch the same
-    contract. Returns ``{address: {"stateDiff": {slot: value}}}`` with 32-byte
+    contract. ``pamms`` keeps an entry when its quote address, an address priced
+    from it, or the router venue its quote address maps to is listed, so router
+    venue addresses such as ``METRIC`` select every entry that venue needs.
+    Returns ``{address: {"stateDiff": {slot: value}}}`` with 32-byte
     hex words, ready for the ``eth_call`` third parameter.
     """
     selected = {pamm.lower() for pamm in pamms} if pamms is not None else None
@@ -184,7 +243,7 @@ def to_state_override(
     merged: dict[str, SlotDiffs] = {}
     bebop_present = False
     for pamm, contracts in snapshot.per_pamm.items():
-        if selected is not None and pamm not in selected:
+        if selected is not None and not _entry_selected(snapshot, pamm, selected):
             continue
         if pamm == _BEBOP_LOWER:
             bebop_present = True
@@ -216,13 +275,13 @@ class OverridesSource(abc.ABC):
 
 
 class OverridesRpcSource(OverridesSource):
-    """Fetch-on-demand source: one ``titan_getPammStateOverrides`` call per fetch."""
+    """Fetch-on-demand source: one ``titan_getPammVenues`` call per fetch."""
 
     def __init__(self, url: str = DEFAULT_OVERRIDES_RPC_URL) -> None:
         self.url = url
 
     async def get_overrides(self) -> OverridesSnapshot:
-        request = {"jsonrpc": "2.0", "id": 1, "method": "titan_getPammStateOverrides", "params": []}
+        request = {"jsonrpc": "2.0", "id": 1, "method": "titan_getPammVenues", "params": []}
         ssl_ctx = _ssl_context() if self.url.startswith("https") else None
         try:
             async with aiohttp.ClientSession() as session:
@@ -238,7 +297,7 @@ class OverridesRpcSource(OverridesSource):
 
 
 def _parse_rpc_response(body: Any) -> OverridesSnapshot:
-    """Parse a ``titan_getPammStateOverrides`` response body into a snapshot.
+    """Parse a ``titan_getPammVenues`` response body into a snapshot.
 
     A present-but-null ``"error"`` is treated as success: many JSON-RPC servers
     send ``{"result": {...}, "error": null}``, and the field's mere presence
@@ -377,6 +436,7 @@ class OverridesWsSource(OverridesSource):
         # A frame only carries the pAMMs it updates; entries for other pAMMs
         # stay cached from earlier frames.
         self._snapshot.per_pamm.update(copy.deepcopy(frame.per_pamm))
+        self._snapshot.priced_addresses.update(copy.deepcopy(frame.priced_addresses))
         if frame.block_number is not None:
             self._snapshot.block_number = frame.block_number
         if frame.slot is not None:
