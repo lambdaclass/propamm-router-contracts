@@ -27,6 +27,7 @@ PriceLevels(
     source: PriceLevelsSource | None = None,
     *,
     rpc_url: str | None = None,
+    decimals: dict[str, int] | None = None,
 )
 ```
 
@@ -48,6 +49,15 @@ prices = PriceLevels(
     rpc_url="https://us.data.titanbuilder.xyz/data",
 )
 ```
+
+### decimals (optional)
+
+Decimals of tokens missing from `TOKEN_DECIMALS`, by token address (an entry
+also overrides the built-in value). Titan's v2 feed sends amounts in human
+units, so a book quoting a token without known decimals is skipped.
+Each value must be an integer from 0 to 255, or the constructor raises
+`PricesError`.
+Applies to the default source; a source you pass takes its own.
 
 ## Methods
 

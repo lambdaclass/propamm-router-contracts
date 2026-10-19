@@ -118,9 +118,15 @@ Titan's v2 feed sends prices and sizes as decimal numbers; the SDK turns them
 back into exact base-unit amounts (a rebuilt amount can be a few base units off,
 from Titan's float rounding), using the decimals of each token. Tokens Titan
 lists today are built in (`TOKEN_DECIMALS`); for any other token, pass its
-decimals or an Ethereum RPC URL to read them on chain, or that token's books
-are skipped. Books are filed under the router venue address
-(`QUOTE_ADDRESS_VENUES` maps Titan's publishing address where they differ).
+decimals (`decimals=`, keyed by token address, on `PriceLevels` or either
+source), or that token's books are skipped. Books are filed under the router
+venue address (`QUOTE_ADDRESS_VENUES` maps Titan's publishing address where
+they differ).
+
+```python
+# DAI isn't in TOKEN_DECIMALS; without this, its books are skipped.
+prices = PriceLevels(decimals={"0x6B175474E89094C44Da98b954EedeAC495271d0F": 18})
+```
 
 The `PriceLevels` client wraps it, mirroring `PropAmmRouter`: a single class
 with a default snapshot source you can override.

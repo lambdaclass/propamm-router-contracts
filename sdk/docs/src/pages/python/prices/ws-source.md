@@ -24,8 +24,11 @@ PriceLevelsWsSource(
     *,
     first_frame_timeout: float = 5.0,
     idle_timeout: float = 30.0,
+    decimals: dict[str, int] | None = None,
 )
 ```
+
+`decimals` as in [`PriceLevelsRpcSource`](/python/prices/rpc-source#decimals-optional).
 
 ## Methods
 

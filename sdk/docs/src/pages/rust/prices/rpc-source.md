@@ -32,6 +32,16 @@ impl Default for PriceLevelsRpcSource
 
 Equivalent to `new(DEFAULT_PRICE_LEVELS_RPC_URL)`.
 
+### PriceLevelsRpcSource::with_decimals()
+
+```rust
+pub fn with_decimals(self, decimals: HashMap<Address, u8>) -> Self
+```
+
+Decimals of tokens missing from `TOKEN_DECIMALS`, by token address (an entry
+also overrides the built-in value). Titan's v2 feed sends amounts in human
+units, so a book quoting a token without known decimals is skipped.
+
 ## Methods
 
 Implements [`PriceLevelsSource`](/rust/types#pricelevelsource).

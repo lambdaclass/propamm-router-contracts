@@ -61,3 +61,12 @@ pick the nearest.
 - **Type:** `typeof fetch`
 
 Custom fetch implementation.
+
+### decimals (optional)
+
+- **Type:** `Record<string, number>`
+
+Decimals of tokens missing from `TOKEN_DECIMALS`, by token address (an entry
+also overrides the built-in value). Titan's v2 feed sends amounts in human
+units, so a book quoting a token without known decimals is skipped.
+Each value must be an integer from 0 to 255, or the constructor throws.

@@ -2,6 +2,29 @@
 
 All notable changes to the TypeScript SDK (`propamm`) are documented here.
 
+## [Unreleased]
+
+### Changed
+
+- `decimals` values on `PriceLevels`, `PriceLevelsRpcSource` and
+  `PriceLevelsWsSource` must be integers from 0 to 255; anything else throws
+  when the source is built. A book whose decimals in the table passed to
+  `parsePriceLevelsMessage` aren't valid is skipped, instead of throwing.
+
+### Removed
+
+- **The `ethRpcUrl` option** on `PriceLevels`, `PriceLevelsRpcSource` and
+  `PriceLevelsWsSource`. A single failed `decimals()` read skipped that token's
+  books for the source's lifetime. Pass the decimals of tokens missing from
+  `TOKEN_DECIMALS` with `decimals` instead; code that passed `ethRpcUrl` must
+  drop it.
+
+### Fixed
+
+- A v2 price rung whose amounts don't fit a uint256 is dropped instead of being
+  returned. So is a rung whose input rounds to zero base units, which read as a
+  free fill.
+
 ## [1.8.0] - 2026-10-16
 
 ### Changed
