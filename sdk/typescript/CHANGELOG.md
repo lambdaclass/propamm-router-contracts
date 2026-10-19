@@ -2,7 +2,7 @@
 
 All notable changes to the TypeScript SDK (`propamm`) are documented here.
 
-## [Unreleased]
+## [1.8.1] - 2026-10-19
 
 ### Changed
 
