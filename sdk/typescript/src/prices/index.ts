@@ -41,7 +41,7 @@
  * parsed, for sources pointed at the deprecated endpoints.
  */
 
-import { createPublicClient, erc20Abi, http, maxUint256, numberToHex, type Address } from "viem";
+import { maxUint256, numberToHex, type Address } from "viem";
 import { QUOTE_ADDRESS_VENUES } from "../common/pamms.js";
 import { TOKEN_DECIMALS } from "../common/tokens.js";
 import { WsSource } from "../ws-source.js";
@@ -113,65 +113,30 @@ export const DEFAULT_PRICE_LEVELS_RPC_URL = "https://eu.data.titanbuilder.xyz/da
  */
 export const DEFAULT_PRICE_LEVELS_WS_URL = "wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels_v2";
 
-/** How sources learn the decimals of tokens missing from {@link TOKEN_DECIMALS}. */
+/** Decimals for tokens missing from {@link TOKEN_DECIMALS}. */
 export interface TokenDecimalsOptions {
-  /** Extra or overriding decimals, by token address. */
-  decimals?: Record<string, number>;
   /**
-   * Ethereum JSON-RPC endpoint. When set, a token in neither table has its
-   * `decimals()` read once and cached; otherwise books quoting it are skipped.
+   * Extra or overriding decimals, by token address. A v2 book quoting a token
+   * in neither table is skipped. A value outside 0–255 throws.
    */
-  ethRpcUrl?: string;
+  decimals?: Record<string, number>;
 }
 
-/** Token decimals: the built-in table, caller additions, and cached on-chain reads. */
-class TokenDecimals {
-  private readonly table: Record<string, number>;
-  private readonly client?: ReturnType<typeof createPublicClient>;
-  private readonly failed = new Set<string>();
-
-  constructor(options: TokenDecimalsOptions = {}) {
-    this.table = { ...TOKEN_DECIMALS };
-    for (const [token, decimals] of Object.entries(options.decimals ?? {})) {
-      this.table[token.toLowerCase()] = decimals;
-    }
-    if (options.ethRpcUrl) this.client = createPublicClient({ transport: http(options.ethRpcUrl) });
-  }
-
-  /** Read the decimals of the payload's unknown tokens, then return the table. */
-  async resolve(raw: unknown): Promise<Record<string, number>> {
-    if (this.client) {
-      const unknown = bookTokens(raw).filter((t) => !(t in this.table) && !this.failed.has(t));
-      await Promise.all(
-        unknown.map(async (token) => {
-          try {
-            const decimals = await this.client!.readContract({
-              address: token as Address,
-              abi: erc20Abi,
-              functionName: "decimals",
-            });
-            this.table[token] = decimals;
-          } catch {
-            this.failed.add(token); // not retried: its books stay skipped
-          }
-        }),
-      );
-    }
-    return this.table;
-  }
+/** Whether `value` is a token's decimals as `decimals()` returns them: an integer 0–255. */
+function isTokenDecimals(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 255;
 }
 
-function bookTokens(raw: unknown): string[] {
-  const books = (raw as Record<string, unknown> | null)?.["books"];
-  if (!Array.isArray(books)) return [];
-  const tokens = new Set<string>();
-  for (const book of books) {
-    for (const key of ["token1Address", "token2Address"]) {
-      const token = (book as Record<string, unknown> | null)?.[key];
-      if (typeof token === "string") tokens.add(token.toLowerCase());
+/** {@link TOKEN_DECIMALS} plus the caller's additions or overrides, keyed lowercase. */
+function decimalsTable(options: TokenDecimalsOptions): Record<string, number> {
+  const table: Record<string, number> = { ...TOKEN_DECIMALS };
+  for (const [token, decimals] of Object.entries(options.decimals ?? {})) {
+    if (!isTokenDecimals(decimals)) {
+      throw new Error(`decimals for ${token} must be an integer 0-255, got ${String(decimals)}`);
     }
+    table[token.toLowerCase()] = decimals;
   }
-  return [...tokens];
+  return table;
 }
 
 export interface PriceLevelsOptions extends TokenDecimalsOptions {
@@ -211,12 +176,12 @@ export class PriceLevels {
   private readonly rpc: PriceLevelsRpcSource;
 
   constructor(options: PriceLevelsOptions = {}) {
-    const decimals = { decimals: options.decimals, ethRpcUrl: options.ethRpcUrl };
-    this.source = options.source ?? new PriceLevelsRpcSource({ url: options.rpcUrl, ...decimals });
+    const rpcOptions = { url: options.rpcUrl, decimals: options.decimals };
+    this.source = options.source ?? new PriceLevelsRpcSource(rpcOptions);
     this.rpc =
       this.source instanceof PriceLevelsRpcSource
         ? this.source
-        : new PriceLevelsRpcSource({ url: options.rpcUrl, ...decimals });
+        : new PriceLevelsRpcSource(rpcOptions);
   }
 
   /** Latest price-level snapshot from the configured source. */
@@ -304,7 +269,7 @@ function parseBooks(
     const t2 = token2.toLowerCase() as Address;
     const d1 = decimals[t1];
     const d2 = decimals[t2];
-    if (d1 === undefined || d2 === undefined) continue;
+    if (!isTokenDecimals(d1) || !isTokenDecimals(d2)) continue;
 
     const qa = quoteAddress.toLowerCase();
     const pamm = (QUOTE_ADDRESS_VENUES[qa]?.toLowerCase() ?? qa) as Address;
@@ -534,18 +499,17 @@ export interface PriceLevelsRpcSourceOptions extends TokenDecimalsOptions {
 export class PriceLevelsRpcSource implements PriceLevelsSource {
   private readonly url: string;
   private readonly fetchFn: typeof fetch;
-  private readonly decimals: TokenDecimals;
+  private readonly decimals: Record<string, number>;
 
   constructor(options: PriceLevelsRpcSourceOptions = {}) {
     this.url = options.url ?? DEFAULT_PRICE_LEVELS_RPC_URL;
     this.fetchFn = options.fetch ?? fetch;
-    this.decimals = new TokenDecimals(options);
+    this.decimals = decimalsTable(options);
   }
 
   /** Latest full snapshot via `titan_getPammBooks`. */
   async getPriceLevels(): Promise<PriceLevelsSnapshot> {
-    const raw = await this.rpc("titan_getPammBooks", []);
-    return parsePriceLevelsMessage(raw, await this.decimals.resolve(raw));
+    return parsePriceLevelsMessage(await this.rpc("titan_getPammBooks", []), this.decimals);
   }
 
   /** Best quote across all pAMMs via `titan_getPammQuote`. */
@@ -614,9 +578,9 @@ export interface PriceLevelsWsSourceOptions extends TokenDecimalsOptions {
  */
 export class PriceLevelsWsSource extends WsSource<unknown> implements PriceLevelsSource {
   // Replaced outright on each frame: price-levels frames are complete snapshots.
-  // Kept raw and parsed per call, once any unknown token's decimals are read.
+  // Kept raw and parsed per call, with this source's decimals.
   private frame: unknown;
-  private readonly decimals: TokenDecimals;
+  private readonly decimals: Record<string, number>;
 
   protected override get name() {
     return "price-levels";
@@ -624,7 +588,7 @@ export class PriceLevelsWsSource extends WsSource<unknown> implements PriceLevel
 
   constructor(options: PriceLevelsWsSourceOptions = {}) {
     super(options.url ?? DEFAULT_PRICE_LEVELS_WS_URL, options);
-    this.decimals = new TokenDecimals(options);
+    this.decimals = decimalsTable(options);
   }
 
   protected override applyFrame(data: string): void {
@@ -638,7 +602,6 @@ export class PriceLevelsWsSource extends WsSource<unknown> implements PriceLevel
   }
 
   async getPriceLevels(): Promise<PriceLevelsSnapshot> {
-    const frame = await this.getSnapshot();
-    return parsePriceLevelsMessage(frame, await this.decimals.resolve(frame));
+    return parsePriceLevelsMessage(await this.getSnapshot(), this.decimals);
   }
 }

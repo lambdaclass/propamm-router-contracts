@@ -39,11 +39,7 @@
 //! The v1 payload (`pamms` of hex `amountIn`/`amountOut` rungs) is still
 //! parsed, for sources pointed at the deprecated endpoints.
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use ethrex_common::{Address, U256};
@@ -343,96 +339,11 @@ fn rungs(value: Option<&Value>) -> impl Iterator<Item = (Decimal, Decimal)> + '_
         })
 }
 
-/// Token decimals: the built-in table, caller additions, and cached on-chain
-/// reads. Shared by a source's clones.
-#[derive(Debug)]
-struct TokenDecimals {
-    table: Mutex<HashMap<Address, u8>>,
-    failed: Mutex<HashSet<Address>>,
-    eth_rpc_url: Option<String>,
-    client: reqwest::Client,
-}
-
-impl TokenDecimals {
-    fn new(extra: HashMap<Address, u8>, eth_rpc_url: Option<String>) -> Self {
-        let mut table: HashMap<Address, u8> = TOKEN_DECIMALS.into_iter().collect();
-        table.extend(extra);
-        Self {
-            table: Mutex::new(table),
-            failed: Mutex::new(HashSet::new()),
-            eth_rpc_url,
-            client: reqwest::Client::new(),
-        }
-    }
-
-    /// Read the decimals of the payload's unknown tokens, then return the table.
-    async fn resolve(&self, raw: &Value) -> HashMap<Address, u8> {
-        if let Some(url) = &self.eth_rpc_url {
-            let unknown: Vec<Address> = {
-                let table = self.table.lock().expect("decimals lock");
-                let failed = self.failed.lock().expect("decimals lock");
-                book_tokens(raw)
-                    .into_iter()
-                    .filter(|t| !table.contains_key(t) && !failed.contains(t))
-                    .collect()
-            };
-            let reads = unknown.iter().map(|token| self.read(url, *token));
-            let results = futures_util::future::join_all(reads).await;
-            let mut table = self.table.lock().expect("decimals lock");
-            let mut failed = self.failed.lock().expect("decimals lock");
-            for (token, result) in unknown.into_iter().zip(results) {
-                match result {
-                    Some(decimals) => {
-                        table.insert(token, decimals);
-                    }
-                    // Not retried: its books stay skipped.
-                    None => {
-                        failed.insert(token);
-                    }
-                }
-            }
-        }
-        self.table.lock().expect("decimals lock").clone()
-    }
-
-    async fn read(&self, url: &str, token: Address) -> Option<u8> {
-        // decimals() selector
-        let call = serde_json::json!({ "to": format!("{token:#x}"), "data": "0x313ce567" });
-        let body: Value = self
-            .client
-            .post(url)
-            .json(&serde_json::json!({
-                "jsonrpc": "2.0", "id": 1, "method": "eth_call", "params": [call, "latest"],
-            }))
-            .send()
-            .await
-            .ok()?
-            .json()
-            .await
-            .ok()?;
-        let word = body.get("result")?.as_str()?.strip_prefix("0x")?;
-        if word.len() != 64 {
-            return None;
-        }
-        u8::from_str_radix(word.get(62..)?, 16)
-            .ok()
-            .filter(|_| word[..62].bytes().all(|b| b == b'0'))
-    }
-}
-
-fn book_tokens(raw: &Value) -> Vec<Address> {
-    let mut tokens: Vec<Address> = raw
-        .get("books")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .flat_map(|book| ["token1Address", "token2Address"].map(|k| book.get(k)))
-        .flatten()
-        .filter_map(|v| v.as_str().and_then(|s| parse_address(s).ok()))
-        .collect();
-    tokens.sort();
-    tokens.dedup();
-    tokens
+/// [`TOKEN_DECIMALS`] plus the caller's additions or overrides.
+fn decimals_table(extra: HashMap<Address, u8>) -> HashMap<Address, u8> {
+    let mut table: HashMap<Address, u8> = TOKEN_DECIMALS.into_iter().collect();
+    table.extend(extra);
+    table
 }
 
 fn parse_pamm(entry: &Value) -> Option<PammPriceLevels> {
@@ -588,7 +499,7 @@ fn extract_rpc_result(body: &Value) -> Result<Value> {
 pub struct PriceLevelsRpcSource {
     url: String,
     client: reqwest::Client,
-    decimals: Arc<TokenDecimals>,
+    decimals: Arc<HashMap<Address, u8>>,
 }
 
 impl Default for PriceLevelsRpcSource {
@@ -602,19 +513,14 @@ impl PriceLevelsRpcSource {
         Self {
             url: url.into(),
             client: reqwest::Client::new(),
-            decimals: Arc::new(TokenDecimals::new(HashMap::new(), None)),
+            decimals: Arc::new(decimals_table(HashMap::new())),
         }
     }
 
-    /// Add to or override [`TOKEN_DECIMALS`]; with `eth_rpc_url`, a token in
-    /// neither has its `decimals()` read once and cached, otherwise books
-    /// quoting it are skipped.
-    pub fn with_decimals(
-        mut self,
-        decimals: HashMap<Address, u8>,
-        eth_rpc_url: Option<String>,
-    ) -> Self {
-        self.decimals = Arc::new(TokenDecimals::new(decimals, eth_rpc_url));
+    /// Add to or override [`TOKEN_DECIMALS`]; a v2 book quoting a token in
+    /// neither is skipped.
+    pub fn with_decimals(mut self, decimals: HashMap<Address, u8>) -> Self {
+        self.decimals = Arc::new(decimals_table(decimals));
         self
     }
 
@@ -685,8 +591,7 @@ impl PriceLevelsSource for PriceLevelsRpcSource {
         let result = self
             .rpc("titan_getPammBooks", serde_json::json!([]))
             .await?;
-        let decimals = self.decimals.resolve(&result).await;
-        parse_price_levels_message_with(&result, &decimals).map(Arc::new)
+        parse_price_levels_message_with(&result, &self.decimals).map(Arc::new)
     }
 
     fn as_rpc_source(&self) -> Option<PriceLevelsRpcSource> {
@@ -720,7 +625,8 @@ impl Default for PriceLevelsWsSourceConfig {
 struct PriceLevelsWsHandler;
 
 impl WsHandler for PriceLevelsWsHandler {
-    // Kept raw and parsed per call, once any unknown token's decimals are read.
+    // Kept raw and parsed per call: a handler has no access to its source's
+    // decimals.
     type Snapshot = Value;
 
     fn apply_frame(snapshot: &mut Arc<Self::Snapshot>, text: &str) -> bool {
@@ -753,7 +659,7 @@ impl WsHandler for PriceLevelsWsHandler {
 /// [`PriceLevelsSource::close`] tears down immediately and permanently.
 pub struct PriceLevelsWsSource {
     conn: WsConnection<PriceLevelsWsHandler>,
-    decimals: TokenDecimals,
+    decimals: HashMap<Address, u8>,
 }
 
 impl Default for PriceLevelsWsSource {
@@ -766,17 +672,13 @@ impl PriceLevelsWsSource {
     pub fn new(config: PriceLevelsWsSourceConfig) -> Self {
         Self {
             conn: WsConnection::new(config.url, config.idle_timeout, config.first_frame_timeout),
-            decimals: TokenDecimals::new(HashMap::new(), None),
+            decimals: decimals_table(HashMap::new()),
         }
     }
 
     /// As [`PriceLevelsRpcSource::with_decimals`].
-    pub fn with_decimals(
-        mut self,
-        decimals: HashMap<Address, u8>,
-        eth_rpc_url: Option<String>,
-    ) -> Self {
-        self.decimals = TokenDecimals::new(decimals, eth_rpc_url);
+    pub fn with_decimals(mut self, decimals: HashMap<Address, u8>) -> Self {
+        self.decimals = decimals_table(decimals);
         self
     }
 }
@@ -785,8 +687,7 @@ impl PriceLevelsWsSource {
 impl PriceLevelsSource for PriceLevelsWsSource {
     async fn get_price_levels(&self) -> Result<Arc<PriceLevelsSnapshot>> {
         let frame = self.conn.get_snapshot().await?;
-        let decimals = self.decimals.resolve(&frame).await;
-        parse_price_levels_message_with(&frame, &decimals).map(Arc::new)
+        parse_price_levels_message_with(&frame, &self.decimals).map(Arc::new)
     }
 
     fn close(&self) {

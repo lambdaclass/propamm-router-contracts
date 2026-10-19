@@ -202,7 +202,7 @@ def _parse_books(raw: dict, decimals: dict[str, int]) -> PriceLevelsSnapshot:
             continue
         d1 = decimals.get(token1.lower())
         d2 = decimals.get(token2.lower())
-        if d1 is None or d2 is None:
+        if not (_is_token_decimals(d1) and _is_token_decimals(d2)):
             continue
 
         pamm = _parse_address(QUOTE_ADDRESS_VENUES.get(quote_address.lower(), quote_address))
@@ -283,55 +283,17 @@ def _base_units(value: Decimal, decimals: int) -> int | None:
     return units if units <= _MAX_UINT256 else None
 
 
-class _TokenDecimals:
-    """Token decimals: the built-in table, caller additions, and cached on-chain reads."""
-
-    def __init__(self, decimals: dict[str, int] | None, eth_rpc_url: str | None) -> None:
-        self.table = dict(TOKEN_DECIMALS)
-        self.table.update({token.lower(): d for token, d in (decimals or {}).items()})
-        self.eth_rpc_url = eth_rpc_url
-        self._failed: set[str] = set()
-
-    async def resolve(self, raw: Any) -> dict[str, int]:
-        """Read the decimals of the payload's unknown tokens, then return the table."""
-        if self.eth_rpc_url is None:
-            return self.table
-        unknown = [t for t in _book_tokens(raw) if t not in self.table and t not in self._failed]
-        if unknown:
-            results = await asyncio.gather(*(self._read(t) for t in unknown))
-            for token, decimals in zip(unknown, results):
-                if decimals is None:
-                    self._failed.add(token)  # not retried: its books stay skipped
-                else:
-                    self.table[token] = decimals
-        return self.table
-
-    async def _read(self, token: str) -> int | None:
-        # decimals() selector
-        call = {"to": token, "data": "0x313ce567"}
-        request = {"jsonrpc": "2.0", "id": 1, "method": "eth_call", "params": [call, "latest"]}
-        ssl_ctx = _ssl_context() if self.eth_rpc_url.startswith("https") else None
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(self.eth_rpc_url, json=request, ssl=ssl_ctx) as response:
-                    body = await response.json()
-            return int(body["result"], 16) if len(body.get("result") or "") == 66 else None
-        except (aiohttp.ClientError, ValueError, KeyError, TypeError):
-            return None
+def _is_token_decimals(value: Any) -> bool:
+    """Whether ``value`` is a token's decimals as ``decimals()`` returns them: 0-255."""
+    return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 255
 
 
-def _book_tokens(raw: Any) -> list[str]:
-    books = raw.get("books") if isinstance(raw, dict) else None
-    if not isinstance(books, list):
-        return []
-    tokens = {
-        book[key].lower()
-        for book in books
-        if isinstance(book, dict)
-        for key in ("token1Address", "token2Address")
-        if isinstance(book.get(key), str)
-    }
-    return sorted(tokens)
+def _decimals_table(decimals: dict[str, int] | None) -> dict[str, int]:
+    """:data:`TOKEN_DECIMALS` plus the caller's additions or overrides, keyed lowercase."""
+    for token, value in (decimals or {}).items():
+        if not _is_token_decimals(value):
+            raise PricesError(f"decimals for {token} must be an integer 0-255, got {value!r}")
+    return {**TOKEN_DECIMALS, **{token.lower(): d for token, d in (decimals or {}).items()}}
 
 
 def _parse_pamm(entry: Any) -> PammPriceLevels | None:
@@ -444,18 +406,17 @@ class PriceLevelsRpcSource(PriceLevelsSource):
         url: str = DEFAULT_PRICE_LEVELS_RPC_URL,
         *,
         decimals: dict[str, int] | None = None,
-        eth_rpc_url: str | None = None,
     ) -> None:
-        """``decimals`` adds to or overrides :data:`TOKEN_DECIMALS`. With
-        ``eth_rpc_url``, a token in neither has its ``decimals()`` read once and
-        cached; otherwise books quoting it are skipped."""
+        """``decimals`` adds to or overrides :data:`TOKEN_DECIMALS`; a v2 book
+        quoting a token in neither is skipped. A value outside 0-255 raises
+        :class:`PricesError`."""
         self.url = url
-        self._decimals = _TokenDecimals(decimals, eth_rpc_url)
+        self._decimals = _decimals_table(decimals)
 
     async def get_price_levels(self) -> PriceLevelsSnapshot:
         """Latest full snapshot via ``titan_getPammBooks``."""
         raw = await self._rpc("titan_getPammBooks", [])
-        return parse_price_levels_message(raw, await self._decimals.resolve(raw))
+        return parse_price_levels_message(raw, self._decimals)
 
     async def get_quote(self, token_in: str, token_out: str, amount_in: int) -> TitanQuote:
         """Best quote across all pAMMs via ``titan_getPammQuote``."""
@@ -511,20 +472,18 @@ class PriceLevelsWsSource(PriceLevelsSource):
         first_frame_timeout: float = 5.0,
         idle_timeout: float = 30.0,
         decimals: dict[str, int] | None = None,
-        eth_rpc_url: str | None = None,
     ) -> None:
-        """``decimals`` and ``eth_rpc_url`` as in :class:`PriceLevelsRpcSource`."""
+        """``decimals`` as in :class:`PriceLevelsRpcSource`."""
         self.url = url
         self.first_frame_timeout = first_frame_timeout
         self.idle_timeout = idle_timeout
-        self._decimals = _TokenDecimals(decimals, eth_rpc_url)
+        self._decimals = _decimals_table(decimals)
 
         # No lock guards this shared state: asyncio is single-threaded and only
         # switches coroutines at `await`, so a block with no `await` is atomic.
         # The writer (`_handle_frame`) is fully synchronous, and the reader takes
         # the raw frame a new frame replaces wholesale, so no torn reads. Frames
-        # are kept raw and parsed per call, once any unknown token's decimals
-        # are read.
+        # are kept raw and parsed per call, with this source's decimals.
         self._frame: Any = None
         self._has_frame = False
         self._closed = False
@@ -551,8 +510,7 @@ class PriceLevelsWsSource(PriceLevelsSource):
 
         if self._closed:
             raise PricesError("price-levels source is closed")
-        frame = self._frame
-        return parse_price_levels_message(frame, await self._decimals.resolve(frame))
+        return parse_price_levels_message(self._frame, self._decimals)
 
     async def close(self) -> None:
         """Immediate, permanent teardown."""
@@ -638,14 +596,10 @@ class PriceLevels:
         *,
         rpc_url: str | None = None,
         decimals: dict[str, int] | None = None,
-        eth_rpc_url: str | None = None,
     ) -> None:
-        """``decimals`` and ``eth_rpc_url`` as in :class:`PriceLevelsRpcSource`,
-        for the default source."""
+        """``decimals`` as in :class:`PriceLevelsRpcSource`, for the default source."""
         _rpc_url = rpc_url or DEFAULT_PRICE_LEVELS_RPC_URL
-        self.source: PriceLevelsSource = source or PriceLevelsRpcSource(
-            _rpc_url, decimals=decimals, eth_rpc_url=eth_rpc_url
-        )
+        self.source: PriceLevelsSource = source or PriceLevelsRpcSource(_rpc_url, decimals=decimals)
         # Quote helpers are HTTP-only. Reuse the snapshot source when it already
         # speaks HTTP so a custom endpoint covers both; otherwise use rpc_url (or
         # the default) so a WsSource paired with a private deployment doesn't

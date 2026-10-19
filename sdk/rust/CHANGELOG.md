@@ -4,6 +4,15 @@ All notable changes to the Rust SDK (`propamm`) are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- **`with_decimals` no longer takes an Ethereum RPC URL**: it is now
+  `with_decimals(decimals)` on `PriceLevelsRpcSource` and
+  `PriceLevelsWsSource`. A single failed `decimals()` read skipped that token's
+  books for the source's lifetime, and the read had no timeout. Callers that
+  passed `None` drop the argument; callers that passed `Some(url)` pass the
+  decimals of the tokens they need instead.
+
 ### Fixed
 
 - A v2 price rung whose amounts overflow a `U256` is dropped, instead of

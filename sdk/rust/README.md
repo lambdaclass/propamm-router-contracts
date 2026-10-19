@@ -129,9 +129,20 @@ Titan's v2 feed sends prices and sizes as decimal numbers; the SDK turns them
 back into exact base-unit amounts (a rebuilt amount can be a few base units off,
 from Titan's float rounding), using the decimals of each token. Tokens Titan
 lists today are built in (`TOKEN_DECIMALS`); for any other token, pass its
-decimals or an Ethereum RPC URL to read them on chain, or that token's books
-are skipped. Books are filed under the router venue address
+decimals (`with_decimals` on either source), or that token's books are
+skipped. Books are filed under the router venue address
 (`QUOTE_ADDRESS_VENUES` maps Titan's publishing address where they differ).
+
+```rust
+use std::{collections::HashMap, sync::Arc};
+use propamm::common::helpers::parse_address;
+use propamm::prices::{PriceLevels, PriceLevelsRpcSource};
+
+// DAI isn't in TOKEN_DECIMALS; without this, its books are skipped.
+let dai = parse_address("0x6B175474E89094C44Da98b954EedeAC495271d0F")?;
+let source = PriceLevelsRpcSource::default().with_decimals(HashMap::from([(dai, 18)]));
+let prices = PriceLevels::with_source(Arc::new(source));
+```
 
 The `PriceLevels` client wraps it, mirroring `PropAmmRouter`: a single type with
 a default snapshot source you can override.

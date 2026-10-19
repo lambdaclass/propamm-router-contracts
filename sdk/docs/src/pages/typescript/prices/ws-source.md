@@ -67,3 +67,12 @@ How long `getPriceLevels` waits for the first frame before throwing.
 Close the socket after this long without a `getPriceLevels` call; the next
 call reconnects transparently. `0` closes right after each call; `Infinity`
 keeps the stream open until `close()`.
+
+### decimals (optional)
+
+- **Type:** `Record<string, number>`
+
+Decimals of tokens missing from `TOKEN_DECIMALS`, by token address (an entry
+also overrides the built-in value). Titan's v2 feed sends amounts in human
+units, so a book quoting a token without known decimals is skipped.
+Each value must be an integer from 0 to 255, or the constructor throws.

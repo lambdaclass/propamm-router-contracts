@@ -4,6 +4,22 @@ All notable changes to the Python SDK (`propamm`) are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- `decimals` values on `PriceLevels`, `PriceLevelsRpcSource` and
+  `PriceLevelsWsSource` must be integers from 0 to 255; anything else raises
+  `PricesError` when the source is built. A book whose decimals in the table
+  passed to `parse_price_levels_message` aren't valid is skipped.
+
+### Removed
+
+- **The `eth_rpc_url` keyword argument** on `PriceLevels`,
+  `PriceLevelsRpcSource` and `PriceLevelsWsSource`. A single failed
+  `decimals()` read skipped that token's books for the source's lifetime, and
+  timeouts escaped as raw exceptions. Pass the decimals of tokens missing from
+  `TOKEN_DECIMALS` with `decimals` instead; code that passed `eth_rpc_url` must
+  drop it.
+
 ### Fixed
 
 - A v2 price rung whose amounts don't fit a uint256 is dropped, instead of
