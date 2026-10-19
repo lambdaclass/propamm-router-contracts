@@ -54,10 +54,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     for level in &pair.order_book {
         println!(
-            "  {} -> {}  [{:?}]",
+            "  {} -> {}",
             fmt(level.amount_in, pair.token_in),
             fmt(level.amount_out, pair.token_out),
-            level.variant,
         );
     }
 

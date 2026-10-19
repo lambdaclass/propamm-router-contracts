@@ -224,12 +224,13 @@ One rung of a pair's order book.
 class PriceLevel:
     amount_in: int
     amount_out: int
-    variant: Literal["Simulated", "Interpolated"]
+    variant: Literal["Simulated", "Interpolated"] | None = None
 ```
 
 - `amount_in` / `amount_out` — amounts in atomic units.
-- `variant` — `"Simulated"` means the rung came from an EVM simulation;
-  `"Interpolated"` from a linear spline between simulated rungs.
+- `variant` — only set when parsing the deprecated v1 payload: `"Simulated"`
+  means the rung came from an EVM simulation, `"Interpolated"` from a linear
+  spline between simulated rungs. The v2 feed doesn't say.
 
 ## TitanQuote
 

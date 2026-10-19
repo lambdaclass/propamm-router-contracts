@@ -8,18 +8,27 @@
  * quote calls attach to `eth_call` (third parameter, plus a block-number
  * override so venues that check block context don't revert).
  *
- * Both payloads share one shape — top-level metadata plus one entry per pAMM:
+ * Both payloads (a `pamm_quote_stream_v2` frame and the `titan_getPammVenues`
+ * result) share one shape — one entry per maker quote address:
  *
  * ```json
  * {
- *   "blockNumber": 24285034,
- *   "0x<pamm>": { "stateOverride": { "0x<contract>": { "stateDiff": { "0x<slot>": "0x<value>" } } } }
+ *   "venues": [{
+ *     "maker": "Goliath",
+ *     "quoteAddress": "0x<quote address>",
+ *     "pricedAddresses": ["0x<quote address>", "0x<pool priced from it>"],
+ *     "slot": 15436468, "blockNumber": 26197444, "timestamp": 1792061637827365465,
+ *     "stateOverride": { "0x<contract>": { "stateDiff": { "0x<slot>": "0x<value>" } } }
+ *   }]
  * }
  * ```
+ *
+ * The v1 shape (top-level metadata plus `"0x<pamm>": { "stateOverride": … }`
+ * entries) is still parsed, for sources pointed at the deprecated endpoints.
  */
 
 import { padHex, type Address, type Hex, type StateOverride } from "viem";
-import { BEBOP } from "../common/pamms.js";
+import { BEBOP, QUOTE_ADDRESS_VENUES } from "../common/pamms.js";
 import { WsSource } from "../ws-source.js";
 
 /** Storage slot diffs for one contract: slot → value (0x-prefixed, lowercased). */
@@ -35,8 +44,13 @@ export interface OverridesSnapshot {
   slot?: bigint;
   /** Generation time in nanoseconds since epoch. */
   timestampNs?: bigint;
-  /** pAMM address → contract address → slot diffs. */
+  /** pAMM quote address → contract address → slot diffs. */
   perPamm: Record<Address, ContractDiffs>;
+  /**
+   * pAMM quote address → the addresses priced from it (the quote address plus
+   * any pools), when the payload says. Only the v2 payload carries this.
+   */
+  pricedAddresses?: Record<Address, Address[]>;
 }
 
 /**
@@ -58,12 +72,12 @@ export interface OverridesSource {
  * Default state-override endpoint. Served from regional hosts (`eu.`, `ap.`,
  * `us.`); override the URL to pick the nearest.
  */
-export const DEFAULT_OVERRIDES_RPC_URL = "https://eu.data.titanbuilder.xyz";
+export const DEFAULT_OVERRIDES_RPC_URL = "https://eu.data.titanbuilder.xyz/data";
 /**
  * Default state-override stream endpoint. Served from regional hosts (`eu.`,
  * `ap.`, `us.`); override the URL to pick the nearest.
  */
-export const DEFAULT_OVERRIDES_WS_URL = "wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream";
+export const DEFAULT_OVERRIDES_WS_URL = "wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream_v2";
 
 /**
  * Bebop prices from a single registry slot. When a snapshot carries no Bebop
@@ -79,15 +93,16 @@ const BEBOP_LOWER = BEBOP.toLowerCase() as Address;
 const META_KEYS = new Set(["slot", "blockNumber", "block_number", "timestamp"]);
 
 /**
- * Parse a raw overrides payload (a WS frame or the JSON-RPC `result`) into a
- * snapshot: metadata keys are split out, addresses and slots are lowercased,
- * and pAMMs/contracts with empty `stateDiff`s are dropped.
+ * Parse a raw overrides payload (a WS frame or the JSON-RPC `result`, v2 or
+ * v1 shape) into a snapshot: addresses and slots are lowercased, and
+ * pAMMs/contracts with empty `stateDiff`s are dropped.
  */
 export function parseOverridesMessage(raw: unknown): OverridesSnapshot {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     throw new Error("overrides message is not a JSON object");
   }
   const message = raw as Record<string, unknown>;
+  if (Array.isArray(message["venues"])) return parseVenues(message["venues"] as unknown[]);
 
   const perPamm: Record<Address, ContractDiffs> = {};
   for (const [key, payload] of Object.entries(message)) {
@@ -105,6 +120,39 @@ export function parseOverridesMessage(raw: unknown): OverridesSnapshot {
       typeof message["timestamp"] === "number" ? BigInt(message["timestamp"]) : undefined,
     perPamm,
   };
+}
+
+// v2: block context sits on every entry; entries of one payload agree on it,
+// and the newest is kept should they not.
+function parseVenues(venues: unknown[]): OverridesSnapshot {
+  const snapshot: OverridesSnapshot = { perPamm: {}, pricedAddresses: {} };
+  for (const entry of venues) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const venue = entry as Record<string, unknown>;
+    const quoteAddress = venue["quoteAddress"];
+    if (typeof quoteAddress !== "string") continue;
+    const contracts = parseContractDiffs(venue);
+    if (!contracts) continue;
+
+    const key = quoteAddress.toLowerCase() as Address;
+    snapshot.perPamm[key] = contracts;
+    const priced = Array.isArray(venue["pricedAddresses"]) ? venue["pricedAddresses"] : [];
+    snapshot.pricedAddresses![key] = priced
+      .filter((address): address is string => typeof address === "string")
+      .map((address) => address.toLowerCase() as Address);
+
+    snapshot.blockNumber = maxOf(snapshot.blockNumber, parseBlockNumber(venue["blockNumber"]));
+    snapshot.slot = maxOf(snapshot.slot, parseBlockNumber(venue["slot"]));
+    if (typeof venue["timestamp"] === "number") {
+      snapshot.timestampNs = maxOf(snapshot.timestampNs, BigInt(venue["timestamp"]));
+    }
+  }
+  return snapshot;
+}
+
+function maxOf(current: bigint | undefined, next: bigint | undefined): bigint | undefined {
+  if (next === undefined) return current;
+  return current === undefined || next > current ? next : current;
 }
 
 function parseContractDiffs(payload: unknown): ContractDiffs | undefined {
@@ -137,7 +185,12 @@ function parseBlockNumber(value: unknown): bigint | undefined {
 }
 
 export interface ToStateOverrideOptions {
-  /** Restrict to these pAMM entries (default: all in the snapshot). */
+  /**
+   * Restrict to the entries for these pAMMs (default: all in the snapshot). An
+   * entry is kept when its quote address, an address priced from it, or the
+   * router venue its quote address maps to is listed, so router venue
+   * addresses such as `METRIC` select every entry that venue needs.
+   */
   pamms?: readonly Address[];
   /** Inject the Bebop default slot when no Bebop entry is present (default true). */
   bebopDefault?: boolean;
@@ -157,7 +210,7 @@ export function toStateOverride(
   const merged: Record<Address, SlotDiffs> = {};
   let bebopPresent = false;
   for (const [pamm, contracts] of Object.entries(snapshot.perPamm)) {
-    if (selected && !selected.includes(pamm)) continue;
+    if (selected && !entrySelected(snapshot, pamm as Address, selected)) continue;
     if (pamm === BEBOP_LOWER) bebopPresent = true;
     for (const [address, slots] of Object.entries(contracts)) {
       merged[address as Address] = { ...merged[address as Address], ...slots };
@@ -181,6 +234,17 @@ export function toStateOverride(
   }));
 }
 
+function entrySelected(
+  snapshot: OverridesSnapshot,
+  quoteAddress: Address,
+  selected: readonly string[],
+): boolean {
+  if (selected.includes(quoteAddress)) return true;
+  const venue = QUOTE_ADDRESS_VENUES[quoteAddress];
+  if (venue && selected.includes(venue.toLowerCase())) return true;
+  return (snapshot.pricedAddresses?.[quoteAddress] ?? []).some((a) => selected.includes(a));
+}
+
 export interface OverridesRpcSourceOptions {
   /** Titan JSON-RPC endpoint. */
   url?: string;
@@ -188,7 +252,7 @@ export interface OverridesRpcSourceOptions {
   fetch?: typeof fetch;
 }
 
-/** Fetch-on-demand source: one `titan_getPammStateOverrides` call per `getOverrides()`. */
+/** Fetch-on-demand source: one `titan_getPammVenues` call per `getOverrides()`. */
 export class OverridesRpcSource implements OverridesSource {
   private readonly url: string;
   private readonly fetchFn: typeof fetch;
@@ -205,7 +269,7 @@ export class OverridesRpcSource implements OverridesSource {
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: 1,
-        method: "titan_getPammStateOverrides",
+        method: "titan_getPammVenues",
         params: [],
       }),
     });
@@ -261,13 +325,23 @@ export class OverridesWsSource extends WsSource<OverridesSnapshot> implements Ov
   protected override applyFrame(data: string): void {
     const frame = parseOverridesMessage(JSON.parse(data));
     Object.assign(this.snapshot.perPamm, frame.perPamm);
+    if (frame.pricedAddresses) {
+      this.snapshot.pricedAddresses = {
+        ...this.snapshot.pricedAddresses,
+        ...frame.pricedAddresses,
+      };
+    }
     if (frame.blockNumber !== undefined) this.snapshot.blockNumber = frame.blockNumber;
     if (frame.slot !== undefined) this.snapshot.slot = frame.slot;
     if (frame.timestampNs !== undefined) this.snapshot.timestampNs = frame.timestampNs;
   }
 
   protected override copySnapshot(): OverridesSnapshot {
-    return { ...this.snapshot, perPamm: { ...this.snapshot.perPamm } };
+    return {
+      ...this.snapshot,
+      perPamm: { ...this.snapshot.perPamm },
+      pricedAddresses: this.snapshot.pricedAddresses && { ...this.snapshot.pricedAddresses },
+    };
   }
 
   getOverrides(): Promise<OverridesSnapshot> {

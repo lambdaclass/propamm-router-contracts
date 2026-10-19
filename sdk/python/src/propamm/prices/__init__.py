@@ -4,32 +4,38 @@ Alongside the raw state overrides (see :mod:`propamm.overrides`), Titan
 publishes prices it has *already quoted*, grouped per pAMM: for each trading
 pair an ``order_book`` of rungs mapping an input amount to the output it would
 receive. This lets a taker read prices across a range of trade sizes without
-running an ``eth_call`` simulation per size. Rungs come in two flavours —
-``Simulated`` (derived from an EVM simulation of a synthesized taker tx) and
-``Interpolated`` (a linear spline between simulated rungs, for finer
-granularity).
+running an ``eth_call`` simulation per size.
 
 Titan exposes this through a WebSocket stream and three JSON-RPC methods:
 
-- ``titan_getPammPriceLevels`` — the full per-pAMM snapshot (also streamed as
-  *complete* snapshots, not deltas).
+- ``titan_getPammBooks`` — the full snapshot (also streamed at
+  ``wss://.../ws/pamm_price_levels_v2`` as *complete* snapshots, not deltas).
 - ``titan_getPammQuote`` — the best quote across all pAMMs for a size.
 - ``titan_getPammQuoteVenue`` — the same, pinned to one venue.
 
-The snapshot payload (the JSON-RPC ``result`` or a WS frame) looks like::
+The v2 payload carries one book per maker and token pair, in human units::
 
     {
-      "slot": 14581462,
-      "blockNumber": 25345763,
-      "timestamp": 1781801564588230787,
-      "pamms": [{
-        "pamm": "0x5979...",
-        "pairs": [{
-          "tokenIn": "0x2260...", "tokenOut": "0xa0b8...",
-          "orderBook": [{"amountIn": "0x989680", "amountOut": "0x174b67393", "variant": "Simulated"}]
-        }]
+      "slot": 15436468, "block": 26197444, "ts": 1792061637434840374,
+      "books": [{
+        "maker": "Tempest", "quoteAddress": "0x0000...",
+        "token1Address": "0xc02a...", "token2Address": "0xdac1...",
+        "bids": [{"price": 2365.0436, "cumVolume": 0.005}],
+        "asks": [{"price": 2365.526259, "cumVolume": 0.004227389132525372}]
       }]
     }
+
+A bid rung sells ``cumVolume`` of token1 for ``cumVolume * price`` of token2; an
+ask rung buys ``cumVolume`` of token1 for ``cumVolume * price`` of token2. The
+parser turns each side into the ``token_in -> token_out`` order book of
+base-unit amounts this module has always returned, which needs each token's
+decimals (see :data:`propamm.common.tokens.TOKEN_DECIMALS`). Titan sends those
+numbers as floats, so a rebuilt amount can be a few base units off the exact
+simulated one. The book is filed under the router venue its quote address maps
+to (:data:`propamm.common.pamms.QUOTE_ADDRESS_VENUES`).
+
+The v1 payload (``pamms`` of hex ``amountIn``/``amountOut`` rungs) is still
+parsed, for sources pointed at the deprecated endpoints.
 """
 
 from __future__ import annotations
@@ -38,6 +44,7 @@ import abc
 import asyncio
 import json
 from dataclasses import dataclass, field
+from decimal import ROUND_HALF_UP, Context, Decimal
 from typing import Any, Literal
 
 import aiohttp
@@ -46,14 +53,16 @@ from eth_typing import ChecksumAddress
 from eth_utils import to_checksum_address
 
 from .._tls import ssl_context as _ssl_context
+from ..common.pamms import QUOTE_ADDRESS_VENUES
+from ..common.tokens import TOKEN_DECIMALS
 from ..error import PricesError, TimeoutError
 
 #: Default price-levels endpoint. Served from regional hosts (``eu.``,
 #: ``ap.``, ``us.``); override the URL to pick the nearest.
-DEFAULT_PRICE_LEVELS_RPC_URL = "https://eu.data.titanbuilder.xyz"
+DEFAULT_PRICE_LEVELS_RPC_URL = "https://eu.data.titanbuilder.xyz/data"
 #: Default price-levels stream endpoint. The stream is served from regional
 #: hosts (``eu.``, ``ap.``, ``us.``); override the URL to pick the nearest.
-DEFAULT_PRICE_LEVELS_WS_URL = "wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels"
+DEFAULT_PRICE_LEVELS_WS_URL = "wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels_v2"
 
 #: Whether a rung came from an EVM simulation or a spline interpolation.
 PriceVariant = Literal["Simulated", "Interpolated"]
@@ -66,7 +75,8 @@ class PriceLevel:
 
     amount_in: int
     amount_out: int
-    variant: PriceVariant
+    #: Only the v1 payload says how a rung was produced.
+    variant: PriceVariant | None = None
 
 
 @dataclass
@@ -147,14 +157,19 @@ def _parse_address(value: Any) -> ChecksumAddress | None:
         return None
 
 
-def parse_price_levels_message(raw: Any) -> PriceLevelsSnapshot:
-    """Parse a raw price-levels payload (a WS frame or the JSON-RPC ``result``).
+def parse_price_levels_message(
+    raw: Any, decimals: dict[str, int] | None = None
+) -> PriceLevelsSnapshot:
+    """Parse a raw price-levels payload (a WS frame or the JSON-RPC ``result``, v2 or v1).
 
-    Hex amounts become ``int``s, addresses are checksummed, and pAMMs/pairs/rungs
-    that are malformed (missing fields, unknown variant) are dropped.
+    Amounts become base-unit ``int``s, addresses are checksummed, and malformed
+    books/pairs/rungs are dropped. A v2 book quoting a token absent from
+    ``decimals`` (default :data:`TOKEN_DECIMALS`) is skipped.
     """
     if not isinstance(raw, dict):
         raise PricesError("price-levels message is not a JSON object")
+    if isinstance(raw.get("books"), list):
+        return _parse_books(raw, TOKEN_DECIMALS if decimals is None else decimals)
 
     raw_pamms = raw.get("pamms")
     pamms = (
@@ -173,6 +188,136 @@ def parse_price_levels_message(raw: Any) -> PriceLevelsSnapshot:
         else None,
         pamms=pamms,
     )
+
+
+def _parse_books(raw: dict, decimals: dict[str, int]) -> PriceLevelsSnapshot:
+    by_pamm: dict[str, dict[tuple[str, str], PairPriceLevels]] = {}
+    for book in raw["books"]:
+        if not isinstance(book, dict):
+            continue
+        quote_address = book.get("quoteAddress")
+        token1 = _parse_address(book.get("token1Address"))
+        token2 = _parse_address(book.get("token2Address"))
+        if not isinstance(quote_address, str) or token1 is None or token2 is None:
+            continue
+        d1 = decimals.get(token1.lower())
+        d2 = decimals.get(token2.lower())
+        if d1 is None or d2 is None:
+            continue
+
+        pamm = _parse_address(QUOTE_ADDRESS_VENUES.get(quote_address.lower(), quote_address))
+        if pamm is None:
+            continue
+        pairs = by_pamm.setdefault(pamm, {})
+        # Bids: sell cumVolume of token1, receive cumVolume*price of token2.
+        bids = [
+            PriceLevel(amount_in=_base_units(volume, d1), amount_out=_base_units(quote, d2))
+            for volume, quote in _rungs(book.get("bids"))
+        ]
+        # Asks: pay cumVolume*price of token2, receive cumVolume of token1.
+        asks = [
+            PriceLevel(amount_in=_base_units(quote, d2), amount_out=_base_units(volume, d1))
+            for volume, quote in _rungs(book.get("asks"))
+        ]
+        # Two quote addresses can map to one venue (Metric); the first book for a
+        # pair is kept.
+        if bids and (token1, token2) not in pairs:
+            pairs[(token1, token2)] = PairPriceLevels(token1, token2, bids)
+        if asks and (token2, token1) not in pairs:
+            pairs[(token2, token1)] = PairPriceLevels(token2, token1, asks)
+
+    timestamp = raw.get("ts")
+    return PriceLevelsSnapshot(
+        block_number=_parse_u64_field(raw.get("block")),
+        slot=_parse_u64_field(raw.get("slot")),
+        timestamp_ns=timestamp
+        if isinstance(timestamp, int) and not isinstance(timestamp, bool)
+        else None,
+        pamms=[PammPriceLevels(pamm, list(pairs.values())) for pamm, pairs in by_pamm.items()],
+    )
+
+
+_EXACT = Context(prec=100)
+
+
+def _rungs(value: Any) -> list[tuple[Decimal, Decimal]]:
+    """``(cumVolume, cumVolume * price)`` per well-formed rung, as exact decimals."""
+    if not isinstance(value, list):
+        return []
+    rungs = []
+    for entry in value:
+        if not isinstance(entry, dict):
+            continue
+        volume = _decimal(entry.get("cumVolume"))
+        price = _decimal(entry.get("price"))
+        if volume is not None and price is not None:
+            # Exact: the default 28-digit context would round the product.
+            rungs.append((volume, _EXACT.multiply(volume, price)))
+    return rungs
+
+
+def _decimal(value: Any) -> Decimal | None:
+    # repr() is the shortest decimal that round-trips to the same double, which
+    # is what Titan printed.
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    result = Decimal(repr(value))
+    return result if result.is_finite() and result >= 0 else None
+
+
+def _base_units(value: Decimal, decimals: int) -> int:
+    return int(value.scaleb(decimals, _EXACT).quantize(Decimal(1), ROUND_HALF_UP, _EXACT))
+
+
+class _TokenDecimals:
+    """Token decimals: the built-in table, caller additions, and cached on-chain reads."""
+
+    def __init__(self, decimals: dict[str, int] | None, eth_rpc_url: str | None) -> None:
+        self.table = dict(TOKEN_DECIMALS)
+        self.table.update({token.lower(): d for token, d in (decimals or {}).items()})
+        self.eth_rpc_url = eth_rpc_url
+        self._failed: set[str] = set()
+
+    async def resolve(self, raw: Any) -> dict[str, int]:
+        """Read the decimals of the payload's unknown tokens, then return the table."""
+        if self.eth_rpc_url is None:
+            return self.table
+        unknown = [t for t in _book_tokens(raw) if t not in self.table and t not in self._failed]
+        if unknown:
+            results = await asyncio.gather(*(self._read(t) for t in unknown))
+            for token, decimals in zip(unknown, results):
+                if decimals is None:
+                    self._failed.add(token)  # not retried: its books stay skipped
+                else:
+                    self.table[token] = decimals
+        return self.table
+
+    async def _read(self, token: str) -> int | None:
+        # decimals() selector
+        call = {"to": token, "data": "0x313ce567"}
+        request = {"jsonrpc": "2.0", "id": 1, "method": "eth_call", "params": [call, "latest"]}
+        ssl_ctx = _ssl_context() if self.eth_rpc_url.startswith("https") else None
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(self.eth_rpc_url, json=request, ssl=ssl_ctx) as response:
+                    body = await response.json()
+            return int(body["result"], 16) if len(body.get("result") or "") == 66 else None
+        except (aiohttp.ClientError, ValueError, KeyError, TypeError):
+            return None
+
+
+def _book_tokens(raw: Any) -> list[str]:
+    books = raw.get("books") if isinstance(raw, dict) else None
+    if not isinstance(books, list):
+        return []
+    tokens = {
+        book[key].lower()
+        for book in books
+        if isinstance(book, dict)
+        for key in ("token1Address", "token2Address")
+        if isinstance(book.get(key), str)
+    }
+    return sorted(tokens)
 
 
 def _parse_pamm(entry: Any) -> PammPriceLevels | None:
@@ -280,12 +425,23 @@ class PriceLevelsRpcSource(PriceLevelsSource):
     skip the on-chain ``eth_call`` that :meth:`PropAmmRouter.quote` runs).
     """
 
-    def __init__(self, url: str = DEFAULT_PRICE_LEVELS_RPC_URL) -> None:
+    def __init__(
+        self,
+        url: str = DEFAULT_PRICE_LEVELS_RPC_URL,
+        *,
+        decimals: dict[str, int] | None = None,
+        eth_rpc_url: str | None = None,
+    ) -> None:
+        """``decimals`` adds to or overrides :data:`TOKEN_DECIMALS`. With
+        ``eth_rpc_url``, a token in neither has its ``decimals()`` read once and
+        cached; otherwise books quoting it are skipped."""
         self.url = url
+        self._decimals = _TokenDecimals(decimals, eth_rpc_url)
 
     async def get_price_levels(self) -> PriceLevelsSnapshot:
-        """Latest full snapshot via ``titan_getPammPriceLevels``."""
-        return parse_price_levels_message(await self._rpc("titan_getPammPriceLevels", []))
+        """Latest full snapshot via ``titan_getPammBooks``."""
+        raw = await self._rpc("titan_getPammBooks", [])
+        return parse_price_levels_message(raw, await self._decimals.resolve(raw))
 
     async def get_quote(self, token_in: str, token_out: str, amount_in: int) -> TitanQuote:
         """Best quote across all pAMMs via ``titan_getPammQuote``."""
@@ -340,16 +496,22 @@ class PriceLevelsWsSource(PriceLevelsSource):
         *,
         first_frame_timeout: float = 5.0,
         idle_timeout: float = 30.0,
+        decimals: dict[str, int] | None = None,
+        eth_rpc_url: str | None = None,
     ) -> None:
+        """``decimals`` and ``eth_rpc_url`` as in :class:`PriceLevelsRpcSource`."""
         self.url = url
         self.first_frame_timeout = first_frame_timeout
         self.idle_timeout = idle_timeout
+        self._decimals = _TokenDecimals(decimals, eth_rpc_url)
 
         # No lock guards this shared state: asyncio is single-threaded and only
         # switches coroutines at `await`, so a block with no `await` is atomic.
-        # The writer (`_handle_frame`) is fully synchronous, and the reader hands
-        # back the snapshot object a frame replaces wholesale, so no torn reads.
-        self._snapshot = PriceLevelsSnapshot()
+        # The writer (`_handle_frame`) is fully synchronous, and the reader takes
+        # the raw frame a new frame replaces wholesale, so no torn reads. Frames
+        # are kept raw and parsed per call, once any unknown token's decimals
+        # are read.
+        self._frame: Any = None
         self._has_frame = False
         self._closed = False
         self._last_use = 0.0
@@ -375,7 +537,8 @@ class PriceLevelsWsSource(PriceLevelsSource):
 
         if self._closed:
             raise PricesError("price-levels source is closed")
-        return self._snapshot
+        frame = self._frame
+        return parse_price_levels_message(frame, await self._decimals.resolve(frame))
 
     async def close(self) -> None:
         """Immediate, permanent teardown."""
@@ -430,12 +593,13 @@ class PriceLevelsWsSource(PriceLevelsSource):
         if not isinstance(data, (str, bytes, bytearray)):
             return
         try:
-            frame = parse_price_levels_message(json.loads(data))
+            frame = json.loads(data)
+            parse_price_levels_message(frame)  # reject undecodable frames up front
         except (json.JSONDecodeError, PricesError):
             return  # skip undecodable frames
 
         # Each frame is a complete snapshot, so it replaces the cached one.
-        self._snapshot = frame
+        self._frame = frame
         self._has_frame = True
         self._frame_event.set()
 
@@ -459,9 +623,15 @@ class PriceLevels:
         source: PriceLevelsSource | None = None,
         *,
         rpc_url: str | None = None,
+        decimals: dict[str, int] | None = None,
+        eth_rpc_url: str | None = None,
     ) -> None:
+        """``decimals`` and ``eth_rpc_url`` as in :class:`PriceLevelsRpcSource`,
+        for the default source."""
         _rpc_url = rpc_url or DEFAULT_PRICE_LEVELS_RPC_URL
-        self.source: PriceLevelsSource = source or PriceLevelsRpcSource(_rpc_url)
+        self.source: PriceLevelsSource = source or PriceLevelsRpcSource(
+            _rpc_url, decimals=decimals, eth_rpc_url=eth_rpc_url
+        )
         # Quote helpers are HTTP-only. Reuse the snapshot source when it already
         # speaks HTTP so a custom endpoint covers both; otherwise use rpc_url (or
         # the default) so a WsSource paired with a private deployment doesn't

@@ -1,6 +1,6 @@
 # PriceLevelsRpcSource
 
-Fetch-on-demand source for pAMM price levels: one `titan_getPammPriceLevels`
+Fetch-on-demand source for pAMM price levels: one `titan_getPammBooks`
 call per `getPriceLevels`. Also exposes the quote helpers directly. Simplest
 for sporadic use.
 
@@ -15,7 +15,7 @@ import { PriceLevels, PriceLevelsRpcSource } from "propamm/prices";
 
 // custom endpoint — snapshot and quotes both use it
 const prices = new PriceLevels({
-  source: new PriceLevelsRpcSource({ url: "https://us.data.titanbuilder.xyz" }),
+  source: new PriceLevelsRpcSource({ url: "https://us.data.titanbuilder.xyz/data" }),
 });
 ```
 
@@ -51,7 +51,7 @@ getQuoteVenue(venue: Address, tokenIn: Address, tokenOut: Address, amountIn: big
 ### url (optional)
 
 - **Type:** `string`
-- **Default:** `https://eu.data.titanbuilder.xyz`
+- **Default:** `https://eu.data.titanbuilder.xyz/data`
 
 Titan JSON-RPC endpoint. Served from regional hosts (`eu.`, `ap.`, `us.`);
 pick the nearest.

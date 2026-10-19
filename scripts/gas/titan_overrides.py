@@ -4,19 +4,27 @@ The propAMMs price off-chain liquidity that mainnet state does not reflect, so a
 plain `eth_call` against committed state sees stale lanes and most venues revert.
 Titan publishes the missing state two ways, both consumed here:
 
-  * a WebSocket stream, `wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream`,
-    one frame per pAMM update;
-  * a pull-based twin, `titan_getPammStateOverrides` on
-    `https://eu.data.titanbuilder.xyz`, which returns every pAMM in one payload.
+  * a WebSocket stream, `wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream_v2`,
+    each frame carrying the pAMMs that just updated;
+  * a pull-based twin, `titan_getPammVenues` on
+    `https://eu.data.titanbuilder.xyz/data`, which returns every pAMM in one payload.
 
-Both share one shape -- top-level metadata plus one entry per pAMM::
+Both share one shape -- one entry per maker quote address, each with its own
+block context::
 
     {
-      "blockNumber": "0x18cb1fe",
-      "slot": 15235932,
-      "0x<pamm>": {"stateOverride": {"0x<addr>": {"balance": ..., "nonce": ...,
-                                                  "stateDiff": {"0x<slot>": "0x<word>"}}}}
+      "venues": [{
+        "maker": "Goliath",
+        "quoteAddress": "0x<quote address>",
+        "pricedAddresses": ["0x<quote address>", "0x<pool priced from it>"],
+        "slot": 15235932, "blockNumber": 26197444,
+        "stateOverride": {"0x<addr>": {"balance": ..., "nonce": ...,
+                                       "stateDiff": {"0x<slot>": "0x<word>"}}}
+      }]
     }
+
+The deprecated v1 shape (top-level `blockNumber`/`slot` plus
+`"0x<pamm>": {"stateOverride": ...}` entries) is still read.
 
 The SDKs attach this to `eth_call`'s third parameter, which applies for one call
 only -- which is why `forge test` cannot use it. This module instead replays the
@@ -56,8 +64,8 @@ from typing import Any
 #: Served from regional hosts (``eu.``, ``ap.``, ``us.``); pass a different URL
 #: to pick the nearest. Kept in step with the SDKs' own defaults --
 #: `sdk/python/src/propamm/overrides/__init__.py`, and its TS/Rust mirrors.
-DEFAULT_OVERRIDES_RPC_URL = "https://eu.data.titanbuilder.xyz"
-DEFAULT_OVERRIDES_WS_URL = "wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream"
+DEFAULT_OVERRIDES_RPC_URL = "https://eu.data.titanbuilder.xyz/data"
+DEFAULT_OVERRIDES_WS_URL = "wss://eu.data.titanbuilder.xyz/ws/pamm_quote_stream_v2"
 
 #: Mainnet beacon-chain genesis time and slot length. A block's canonical
 #: timestamp is `genesis + slot * 12`. Mirrors `sdk/python/src/propamm/overrides`.
@@ -72,19 +80,36 @@ META_KEYS = frozenset({"slot", "blockNumber", "block_number", "timestamp"})
 #: those are carried through the snapshot but are not router venues.
 WHITELIST_VENUES: dict[str, str] = {
     "fermi": "0x5979458912F80B96d30D4220af8E2e4925A33320",
-    "bebop": "0xB09AaA5614916d7AEb59C295C52c92ca82aDdD76",
+    "bebop": "0xB09AAA8933626d7E4C48D65dAd2D77021CFBCA9a",
     "kipseli": "0x71e790dd841c8A9061487cb3E78C288E75cE0B3d",
     "tempest": "0x00000003f1ec2379e79F58E12EC6C4F51Ee92149",
-    "taurusfi": "0x217d58931A8549ca539426AA8152E33dAfc3d95A",
-    "metric": "0xE715Dc29d2c273D0FC5A03e5Cca9CcB0Abb1dCDB",
+    "taurusfi": "0x3ce2672Aa806138585920421406Bf0dEcB8130Cb",
+    "metric": "0x99Ab7c1C5eab47801F7937075998527a550fbA8a",
     "elzorro": "0xCF211B4dD0D2be5C173Ea57Bcf938FC61d1d3bd3",
+    "stelaxis": "0x77047Af6CD8f7f84d96A020a2833d24916b75FDE",
+    "goliath": "0x4367985A63063fc970b009c6E599e9225181f551",
 }
 _VENUE_BY_ADDR = {addr.lower(): name for name, addr in WHITELIST_VENUES.items()}
+
+#: Titan keys each entry by the maker's quote address, which for some makers is
+#: not the router venue. Mirrors `QUOTE_ADDRESS_VENUES` in
+#: `sdk/python/src/propamm/common/pamms.py`.
+QUOTE_ADDRESS_VENUES: dict[str, str] = {
+    "0xc9a956b5196dfe110debe8781857bc8b97d32091": WHITELIST_VENUES["kipseli"].lower(),
+    "0xe844701934d9c6085b292e428f41b911cc0b3872": WHITELIST_VENUES["metric"].lower(),
+    "0x30a88bf894d1b806125a23ebf23d715496fd7102": WHITELIST_VENUES["metric"].lower(),
+}
+
+
+def venue_address(address: str) -> str:
+    """The router venue a Titan quote address stands for (lowercased)."""
+    return QUOTE_ADDRESS_VENUES.get(address.lower(), address.lower())
 
 
 def venue_name(address: str) -> str:
     """Human name for a pAMM address, or the address itself if not a router venue."""
-    return _VENUE_BY_ADDR.get(address.lower(), address.lower())
+    venue = venue_address(address)
+    return _VENUE_BY_ADDR.get(venue, venue)
 
 
 def as_int(value: Any) -> int:
@@ -120,7 +145,7 @@ class Snapshot:
     @property
     def router_venues(self) -> list[str]:
         """Names of router-whitelisted venues carrying overrides in this snapshot."""
-        return sorted(venue_name(p) for p in self.per_pamm if p.lower() in _VENUE_BY_ADDR)
+        return sorted({venue_name(p) for p in self.per_pamm if venue_address(p) in _VENUE_BY_ADDR})
 
     def counts(self) -> tuple[int, int]:
         """(accounts touched, storage slots written) this snapshot would apply."""
@@ -132,18 +157,24 @@ class Snapshot:
         return accounts, slots
 
 
-def _split_payload(raw: dict[str, Any]) -> tuple[int, int, dict[str, dict[str, Any]]]:
-    """Split a payload into (blockNumber, slot, per-pAMM stateOverride maps)."""
+def _entries(raw: dict[str, Any]) -> list[tuple[int, int, str, dict[str, Any]]]:
+    """Split a payload into (blockNumber, slot, pAMM, stateOverride map) entries."""
+    if isinstance(raw.get("venues"), list):  # v2: block context per entry
+        return [
+            (as_int(v["blockNumber"]), as_int(v["slot"]), v["quoteAddress"].lower(), v["stateOverride"])
+            for v in raw["venues"]
+            if isinstance(v, dict) and isinstance(v.get("stateOverride"), dict) and v["stateOverride"]
+        ]
     block_number = as_int(raw["blockNumber"] if "blockNumber" in raw else raw["block_number"])
     slot = as_int(raw["slot"])
-    per_pamm: dict[str, dict[str, Any]] = {}
+    entries = []
     for key, value in raw.items():
         if key in META_KEYS or not isinstance(value, dict):
             continue
         overrides = value.get("stateOverride") or value.get("state_override")
         if isinstance(overrides, dict) and overrides:
-            per_pamm[key.lower()] = overrides
-    return block_number, slot, per_pamm
+            entries.append((block_number, slot, key.lower(), overrides))
+    return entries
 
 
 # --------------------------------------------------------------------------- #
@@ -164,11 +195,20 @@ def rpc(url: str, method: str, params: list[Any], timeout: float = 60.0) -> Any:
 
 
 def fetch_snapshot_rpc(url: str = DEFAULT_OVERRIDES_RPC_URL) -> Snapshot:
-    """Pull one complete snapshot via `titan_getPammStateOverrides`."""
-    raw = rpc(url, "titan_getPammStateOverrides", [])
+    """Pull one complete snapshot via `titan_getPammVenues`.
+
+    Entries of one payload target the same block in practice; should they not,
+    the newest block wins and older entries are left out, as on the stream.
+    """
+    raw = rpc(url, "titan_getPammVenues", [])
     if raw is None:
-        raise RuntimeError("titan_getPammStateOverrides returned no result")
-    block_number, slot, per_pamm = _split_payload(raw)
+        raise RuntimeError("titan_getPammVenues returned no result")
+    entries = _entries(raw)
+    if not entries:
+        raise RuntimeError("titan_getPammVenues returned no pAMM entries")
+    block_number = max(e[0] for e in entries)
+    slot = max(e[1] for e in entries if e[0] == block_number)
+    per_pamm = {pamm: ov for block, _, pamm, ov in entries if block == block_number}
     return Snapshot(block_number=block_number, slot=slot, per_pamm=per_pamm)
 
 
@@ -268,8 +308,8 @@ def fetch_snapshot_ws(
 ) -> Snapshot:
     """Accumulate stream frames into one **internally consistent** snapshot.
 
-    Each frame carries a single pAMM, so a snapshot has to be assembled. Frames
-    are grouped by the block they target and the newest fully-observed block
+    Each frame carries only the pAMMs that just updated, so a snapshot has to be
+    assembled. Entries are grouped by the block they target and the newest fully-observed block
     wins: a pAMM that last published for an older block is left out rather than
     mixed in, because its lane really is stale for the block we simulate.
     """
@@ -289,11 +329,11 @@ def fetch_snapshot_ws(
                 break
             frames += 1
             try:
-                block_number, slot, per_pamm = _split_payload(json.loads(message))
-            except (ValueError, KeyError):
+                entries = _entries(json.loads(message))
+            except (ValueError, KeyError, AttributeError):
                 continue
-            if per_pamm:
-                by_block.setdefault(block_number, {}).update(per_pamm)
+            for block_number, slot, pamm, overrides in entries:
+                by_block.setdefault(block_number, {})[pamm] = overrides
                 slots[block_number] = slot
     finally:
         sock.close()
@@ -336,7 +376,7 @@ def fetch_snapshot(source: str = "ws", *, seconds: float = 12.0, verbose: bool =
                     time.sleep(delay)
         if source == "ws":
             raise RuntimeError(f"stream unavailable after {_WS_ATTEMPTS} attempts: {last}")
-        print(f"  stream unavailable ({last}); falling back to titan_getPammStateOverrides")
+        print(f"  stream unavailable ({last}); falling back to titan_getPammVenues")
     return fetch_snapshot_rpc()
 
 
@@ -365,7 +405,7 @@ def apply_to_anvil(anvil_url: str, snapshot: Snapshot, *, only: set[str] | None 
 
     accounts = written = 0
     for pamm, overrides in snapshot.per_pamm.items():
-        if wanted is not None and pamm not in wanted:
+        if wanted is not None and pamm not in wanted and venue_address(pamm) not in wanted:
             continue
         for address, spec in overrides.items():
             if "balance" in spec:

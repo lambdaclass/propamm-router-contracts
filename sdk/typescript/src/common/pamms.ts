@@ -31,3 +31,18 @@ export const PAMMS = {
 } as const satisfies Record<string, Address>;
 
 export type PammName = keyof typeof PAMMS;
+
+/**
+ * Titan publishes each maker's data under the maker's quote address, which for
+ * some makers is not the venue address the router whitelists. This maps those
+ * quote addresses (lowercased) to the router venue; makers absent here publish
+ * under the venue address itself. Source: the stream-address table in Titan's
+ * takers docs.
+ */
+export const QUOTE_ADDRESS_VENUES: Readonly<Record<string, Address>> = {
+  // Kipseli
+  "0xc9a956b5196dfe110debe8781857bc8b97d32091": KIPSELI,
+  // Metric publishes under two quote addresses; its venue needs both.
+  "0xe844701934d9c6085b292e428f41b911cc0b3872": METRIC,
+  "0x30a88bf894d1b806125a23ebf23d715496fd7102": METRIC,
+};

@@ -1,7 +1,7 @@
 # OverridesRpcSource
 
 Fetch-on-demand source for pAMM state overrides: one
-`titan_getPammStateOverrides` HTTP call per `get_overrides()`. Nothing to
+`titan_getPammVenues` HTTP call per `get_overrides()`. Nothing to
 manage; simplest for sporadic quoting.
 
 ```rust
@@ -45,6 +45,6 @@ endpoint. Fails on HTTP or JSON-RPC errors.
 
 ### OverridesRpcSource::default()
 
-Uses the public endpoint `https://eu.data.titanbuilder.xyz`. Titan serves the
+Uses the public endpoint `https://eu.data.titanbuilder.xyz/data`. Titan serves the
 same data from `eu.`, `ap.` and `us.` hosts — use `new()` with an explicit URL
 to pick the nearest.

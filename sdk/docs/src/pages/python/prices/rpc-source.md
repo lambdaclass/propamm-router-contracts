@@ -1,6 +1,6 @@
 # PriceLevelsRpcSource
 
-Fetch-on-demand source for pAMM price levels: one `titan_getPammPriceLevels`
+Fetch-on-demand source for pAMM price levels: one `titan_getPammBooks`
 call per `get_price_levels`. Also exposes the quote helpers directly. Simplest
 for sporadic use.
 
@@ -10,7 +10,7 @@ for sporadic use.
 from propamm.prices import PriceLevels, PriceLevelsRpcSource
 
 # custom endpoint — snapshot and quotes both use it
-prices = PriceLevels(source=PriceLevelsRpcSource("https://us.data.titanbuilder.xyz"))
+prices = PriceLevels(source=PriceLevelsRpcSource("https://us.data.titanbuilder.xyz/data"))
 ```
 
 ## Constructor
