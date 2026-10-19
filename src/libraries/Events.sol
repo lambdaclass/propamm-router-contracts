@@ -31,3 +31,27 @@ event VenueWhitelisted(address indexed venue);
 /// @notice Emitted when an authorized account removes a propAMM venue from the whitelist.
 /// @param venue The venue address removed.
 event VenueRemoved(address indexed venue);
+
+/// @notice Emitted when a venue call reverted and the swap fell back to Uniswap V3.
+/// @dev The router catches that revert and fills on Uniswap, so the transaction
+///      succeeds and the only trace of the failure is the call tree — which a node
+///      can only serve for as long as it keeps the state to re-execute from (128
+///      blocks on ethrex). This event puts the same facts in a log, where they are
+///      replayable forever. It is emitted once per failed venue, so a swap that
+///      tries several produces several.
+/// @param venue The venue whose call reverted.
+/// @param tokenIn The input token of the attempt.
+/// @param tokenOut The output token of the attempt.
+/// @param amountIn The input amount the venue was asked to fill.
+/// @param entrySelector The router entrypoint the caller used, which says whether the
+///        caller pinned this venue (`swapViaVenueV1`) or the router chose it (`swapV1`).
+/// @param reason The venue's revert data, truncated to `VENUE_REVERT_LOG_BYTES`: enough
+///        for a 4-byte custom error selector or a short `Error(string)`.
+event VenueCallFailed(
+    address indexed venue,
+    address indexed tokenIn,
+    address indexed tokenOut,
+    uint256 amountIn,
+    bytes4 entrySelector,
+    bytes reason
+);

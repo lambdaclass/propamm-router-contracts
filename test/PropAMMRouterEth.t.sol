@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.35;
 
-import {Test} from "forge-std/Test.sol";
+import {Test, Vm} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {AccessManager} from "@openzeppelin/contracts/access/manager/AccessManager.sol";
@@ -13,6 +13,7 @@ import {MockQuoterV2} from "./mocks/MockQuoterV2.sol";
 import {MockPropAMMExactOut} from "./mocks/MockPropAMMExactOut.sol";
 import {ETH_SENTINEL, WETH} from "../src/libraries/Constants.sol";
 import "../src/libraries/Errors.sol";
+import "../src/libraries/Events.sol";
 
 /// @title PropAMMRouterEthTest
 /// @notice Exercises the native-ETH input paths through `_coreSwap`: ETH is
@@ -119,6 +120,39 @@ contract PropAMMRouterEthTest is Test {
         assertEq(IERC20(WETH).balanceOf(address(deadVenue)), 0, "rolled-back transfer left nothing at dead venue");
         assertEq(IERC20(WETH).balanceOf(address(router)), 0, "no WETH stranded in router");
         assertEq(address(router).balance, 0, "no ETH stranded in router");
+    }
+
+    // --- the failed venue leaves a log, not just a call tree --------------
+
+    function test_ethIn_venueFails_emitsVenueCallFailed() public {
+        vm.recordLogs();
+
+        router.swapViaVenueV1{value: AMOUNT_IN}(
+            address(deadVenue), ETH_SENTINEL, address(tokenOut), AMOUNT_IN, AMOUNT_IN, recipient, block.timestamp + 1
+        );
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 topic0 = keccak256("VenueCallFailed(address,address,address,uint256,bytes4,bytes)");
+
+        bool found;
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].emitter != address(router) || logs[i].topics[0] != topic0) continue;
+            found = true;
+
+            assertEq(address(uint160(uint256(logs[i].topics[1]))), address(deadVenue), "venue");
+            // tokenIn is logged as WETH, not the ETH sentinel: that is what the
+            // venue was actually asked for.
+            assertEq(address(uint160(uint256(logs[i].topics[2]))), WETH, "tokenIn");
+            assertEq(address(uint160(uint256(logs[i].topics[3]))), address(tokenOut), "tokenOut");
+
+            (uint256 amountIn, bytes4 entrySelector,) = abi.decode(logs[i].data, (uint256, bytes4, bytes));
+            assertEq(amountIn, AMOUNT_IN, "amountIn");
+            // The whole point of the field: it says the caller pinned this venue
+            // rather than the router choosing it.
+            assertEq(entrySelector, PropAMMRouter.swapViaVenueV1.selector, "entry selector");
+        }
+
+        assertTrue(found, "VenueCallFailed not emitted");
     }
 
     // --- ETH -> swapV1 auto-selects the venue -----------------------------
