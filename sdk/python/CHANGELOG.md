@@ -28,10 +28,6 @@ All notable changes to the Python SDK (`propamm`) are documented here.
 - `to_state_override`'s `pamms` argument now also matches an entry whose priced addresses or mapped router
   venue include the listed address, so `METRIC` selects both of Metric's
   entries and `KIPSELI` selects Kipseli's.
-- **`TAURUSFI` now points at `0x20861433D9119B866EEB398cb1ad46652A3cF953`**,
-  TaurusFi's new contract. The previous address no longer receives price
-  updates, so quoting it reverts with `StaleUpdate()`. Code that hardcoded the
-  old address must be updated.
 
 ### Added
 
