@@ -6,6 +6,8 @@ pub mod abi;
 
 use std::sync::Arc;
 
+use futures_util::future::join_all;
+
 use ethrex_common::{Address, H256, U256};
 use ethrex_l2_sdk::calldata::encode_calldata;
 
@@ -221,6 +223,79 @@ impl PropAmmRouter {
             Value::Uint(amount_in),
         ]);
         self.quote_call(mode.quote_selector(), &args, opts).await
+    }
+
+    /// Every venue that actually prices this pair, best output first.
+    pub async fn get_quotes(
+        &self,
+        token_in: Address,
+        token_out: Address,
+        amount_in: U256,
+    ) -> Result<Vec<Quote>> {
+        self.get_quotes_with(token_in, token_out, amount_in, &QuoteOptions::default())
+            .await
+    }
+
+    /// [`Self::get_quotes`] with explicit per-call options.
+    ///
+    /// Each venue is quoted on its own through `quoteVenueV1`, which propagates
+    /// the venue's revert. Quoting them together would go through
+    /// `quoteSelectedVenuesV1`, which falls back to Uniswap and would report
+    /// every venue as alive. Venues that revert or quote zero are dropped, so
+    /// the result doubles as the venue list for `swapViaSelectedVenuesV1`.
+    ///
+    /// `opts.venues` narrows the candidates; by default every whitelisted venue
+    /// is tried. All of them price against one snapshot, so the outputs are
+    /// comparable — resolving overrides per venue would mix blocks.
+    pub async fn get_quotes_with(
+        &self,
+        token_in: Address,
+        token_out: Address,
+        amount_in: U256,
+        opts: &QuoteOptions,
+    ) -> Result<Vec<Quote>> {
+        let venues = match opts.venues.as_deref() {
+            Some(venues) => venues.to_vec(),
+            None => self.get_whitelisted_venues().await?,
+        };
+        let overrides = self.resolve_overrides(opts).await?;
+
+        let results = join_all(venues.into_iter().map(|venue| {
+            let overrides = &overrides;
+            async move {
+                let args = [
+                    Value::Address(venue),
+                    Value::Address(token_in),
+                    Value::Address(token_out),
+                    Value::Uint(amount_in),
+                ];
+                (
+                    venue,
+                    self.call_router(abi::QUOTE_VENUE, &args, overrides).await,
+                )
+            }
+        }))
+        .await;
+
+        let mut quotes = Vec::new();
+        for (venue, result) in results {
+            match result {
+                Ok(data) => {
+                    let values = abi::decode_values("uint256,address", &data)?;
+                    let amount_out = abi::as_u256(&values[0])?;
+                    if !amount_out.is_zero() {
+                        quotes.push(Quote { amount_out, venue });
+                    }
+                }
+                // Only a revert means "this venue does not price the pair".
+                // Anything else (transport, node) must surface instead of
+                // silently shortening the list.
+                Err(Error::Revert { .. }) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        quotes.sort_by(|a, b| b.amount_out.cmp(&a.amount_out));
+        Ok(quotes)
     }
 
     //-------//
