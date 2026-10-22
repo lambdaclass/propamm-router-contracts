@@ -294,7 +294,7 @@ impl PropAmmRouter {
                 Err(error) => return Err(error),
             }
         }
-        quotes.sort_by(|a, b| b.amount_out.cmp(&a.amount_out));
+        quotes.sort_by_key(|quote| std::cmp::Reverse(quote.amount_out));
         Ok(quotes)
     }
 
