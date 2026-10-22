@@ -2,14 +2,14 @@
 
 All notable changes to the Python SDK (`propamm`) are documented here.
 
-## [Unreleased]
+## [1.8.0] - 2026-10-22
 
 ### Added
 
-- `PropAmmRouter.get_quotes`: every whitelisted venue that actually prices a pair,
-  best output first. Quotes each venue on its own so a venue that cannot
-  serve the pair reverts rather than falling back to Uniswap, and drops
-  reverting and zero quotes. The result is the venue list for a
+- `PropAmmRouter.get_quotes`: every whitelisted venue that actually prices
+  a pair, best output first. Quotes each venue on its own so a venue that
+  cannot serve the pair reverts rather than falling back to Uniswap, and
+  drops reverting and zero quotes. The result is the venue list for a
   venue-restricted swap, which skips the on-chain requote of every venue
   that cannot fill.
 
