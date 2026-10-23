@@ -2,7 +2,7 @@
 
 All notable changes to the Rust SDK (`propamm`) are documented here.
 
-## [1.8.0] - 2026-10-19
+## [1.9.0] - 2026-10-23
 
 ### Changed
 
@@ -11,6 +11,35 @@ All notable changes to the Rust SDK (`propamm`) are documented here.
   `0x3ce2672Aa806138585920421406Bf0dEcB8130Cb`, no longer receives price
   updates, so quoting it reverts with `StaleUpdate()`. Code that hardcoded the
   old address must be updated.
+
+## [1.8.0] - 2026-10-22
+
+### Added
+
+- `PropAmmRouter::get_quotes` / `get_quotes_with`: every whitelisted venue
+  that actually prices a pair, best output first. Quotes each venue on its
+  own so a venue that cannot serve the pair reverts rather than falling back
+  to Uniswap, and drops reverting and zero quotes. The result is the venue
+  list for a venue-restricted swap, which skips the on-chain requote of
+  every venue that cannot fill.
+
+## [1.7.1] - 2026-10-19
+
+### Changed
+
+- **`with_decimals` no longer takes an Ethereum RPC URL**: it is now
+  `with_decimals(decimals)` on `PriceLevelsRpcSource` and
+  `PriceLevelsWsSource`. A single failed `decimals()` read skipped that token's
+  books for the source's lifetime, and the read had no timeout. Callers that
+  passed `None` drop the argument; callers that passed `Some(url)` pass the
+  decimals of the tokens they need instead.
+
+### Fixed
+
+- A v2 price rung whose amounts overflow a `U256` is dropped, instead of
+  panicking the parse (and, for `PriceLevelsWsSource`, the stream's handler
+  task). So is a rung whose input rounds to zero base units, which read as a
+  free fill.
 
 ## [1.7.0] - 2026-10-16
 

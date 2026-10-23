@@ -39,11 +39,7 @@
 //! The v1 payload (`pamms` of hex `amountIn`/`amountOut` rungs) is still
 //! parsed, for sources pointed at the deprecated endpoints.
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use ethrex_common::{Address, U256};
@@ -214,21 +210,9 @@ fn parse_books(
         };
 
         // Bids: sell cumVolume of token1, receive cumVolume*price of token2.
-        let bids: Vec<PriceLevel> = rungs(book.get("bids"))
-            .map(|(volume, quote)| PriceLevel {
-                amount_in: volume.base_units(d1),
-                amount_out: quote.base_units(d2),
-                variant: None,
-            })
-            .collect();
+        let bids = levels(rungs(book.get("bids")), d1, d2);
         // Asks: pay cumVolume*price of token2, receive cumVolume of token1.
-        let asks: Vec<PriceLevel> = rungs(book.get("asks"))
-            .map(|(volume, quote)| PriceLevel {
-                amount_in: quote.base_units(d2),
-                amount_out: volume.base_units(d1),
-                variant: None,
-            })
-            .collect();
+        let asks = levels(rungs(book.get("asks")).map(|(v, q)| (q, v)), d2, d1);
 
         let pamm = venue_for_quote_address(quote_address);
         let index = match pamms.iter().position(|p| p.pamm == pamm) {
@@ -287,25 +271,62 @@ impl Decimal {
         })
     }
 
-    fn times(self, other: Self) -> Self {
-        Self {
-            digits: self.digits * other.digits,
+    /// The exact product, or `None` when its digits overflow a `U256`.
+    fn times(self, other: Self) -> Option<Self> {
+        Some(Self {
+            digits: self.digits.checked_mul(other.digits)?,
             scale: self.scale + other.scale,
-        }
+        })
     }
 
-    /// `self * 10^decimals`, rounded to the nearest integer (half up).
-    fn base_units(self, decimals: u8) -> U256 {
+    /// `self * 10^decimals`, rounded to the nearest integer (half up), or
+    /// `None` when it overflows a `U256`.
+    fn base_units(self, decimals: u8) -> Option<U256> {
         let decimals = u32::from(decimals);
         if decimals >= self.scale {
-            return self.digits * U256::exp10((decimals - self.scale) as usize);
+            return self.digits.checked_mul(pow10(decimals - self.scale)?);
         }
-        let divisor = U256::exp10((self.scale - decimals) as usize);
-        (self.digits + divisor / 2) / divisor
+        // A divisor past `U256::MAX` is over twice any `digits`: rounds to zero.
+        let Some(divisor) = pow10(self.scale - decimals) else {
+            return Some(U256::zero());
+        };
+        let (quotient, remainder) = (self.digits / divisor, self.digits % divisor);
+        // `remainder * 2 >= divisor`, without the overflow.
+        Some(if remainder >= divisor - remainder {
+            quotient + 1
+        } else {
+            quotient
+        })
     }
 }
 
-/// `(cumVolume, cumVolume * price)` per well-formed rung.
+/// `10^exponent`, or `None` past `U256::MAX`.
+fn pow10(exponent: u32) -> Option<U256> {
+    U256::from(10u8).checked_pow(U256::from(exponent))
+}
+
+/// `(amount_in, amount_out)` rungs as base-unit levels, dropping any that
+/// overflow a `U256` or take no input (a zero `amount_in` reads as a free fill).
+fn levels(
+    rungs: impl Iterator<Item = (Decimal, Decimal)>,
+    decimals_in: u8,
+    decimals_out: u8,
+) -> Vec<PriceLevel> {
+    rungs
+        .filter_map(|(amount_in, amount_out)| {
+            Some(PriceLevel {
+                amount_in: amount_in
+                    .base_units(decimals_in)
+                    .filter(|amount| !amount.is_zero())?,
+                amount_out: amount_out.base_units(decimals_out)?,
+                variant: None,
+            })
+        })
+        .collect()
+}
+
+/// `(cumVolume, cumVolume * price)` per well-formed rung whose product fits a
+/// `U256`.
 fn rungs(value: Option<&Value>) -> impl Iterator<Item = (Decimal, Decimal)> + '_ {
     value
         .and_then(Value::as_array)
@@ -314,100 +335,15 @@ fn rungs(value: Option<&Value>) -> impl Iterator<Item = (Decimal, Decimal)> + '_
         .filter_map(|rung| {
             let volume = rung.get("cumVolume").and_then(Decimal::from_json)?;
             let price = rung.get("price").and_then(Decimal::from_json)?;
-            Some((volume, volume.times(price)))
+            Some((volume, volume.times(price)?))
         })
 }
 
-/// Token decimals: the built-in table, caller additions, and cached on-chain
-/// reads. Shared by a source's clones.
-#[derive(Debug)]
-struct TokenDecimals {
-    table: Mutex<HashMap<Address, u8>>,
-    failed: Mutex<HashSet<Address>>,
-    eth_rpc_url: Option<String>,
-    client: reqwest::Client,
-}
-
-impl TokenDecimals {
-    fn new(extra: HashMap<Address, u8>, eth_rpc_url: Option<String>) -> Self {
-        let mut table: HashMap<Address, u8> = TOKEN_DECIMALS.into_iter().collect();
-        table.extend(extra);
-        Self {
-            table: Mutex::new(table),
-            failed: Mutex::new(HashSet::new()),
-            eth_rpc_url,
-            client: reqwest::Client::new(),
-        }
-    }
-
-    /// Read the decimals of the payload's unknown tokens, then return the table.
-    async fn resolve(&self, raw: &Value) -> HashMap<Address, u8> {
-        if let Some(url) = &self.eth_rpc_url {
-            let unknown: Vec<Address> = {
-                let table = self.table.lock().expect("decimals lock");
-                let failed = self.failed.lock().expect("decimals lock");
-                book_tokens(raw)
-                    .into_iter()
-                    .filter(|t| !table.contains_key(t) && !failed.contains(t))
-                    .collect()
-            };
-            let reads = unknown.iter().map(|token| self.read(url, *token));
-            let results = futures_util::future::join_all(reads).await;
-            let mut table = self.table.lock().expect("decimals lock");
-            let mut failed = self.failed.lock().expect("decimals lock");
-            for (token, result) in unknown.into_iter().zip(results) {
-                match result {
-                    Some(decimals) => {
-                        table.insert(token, decimals);
-                    }
-                    // Not retried: its books stay skipped.
-                    None => {
-                        failed.insert(token);
-                    }
-                }
-            }
-        }
-        self.table.lock().expect("decimals lock").clone()
-    }
-
-    async fn read(&self, url: &str, token: Address) -> Option<u8> {
-        // decimals() selector
-        let call = serde_json::json!({ "to": format!("{token:#x}"), "data": "0x313ce567" });
-        let body: Value = self
-            .client
-            .post(url)
-            .json(&serde_json::json!({
-                "jsonrpc": "2.0", "id": 1, "method": "eth_call", "params": [call, "latest"],
-            }))
-            .send()
-            .await
-            .ok()?
-            .json()
-            .await
-            .ok()?;
-        let word = body.get("result")?.as_str()?.strip_prefix("0x")?;
-        if word.len() != 64 {
-            return None;
-        }
-        u8::from_str_radix(word.get(62..)?, 16)
-            .ok()
-            .filter(|_| word[..62].bytes().all(|b| b == b'0'))
-    }
-}
-
-fn book_tokens(raw: &Value) -> Vec<Address> {
-    let mut tokens: Vec<Address> = raw
-        .get("books")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .flat_map(|book| ["token1Address", "token2Address"].map(|k| book.get(k)))
-        .flatten()
-        .filter_map(|v| v.as_str().and_then(|s| parse_address(s).ok()))
-        .collect();
-    tokens.sort();
-    tokens.dedup();
-    tokens
+/// [`TOKEN_DECIMALS`] plus the caller's additions or overrides.
+fn decimals_table(extra: HashMap<Address, u8>) -> HashMap<Address, u8> {
+    let mut table: HashMap<Address, u8> = TOKEN_DECIMALS.into_iter().collect();
+    table.extend(extra);
+    table
 }
 
 fn parse_pamm(entry: &Value) -> Option<PammPriceLevels> {
@@ -563,7 +499,7 @@ fn extract_rpc_result(body: &Value) -> Result<Value> {
 pub struct PriceLevelsRpcSource {
     url: String,
     client: reqwest::Client,
-    decimals: Arc<TokenDecimals>,
+    decimals: Arc<HashMap<Address, u8>>,
 }
 
 impl Default for PriceLevelsRpcSource {
@@ -577,19 +513,14 @@ impl PriceLevelsRpcSource {
         Self {
             url: url.into(),
             client: reqwest::Client::new(),
-            decimals: Arc::new(TokenDecimals::new(HashMap::new(), None)),
+            decimals: Arc::new(decimals_table(HashMap::new())),
         }
     }
 
-    /// Add to or override [`TOKEN_DECIMALS`]; with `eth_rpc_url`, a token in
-    /// neither has its `decimals()` read once and cached, otherwise books
-    /// quoting it are skipped.
-    pub fn with_decimals(
-        mut self,
-        decimals: HashMap<Address, u8>,
-        eth_rpc_url: Option<String>,
-    ) -> Self {
-        self.decimals = Arc::new(TokenDecimals::new(decimals, eth_rpc_url));
+    /// Add to or override [`TOKEN_DECIMALS`]; a v2 book quoting a token in
+    /// neither is skipped.
+    pub fn with_decimals(mut self, decimals: HashMap<Address, u8>) -> Self {
+        self.decimals = Arc::new(decimals_table(decimals));
         self
     }
 
@@ -660,8 +591,7 @@ impl PriceLevelsSource for PriceLevelsRpcSource {
         let result = self
             .rpc("titan_getPammBooks", serde_json::json!([]))
             .await?;
-        let decimals = self.decimals.resolve(&result).await;
-        parse_price_levels_message_with(&result, &decimals).map(Arc::new)
+        parse_price_levels_message_with(&result, &self.decimals).map(Arc::new)
     }
 
     fn as_rpc_source(&self) -> Option<PriceLevelsRpcSource> {
@@ -695,7 +625,8 @@ impl Default for PriceLevelsWsSourceConfig {
 struct PriceLevelsWsHandler;
 
 impl WsHandler for PriceLevelsWsHandler {
-    // Kept raw and parsed per call, once any unknown token's decimals are read.
+    // Kept raw and parsed per call: a handler has no access to its source's
+    // decimals.
     type Snapshot = Value;
 
     fn apply_frame(snapshot: &mut Arc<Self::Snapshot>, text: &str) -> bool {
@@ -728,7 +659,7 @@ impl WsHandler for PriceLevelsWsHandler {
 /// [`PriceLevelsSource::close`] tears down immediately and permanently.
 pub struct PriceLevelsWsSource {
     conn: WsConnection<PriceLevelsWsHandler>,
-    decimals: TokenDecimals,
+    decimals: HashMap<Address, u8>,
 }
 
 impl Default for PriceLevelsWsSource {
@@ -741,17 +672,13 @@ impl PriceLevelsWsSource {
     pub fn new(config: PriceLevelsWsSourceConfig) -> Self {
         Self {
             conn: WsConnection::new(config.url, config.idle_timeout, config.first_frame_timeout),
-            decimals: TokenDecimals::new(HashMap::new(), None),
+            decimals: decimals_table(HashMap::new()),
         }
     }
 
     /// As [`PriceLevelsRpcSource::with_decimals`].
-    pub fn with_decimals(
-        mut self,
-        decimals: HashMap<Address, u8>,
-        eth_rpc_url: Option<String>,
-    ) -> Self {
-        self.decimals = TokenDecimals::new(decimals, eth_rpc_url);
+    pub fn with_decimals(mut self, decimals: HashMap<Address, u8>) -> Self {
+        self.decimals = decimals_table(decimals);
         self
     }
 }
@@ -760,8 +687,7 @@ impl PriceLevelsWsSource {
 impl PriceLevelsSource for PriceLevelsWsSource {
     async fn get_price_levels(&self) -> Result<Arc<PriceLevelsSnapshot>> {
         let frame = self.conn.get_snapshot().await?;
-        let decimals = self.decimals.resolve(&frame).await;
-        parse_price_levels_message_with(&frame, &decimals).map(Arc::new)
+        parse_price_levels_message_with(&frame, &self.decimals).map(Arc::new)
     }
 
     fn close(&self) {
@@ -1088,6 +1014,29 @@ mod tests {
         let raw = serde_json::json!({ "books": [unknown] });
         let snapshot = parse_price_levels_message_with(&raw, &decimals).unwrap();
         assert_eq!(snapshot.pamms[0].pairs.len(), 2);
+    }
+
+    #[test]
+    fn parse_v2_books_drops_rungs_past_u256_or_without_input() {
+        let mut book = v2_book("0x00000003f1ec2379e79f58e12ec6c4f51ee92149");
+        book["bids"] = serde_json::json!([
+            // cumVolume * price overflows a U256.
+            { "price": 1e40, "cumVolume": 1e40 },
+            // Fits as a decimal, but not once scaled to 18 decimals.
+            { "price": 1.0, "cumVolume": 1e70 },
+            { "price": 2431.1554, "cumVolume": 0.005 },
+        ]);
+        book["asks"] = serde_json::json!([
+            // Its 10^scale divisor overflows, so the input rounds to zero base
+            // units: a free fill, dropped.
+            { "price": 1e-90, "cumVolume": 1.0 },
+            { "price": 2431.6514270000002, "cumVolume": 0.004112431530672673 },
+        ]);
+        let raw = serde_json::json!({ "books": [book] });
+
+        let pairs = &parse_price_levels_message(&raw).unwrap().pamms[0].pairs;
+        assert_eq!(rungs(&pairs[0]), vec![(5_000_000_000_000_000, 12_155_777)]);
+        assert_eq!(rungs(&pairs[1]), vec![(10_000_000, 4_112_431_530_672_673)]);
     }
 
     #[test]

@@ -5,6 +5,8 @@
  */
 
 import {
+  BaseError,
+  ContractFunctionRevertedError,
   erc20Abi,
   isAddressEqual,
   parseEventLogs,
@@ -173,6 +175,49 @@ export class PropAmmRouter {
       await this.resolveOverrides(opts),
     );
     return { amountOut, venue };
+  }
+
+  /**
+   * Every venue that actually prices this pair, best output first.
+   *
+   * Each venue is quoted on its own through `quoteVenueV1`, which propagates
+   * the venue's revert. Quoting them together would go through
+   * `quoteSelectedVenuesV1`, which falls back to Uniswap and would report every
+   * venue as alive. Venues that revert or quote zero are dropped, so the result
+   * doubles as the venue list for `swapViaSelectedVenuesV1`.
+   *
+   * `opts.venues` narrows the candidates; by default every whitelisted venue is
+   * tried. All of them price against one snapshot, so the outputs are
+   * comparable — resolving overrides per venue would mix blocks.
+   */
+  async getQuotes(
+    tokenIn: Address,
+    tokenOut: Address,
+    amountIn: bigint,
+    opts?: QuoteOptions,
+  ): Promise<Quote[]> {
+    const venues = opts?.venues ?? (await this.getWhitelistedVenues());
+    const snapshot = await this.resolveSnapshot(opts);
+    const quotes = await Promise.all(
+      venues.map(async (venue) => {
+        try {
+          return await this.quote(tokenIn, tokenOut, amountIn, {
+            ...opts,
+            overrides: snapshot ?? null,
+            venues: [venue],
+          });
+        } catch (error) {
+          // Only a revert means "this venue does not price the pair". Anything
+          // else (transport, node) must surface instead of silently shortening
+          // the list.
+          if (isRevert(error)) return undefined;
+          throw error;
+        }
+      }),
+    );
+    return quotes
+      .filter((quote): quote is Quote => quote !== undefined && quote.amountOut > 0n)
+      .sort((a, b) => (a.amountOut === b.amountOut ? 0 : a.amountOut > b.amountOut ? -1 : 1));
   }
 
   //-------//
@@ -382,13 +427,22 @@ export class PropAmmRouter {
    * `block.timestamp` against the state they pushed, which is keyed to the slot,
    * not to the frame's emit time.
    */
+  /**
+   * Resolve a quote's override options down to a single snapshot. Split out of
+   * `resolveOverrides` so a multi-venue caller can pull one snapshot and price
+   * every venue against it.
+   */
+  private async resolveSnapshot(opts?: QuoteOptions): Promise<OverridesSnapshot | undefined> {
+    const chosen = opts?.overrides === undefined ? this.overrides : opts.overrides;
+    if (chosen === null) return undefined;
+    const snapshot = isOverridesSource(chosen) ? await chosen.getOverrides() : chosen;
+    return snapshot ?? undefined;
+  }
+
   private async resolveOverrides(
     opts?: QuoteOptions,
   ): Promise<{ stateOverride?: StateOverride; blockNumber?: bigint; blockTimestamp?: bigint }> {
-    const chosen = opts?.overrides === undefined ? this.overrides : opts.overrides;
-    if (chosen === null) return {};
-
-    const snapshot = isOverridesSource(chosen) ? await chosen.getOverrides() : chosen;
+    const snapshot = await this.resolveSnapshot(opts);
     if (!snapshot) return {};
 
     const stateOverride = toStateOverride(snapshot, { bebopDefault: opts?.bebopDefault });
@@ -400,6 +454,14 @@ export class PropAmmRouter {
       blockTimestamp: blockTimeSecs(snapshot),
     };
   }
+}
+
+/** True when the error carries an on-chain revert, rather than a transport failure. */
+function isRevert(error: unknown): boolean {
+  return (
+    error instanceof BaseError &&
+    error.walk((inner) => inner instanceof ContractFunctionRevertedError) !== null
+  );
 }
 
 /**
