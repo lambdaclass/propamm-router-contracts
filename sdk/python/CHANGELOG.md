@@ -2,6 +2,16 @@
 
 All notable changes to the Python SDK (`propamm`) are documented here.
 
+## [1.9.0] - 2026-10-23
+
+### Changed
+
+- **`TAURUSFI` now points at `0x20861433D9119B866EEB398cb1ad46652A3cF953`**,
+  TaurusFi's new contract. The previous address,
+  `0x3ce2672Aa806138585920421406Bf0dEcB8130Cb`, no longer receives price
+  updates, so quoting it reverts with `StaleUpdate()`. Code that hardcoded the
+  old address must be updated.
+
 ## [1.8.0] - 2026-10-22
 
 ### Added
