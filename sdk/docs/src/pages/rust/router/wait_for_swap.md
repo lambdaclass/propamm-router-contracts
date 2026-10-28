@@ -1,7 +1,8 @@
 # wait_for_swap
 
 Wait until a swap transaction is mined and decode its outcome from the
-router's `Swapped` (and, when present, `FrontendFeeCharged`) events.
+router's swap event (`Swapped`, `SwappedViaVenue` or `SwappedViaSelectedVenues`,
+by entrypoint) and, when present, `FrontendFeeCharged`.
 
 ```rust
 pub async fn wait_for_swap(&self, hash: H256) -> Result<SwapResult>
@@ -20,7 +21,7 @@ let result: SwapResult = router.wait_for_swap(hash).await?;
 
 The decoded swap outcome.
 
-Fails if the transaction reverted or emitted no `Swapped` event.
+Fails if the transaction reverted or emitted no swap event.
 
 ## Parameters
 

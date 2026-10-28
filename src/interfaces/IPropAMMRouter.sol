@@ -5,7 +5,12 @@ pragma solidity ^0.8.35;
 /// @notice Router for single-hop swaps across whitelisted proprietary venues,
 /// with a public-venue fallback used when the chosen propAMM cannot fill.
 interface IPropAMMRouter {
-    /// @notice Emitted once per successful swap after `tokenOut` is delivered to `recipient`.
+    /// @notice Emitted once per successful swap after `tokenOut` is delivered to `recipient`,
+    /// by the best-venue entrypoints (`swapV1`, `swapWithFeeV1`) and once per
+    /// executed leg of the split entrypoints. The pinned-venue and
+    /// selected-venues entrypoints emit {SwappedViaVenue} and
+    /// {SwappedViaSelectedVenues} instead: the same fields plus the caller's
+    /// routing request, so an indexer needs no trace to recover it.
     /// @param sender The address that invoked the swap entrypoint and supplied
     /// `amountIn` of `tokenIn`. Indexed so consumers can fetch a given account's
     /// recent swaps.
@@ -25,6 +30,56 @@ interface IPropAMMRouter {
         uint256 amountOut,
         address recipient,
         address marketMaker
+    );
+
+    /// @notice Emitted once per successful `swapViaVenueV1` / `swapViaVenueWithFeeV1`
+    /// swap, in place of {Swapped}: the same fields plus the venue the caller
+    /// pinned, so `venue != marketMaker` reads as "asked for, did not fill".
+    /// @param sender The address that invoked the swap entrypoint and supplied
+    /// `amountIn` of `tokenIn`.
+    /// @param tokenIn The token sold.
+    /// @param tokenOut The token bought.
+    /// @param amountIn The exact amount of `tokenIn` pulled from `sender`.
+    /// @param amountOut The amount of `tokenOut` delivered to `recipient`.
+    /// @param recipient The address that received `tokenOut`.
+    /// @param marketMaker The proprietary AMM that filled, or the public-venue
+    /// fallback address.
+    /// @param venue The venue the caller asked for. Equals `marketMaker` when it
+    /// filled; `marketMaker` is the public-venue fallback when it did not.
+    event SwappedViaVenue(
+        address indexed sender,
+        address indexed tokenIn,
+        address indexed tokenOut,
+        uint256 amountIn,
+        uint256 amountOut,
+        address recipient,
+        address marketMaker,
+        address venue
+    );
+
+    /// @notice Emitted once per successful `swapViaSelectedVenuesV1` /
+    /// `swapViaSelectedVenuesWithFeeV1` swap, in place of {Swapped}: the same
+    /// fields plus the venues the caller offered for selection.
+    /// @param sender The address that invoked the swap entrypoint and supplied
+    /// `amountIn` of `tokenIn`.
+    /// @param tokenIn The token sold.
+    /// @param tokenOut The token bought.
+    /// @param amountIn The exact amount of `tokenIn` pulled from `sender`.
+    /// @param amountOut The amount of `tokenOut` delivered to `recipient`.
+    /// @param recipient The address that received `tokenOut`.
+    /// @param marketMaker The proprietary AMM that filled, or the public-venue
+    /// fallback address.
+    /// @param venues The caller-supplied candidate venues, in calldata order.
+    /// `marketMaker` is one of them when a candidate filled, else the fallback.
+    event SwappedViaSelectedVenues(
+        address indexed sender,
+        address indexed tokenIn,
+        address indexed tokenOut,
+        uint256 amountIn,
+        uint256 amountOut,
+        address recipient,
+        address marketMaker,
+        address[] venues
     );
 
     /// @notice Emitted when a frontend fee is skimmed from a `*WithFeeV1` swap output.
