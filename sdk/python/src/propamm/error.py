@@ -45,7 +45,7 @@ class MissingEventError(PropAmmError):
     """A mined, successful transaction emitted no expected event.
 
     Usually the wrong router address or ABI drift (e.g. a swap with no
-    ``Swapped`` log).
+    swap log).
     """
 
     def __init__(self, tx_hash: str, event: str) -> None:

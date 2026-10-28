@@ -190,7 +190,7 @@ contract PropAMMRouter is
         require(_isVenue(venue), UnknownVenue());
 
         (amountOut, executedVenue) = _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
-        _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
+        _emitSwappedViaVenue(executedVenue, venue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
 
     /// @inheritdoc IPropAMMRouter
@@ -216,7 +216,7 @@ contract PropAMMRouter is
             _coreSwap(venue, tokenIn, tokenOut, amountIn, grossMin, address(this), deadline);
 
         amountOut = FrontendFees._skimAndDisburse(tokenOut, delivered, fee, recipient, amountOutMin);
-        _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
+        _emitSwappedViaVenue(executedVenue, venue, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
 
     /// @inheritdoc IPropAMMRouter
@@ -241,7 +241,7 @@ contract PropAMMRouter is
         }
 
         (amountOut, executedVenue) = _coreSwap(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline);
-        _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
+        _emitSwappedViaSelectedVenues(executedVenue, venues, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
 
     /// @inheritdoc IPropAMMRouter
@@ -271,16 +271,16 @@ contract PropAMMRouter is
         (delivered, executedVenue) = _coreSwap(venue, tokenIn, tokenOut, amountIn, grossMin, address(this), deadline);
 
         amountOut = FrontendFees._skimAndDisburse(tokenOut, delivered, fee, recipient, amountOutMin);
-        _emitSwapped(executedVenue, tokenIn, tokenOut, amountIn, amountOut, recipient);
+        _emitSwappedViaSelectedVenues(executedVenue, venues, tokenIn, tokenOut, amountIn, amountOut, recipient);
     }
 
     /// @notice Pulls funds once and executes a swap, attempting `venue` first
     /// and recovering via the fallback if it fails.
     /// @dev Shared core for all the public swap entrypoints; unguarded so each
     /// of them can apply `whenNotPaused`/`nonReentrant` without
-    /// re-entering the guard through one another. The `Swapped` event is emitted
-    /// by the calling entrypoint (not here) so the fee entrypoints can log the
-    /// net amount and real recipient.
+    /// re-entering the guard through one another. The swap event is emitted by
+    /// the calling entrypoint (not here): the fee entrypoints log the net
+    /// amount and real recipient, and each call shape logs its own event.
     /// @param venue The propAMM to attempt first, or `fallbackSwapRouter`.
     /// @param tokenIn The address of the token being sold.
     /// @param tokenOut The address of the token being bought.
@@ -455,6 +455,52 @@ contract PropAMMRouter is
         address recipient
     ) private {
         emit Swapped(msg.sender, tokenIn, tokenOut, amountIn, amountOut, recipient, marketMaker);
+    }
+
+    /// @notice Logs a completed pinned-venue swap.
+    /// @dev `_emitSwapped` for the `swapViaVenue*` entrypoints, same stack
+    /// rationale, plus the venue the caller pinned.
+    /// @param marketMaker The venue that filled, or `fallbackSwapRouter`.
+    /// @param venue The venue the caller asked for.
+    /// @param tokenIn The token sold.
+    /// @param tokenOut The token bought.
+    /// @param amountIn The exact amount of `tokenIn` pulled from the caller.
+    /// @param amountOut The amount of `tokenOut` delivered to `recipient`.
+    /// @param recipient The address that received `tokenOut`.
+    function _emitSwappedViaVenue(
+        address marketMaker,
+        address venue,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOut,
+        address recipient
+    ) private {
+        emit SwappedViaVenue(msg.sender, tokenIn, tokenOut, amountIn, amountOut, recipient, marketMaker, venue);
+    }
+
+    /// @notice Logs a completed selected-venues swap.
+    /// @dev `_emitSwapped` for the `swapViaSelectedVenues*` entrypoints, same
+    /// stack rationale, plus the candidates the caller offered.
+    /// @param marketMaker The venue that filled, or `fallbackSwapRouter`.
+    /// @param venues The caller-supplied candidate venues, as passed.
+    /// @param tokenIn The token sold.
+    /// @param tokenOut The token bought.
+    /// @param amountIn The exact amount of `tokenIn` pulled from the caller.
+    /// @param amountOut The amount of `tokenOut` delivered to `recipient`.
+    /// @param recipient The address that received `tokenOut`.
+    function _emitSwappedViaSelectedVenues(
+        address marketMaker,
+        address[] calldata venues,
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn,
+        uint256 amountOut,
+        address recipient
+    ) private {
+        emit SwappedViaSelectedVenues(
+            msg.sender, tokenIn, tokenOut, amountIn, amountOut, recipient, marketMaker, venues
+        );
     }
 
     // We don't accept plain transfers from accounts. They should use `swap*` instead.

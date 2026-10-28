@@ -80,6 +80,16 @@ pub const ERC20_ALLOWANCE: &str = "allowance(address,address)";
 
 // Events
 pub const SWAPPED_EVENT: &str = "Swapped(address,address,address,uint256,uint256,address,address)";
+pub const SWAPPED_VIA_VENUE_EVENT: &str =
+    "SwappedViaVenue(address,address,address,uint256,uint256,address,address,address)";
+pub const SWAPPED_VIA_SELECTED_VENUES_EVENT: &str =
+    "SwappedViaSelectedVenues(address,address,address,uint256,uint256,address,address,address[])";
+/// The per-entrypoint swap events; all share the leading seven fields.
+pub const SWAP_EVENTS: &[&str] = &[
+    SWAPPED_EVENT,
+    SWAPPED_VIA_VENUE_EVENT,
+    SWAPPED_VIA_SELECTED_VENUES_EVENT,
+];
 pub const FRONTEND_FEE_CHARGED_EVENT: &str = "FrontendFeeCharged(address,address,uint256,address)";
 pub const FALLBACK_FEE_UPDATED_EVENT: &str = "FallbackFeeUpdated(uint24,uint24)";
 pub const FALLBACK_SWAP_ROUTER_UPDATED_EVENT: &str = "FallbackSwapRouterUpdated(address,address)";
@@ -133,6 +143,8 @@ pub const FUNCTIONS: &[&str] = &[
 /// Every router event the SDK knows. Same parity-test contract as [`FUNCTIONS`].
 pub const EVENTS: &[&str] = &[
     SWAPPED_EVENT,
+    SWAPPED_VIA_VENUE_EVENT,
+    SWAPPED_VIA_SELECTED_VENUES_EVENT,
     FRONTEND_FEE_CHARGED_EVENT,
     FALLBACK_FEE_UPDATED_EVENT,
     FALLBACK_SWAP_ROUTER_UPDATED_EVENT,
@@ -322,6 +334,28 @@ mod tests {
         let mut data = u256_word(1000).to_vec();
         data.extend_from_slice(&u256_word(950));
         data.extend_from_slice(&address_word(recipient));
+        data.extend_from_slice(&address_word(market_maker));
+
+        let values = decode_values("uint256,uint256,address,address", &data).unwrap();
+        assert_eq!(as_u256(&values[0]).unwrap(), U256::from(1000u64));
+        assert_eq!(as_u256(&values[1]).unwrap(), U256::from(950u64));
+        assert_eq!(as_address(&values[2]).unwrap(), recipient);
+        assert_eq!(as_address(&values[3]).unwrap(), market_maker);
+    }
+
+    #[test]
+    fn routed_swap_event_data_decodes_with_the_same_leading_layout() {
+        // SwappedViaSelectedVenues appends `address[] venues` after the shared
+        // (amountIn, amountOut, recipient, marketMaker); the dynamic tail must
+        // not disturb decoding the shared prefix.
+        let recipient = address_with_last_byte(0xaa);
+        let market_maker = address_with_last_byte(0xbb);
+        let mut data = u256_word(1000).to_vec();
+        data.extend_from_slice(&u256_word(950));
+        data.extend_from_slice(&address_word(recipient));
+        data.extend_from_slice(&address_word(market_maker));
+        data.extend_from_slice(&u256_word(0xa0)); // offset of `venues`
+        data.extend_from_slice(&u256_word(1)); // venues.length
         data.extend_from_slice(&address_word(market_maker));
 
         let values = decode_values("uint256,uint256,address,address", &data).unwrap();

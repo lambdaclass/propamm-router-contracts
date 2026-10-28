@@ -165,6 +165,25 @@ unique key for "one swap" the way it is for the single-venue entrypoints: an ind
 that assumed one `Swapped` per transaction must key on `(txHash, logIndex)` instead. The
 `Swapped` event's ABI is unchanged; only how many of them a single transaction can emit.
 
+### Swap events
+
+Each swap entrypoint logs its fill with the event that matches the call shape, so an
+indexer reads the caller's routing request off the log instead of tracing the
+transaction (a call that arrives through an aggregator hides the router calldata):
+
+| Entrypoints | Event | Routing field |
+|---|---|---|
+| `swapV1`, `swapWithFeeV1`; one per `swapSplit*` leg | `Swapped` | none: the router picked |
+| `swapViaVenueV1`, `swapViaVenueWithFeeV1` | `SwappedViaVenue` | `venue`, the pinned venue |
+| `swapViaSelectedVenuesV1`, `swapViaSelectedVenuesWithFeeV1` | `SwappedViaSelectedVenues` | `venues`, the candidates in calldata order |
+
+The seven leading fields are identical across the three (`sender`, `tokenIn`, `tokenOut`
+indexed; `amountIn`, `amountOut`, `recipient`, `marketMaker`), so a consumer that only
+cares about the fill decodes them the same way and only needs to accept three `topic0`s.
+`marketMaker` is still the venue that filled, or the Uniswap V3 fallback: a fallback is
+`marketMaker == fallbackSwapRouter`, and on `SwappedViaVenue` a `venue != marketMaker`
+says the pinned venue was asked for and did not fill. Fees stay on `FrontendFeeCharged`.
+
 ## Prerequisites
 
 - [Foundry](https://book.getfoundry.sh/getting-started/installation) installed.
