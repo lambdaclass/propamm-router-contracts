@@ -975,20 +975,23 @@ mod tests {
 
     #[test]
     fn parse_v2_books_files_books_under_the_router_venue() {
-        use crate::common::pamms::{KIPSELI, METRIC};
+        use crate::common::pamms::{KALIBER, KIPSELI, METRIC};
         let raw = serde_json::json!({ "books": [
             v2_book("0xc9a956b5196dfe110debe8781857bc8b97d32091"),
+            v2_book("0x32b569ac897a034f6ec292531e8ef81a9b4ed9ef"),
             v2_book("0xe844701934d9c6085b292e428f41b911cc0b3872"),
             v2_book("0x30a88bf894d1b806125a23ebf23d715496fd7102"),
+            v2_book("0x810a649974f21bb6d3b2e781597edbdaabe82228"),
+            v2_book("0x38e6f145586043a030d02f1aa32eb55c65183a1d"),
         ]});
         let snapshot = parse_price_levels_message(&raw).unwrap();
-        // Metric's two quote addresses collapse into one venue, one book per pair.
+        // Metric's four quote addresses collapse into one venue, one book per pair.
         let venues: Vec<_> = snapshot
             .pamms
             .iter()
             .map(|p| (p.pamm, p.pairs.len()))
             .collect();
-        assert_eq!(venues, vec![(KIPSELI, 2), (METRIC, 2)]);
+        assert_eq!(venues, vec![(KIPSELI, 2), (KALIBER, 2), (METRIC, 2)]);
     }
 
     #[test]

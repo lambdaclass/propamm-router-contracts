@@ -208,17 +208,20 @@ def test_parse_v2_books_rebuilds_the_v1_base_unit_rungs():
 
 
 def test_parse_v2_books_files_books_under_the_router_venue():
-    from propamm.common.pamms import KIPSELI, METRIC
+    from propamm.common.pamms import KALIBER, KIPSELI, METRIC
 
     books = [
         {**_V2_BOOK, "quoteAddress": "0xc9a956b5196dfe110debe8781857bc8b97d32091"},
+        {**_V2_BOOK, "quoteAddress": "0x32b569ac897a034f6ec292531e8ef81a9b4ed9ef"},
         {**_V2_BOOK, "quoteAddress": "0xe844701934d9c6085b292e428f41b911cc0b3872"},
         {**_V2_BOOK, "quoteAddress": "0x30a88bf894d1b806125a23ebf23d715496fd7102"},
+        {**_V2_BOOK, "quoteAddress": "0x810a649974f21bb6d3b2e781597edbdaabe82228"},
+        {**_V2_BOOK, "quoteAddress": "0x38e6f145586043a030d02f1aa32eb55c65183a1d"},
     ]
     snapshot = parse_price_levels_message({"books": books})
-    # Metric's two quote addresses collapse into one venue, one book per pair.
-    assert [p.pamm for p in snapshot.pamms] == [KIPSELI, METRIC]
-    assert [len(p.pairs) for p in snapshot.pamms] == [2, 2]
+    # Metric's four quote addresses collapse into one venue, one book per pair.
+    assert [p.pamm for p in snapshot.pamms] == [KIPSELI, KALIBER, METRIC]
+    assert [len(p.pairs) for p in snapshot.pamms] == [2, 2, 2]
 
 
 def test_parse_v2_books_skips_unknown_tokens_and_empty_sides():

@@ -88,6 +88,8 @@ WHITELIST_VENUES: dict[str, str] = {
     "elzorro": "0xCF211B4dD0D2be5C173Ea57Bcf938FC61d1d3bd3",
     "stelaxis": "0x77047Af6CD8f7f84d96A020a2833d24916b75FDE",
     "goliath": "0x4367985A63063fc970b009c6E599e9225181f551",
+    "kaliber": "0xb8D4E06E3038B07B4376ba3020EABCE69F673463",
+    "wilbrr": "0x6E27bB694393840e253262361B79187d4899e9CF",
 }
 _VENUE_BY_ADDR = {addr.lower(): name for name, addr in WHITELIST_VENUES.items()}
 
@@ -96,8 +98,11 @@ _VENUE_BY_ADDR = {addr.lower(): name for name, addr in WHITELIST_VENUES.items()}
 #: `sdk/python/src/propamm/common/pamms.py`.
 QUOTE_ADDRESS_VENUES: dict[str, str] = {
     "0xc9a956b5196dfe110debe8781857bc8b97d32091": WHITELIST_VENUES["kipseli"].lower(),
+    "0x32b569ac897a034f6ec292531e8ef81a9b4ed9ef": WHITELIST_VENUES["kaliber"].lower(),
     "0xe844701934d9c6085b292e428f41b911cc0b3872": WHITELIST_VENUES["metric"].lower(),
     "0x30a88bf894d1b806125a23ebf23d715496fd7102": WHITELIST_VENUES["metric"].lower(),
+    "0x810a649974f21bb6d3b2e781597edbdaabe82228": WHITELIST_VENUES["metric"].lower(),
+    "0x38e6f145586043a030d02f1aa32eb55c65183a1d": WHITELIST_VENUES["metric"].lower(),
 }
 
 

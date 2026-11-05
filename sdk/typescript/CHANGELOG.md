@@ -2,6 +2,19 @@
 
 All notable changes to the TypeScript SDK (`propamm`) are documented here.
 
+## [Unreleased]
+
+### Added
+
+- `KALIBER` and `WILBRR` venue constants in `common/pamms`, plus their
+  `kaliber` and `wilbrr` entries in `PAMMS` (and therefore in the `PammName`
+  union).
+- Kaliber's Titan quote address, `0x32b569ac897a034f6ec292531e8ef81a9b4ed9ef`,
+  in `QUOTE_ADDRESS_VENUES`.
+- Metric's two newer Titan quote addresses,
+  `0x810a649974f21bb6d3b2e781597edbdaabe82228` and
+  `0x38e6f145586043a030d02f1aa32eb55c65183a1d`, in `QUOTE_ADDRESS_VENUES`.
+
 ## [1.10.0] - 2026-10-23
 
 ### Changed

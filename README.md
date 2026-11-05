@@ -1,6 +1,6 @@
 # PropAMMRouter
 
-Single-hop router that quotes and executes swaps against a proprietary AMM (FermiSwap, Kipseli, Bebop, Tempest, TaurusFi, Metric, El Zorro, Stelaxis, or Goliath) or directly against Uniswap V3, and falls back to Uniswap V3 when the chosen proprietary venue cannot fill the swap.
+Single-hop router that quotes and executes swaps against a proprietary AMM (FermiSwap, Kipseli, Bebop, Tempest, TaurusFi, Metric, El Zorro, Stelaxis, Goliath, Kaliber, or Wilbrr) or directly against Uniswap V3, and falls back to Uniswap V3 when the chosen proprietary venue cannot fill the swap.
 
 ## Deployed Contracts
 
@@ -16,10 +16,12 @@ The PropAMMs the router interacts with are deployed at:
 - El Zorro: `0xCF211B4dD0D2be5C173Ea57Bcf938FC61d1d3bd3`
 - Stelaxis: `0x77047Af6CD8f7f84d96A020a2833d24916b75FDE`
 - Goliath: `0x4367985A63063fc970b009c6E599e9225181f551`
+- Kaliber: `0xb8D4E06E3038B07B4376ba3020EABCE69F673463`
+- Wilbrr: `0x6E27bB694393840e253262361B79187d4899e9CF`
 
 ## Overview
 
-Venues are identified **by address**: the proprietary AMM routers (FermiSwap, Kipseli, Bebop, Tempest, TaurusFi, Metric, El Zorro, Stelaxis, Goliath) plus the Uniswap V3 fallback, denoted by the SwapRouter02 address wired in at deployment. The router exposes the following external functions (see `src/interfaces/IPropAMMRouter.sol` for the full NatSpec and the [rationale](https://github.com/lambdaclass/propamm-router-contracts/blob/main/docs/rationale.md) document with some design decisions):
+Venues are identified **by address**: the proprietary AMM routers (FermiSwap, Kipseli, Bebop, Tempest, TaurusFi, Metric, El Zorro, Stelaxis, Goliath, Kaliber, Wilbrr) plus the Uniswap V3 fallback, denoted by the SwapRouter02 address wired in at deployment. The router exposes the following external functions (see `src/interfaces/IPropAMMRouter.sol` for the full NatSpec and the [rationale](https://github.com/lambdaclass/propamm-router-contracts/blob/main/docs/rationale.md) document with some design decisions):
 
 - `swapV1(tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline)`: pulls `amountIn` of `tokenIn` from `msg.sender`, routes through the best-quoting venue, and falls back to Uniswap V3 if that venue reverts or under-delivers. Returns `(amountOut, executedVenue)`, where `executedVenue` is the proprietary venue that filled or the SwapRouter02 address when the fallback ran. Routes to Uniswap V3 if the best propAMM quote is below `amountOutMin`, and checks `amountOutMin` against the measured balance delta of `recipient` after execution (`InsufficientOutput`). Reverts when the contract is paused (see [Pausing the contract](#pausing-the-contract)); quote functions remain callable.
 - `swapViaVenueV1(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline)`: attempts the caller-specified `venue` first. A proprietary venue still falls back to Uniswap V3 if it fails to fill; naming the Uniswap V3 SwapRouter02 address routes directly to Uniswap V3 (it *is* the fallback, so there is nothing further to fall back to). Reverts `UnknownVenue` if `venue` is neither a whitelisted proprietary AMM nor the SwapRouter02 address.
@@ -295,6 +297,8 @@ This prints `amountOut`, e.g. `2115659878` (≈ 2115.66 USDC for 1 WETH, with US
 | El Zorro | `0xCF211B4dD0D2be5C173Ea57Bcf938FC61d1d3bd3` |
 | Stelaxis | `0x77047Af6CD8f7f84d96A020a2833d24916b75FDE` |
 | Goliath | `0x4367985A63063fc970b009c6E599e9225181f551` |
+| Kaliber | `0xb8D4E06E3038B07B4376ba3020EABCE69F673463` |
+| Wilbrr | `0x6E27bB694393840e253262361B79187d4899e9CF` |
 
 ### Pausing the contract
 

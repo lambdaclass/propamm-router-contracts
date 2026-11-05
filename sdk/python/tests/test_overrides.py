@@ -158,20 +158,23 @@ def test_parse_v2_venues_reads_entries_and_block_context():
 
 
 def test_to_state_override_selects_every_entry_a_router_venue_needs():
-    from propamm.common.pamms import KIPSELI, METRIC
+    from propamm.common.pamms import KALIBER, KIPSELI, METRIC
 
     metric_a, metric_b = (
         "0xe844701934d9c6085b292e428f41b911cc0b3872",
         "0x30a88bf894d1b806125a23ebf23d715496fd7102",
     )
     kipseli = "0xc9a956b5196dfe110debe8781857bc8b97d32091"
+    kaliber = "0x32b569ac897a034f6ec292531e8ef81a9b4ed9ef"
     raw = {
         "venues": [
             # Metric lists its router venue among the priced addresses.
             _v2_venue(metric_a, "0x" + "11" * 20, [metric_a, METRIC], 1),
             _v2_venue(metric_b, "0x" + "22" * 20, [metric_b, METRIC], 2),
-            # Kipseli doesn't; its quote address is mapped to the venue instead.
+            # Kipseli and Kaliber don't; their quote addresses are mapped to the
+            # venue instead.
             _v2_venue(kipseli, "0x" + "33" * 20, [kipseli], 3),
+            _v2_venue(kaliber, "0x" + "44" * 20, [kaliber], 4),
         ]
     }
     snapshot = parse_overrides_message(raw)
@@ -183,3 +186,4 @@ def test_to_state_override_selects_every_entry_a_router_venue_needs():
         [to_checksum_address("0x" + "11" * 20), to_checksum_address("0x" + "22" * 20)]
     )
     assert contracts([KIPSELI]) == [to_checksum_address("0x" + "33" * 20)]
+    assert contracts([KALIBER]) == [to_checksum_address("0x" + "44" * 20)]

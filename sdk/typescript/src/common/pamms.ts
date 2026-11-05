@@ -10,6 +10,8 @@ export const METRIC: Address = "0x99Ab7c1C5eab47801F7937075998527a550fbA8a";
 export const EL_ZORRO: Address = "0xCF211B4dD0D2be5C173Ea57Bcf938FC61d1d3bd3";
 export const STELAXIS: Address = "0x77047Af6CD8f7f84d96A020a2833d24916b75FDE";
 export const GOLIATH: Address = "0x4367985A63063fc970b009c6E599e9225181f551";
+export const KALIBER: Address = "0xb8D4E06E3038B07B4376ba3020EABCE69F673463";
+export const WILBRR: Address = "0x6E27bB694393840e253262361B79187d4899e9CF";
 
 /**
  * Curated propAMM name → venue address mapping, for the `venues` option of
@@ -28,6 +30,8 @@ export const PAMMS = {
   elzorro: EL_ZORRO,
   stelaxis: STELAXIS,
   goliath: GOLIATH,
+  kaliber: KALIBER,
+  wilbrr: WILBRR,
 } as const satisfies Record<string, Address>;
 
 export type PammName = keyof typeof PAMMS;
@@ -42,7 +46,12 @@ export type PammName = keyof typeof PAMMS;
 export const QUOTE_ADDRESS_VENUES: Readonly<Record<string, Address>> = {
   // Kipseli
   "0xc9a956b5196dfe110debe8781857bc8b97d32091": KIPSELI,
-  // Metric publishes under two quote addresses; its venue needs both.
+  // Kaliber: Titan publishes under a quote address whose entry does not list
+  // the router venue among its priced addresses either.
+  "0x32b569ac897a034f6ec292531e8ef81a9b4ed9ef": KALIBER,
+  // Metric publishes under four quote addresses; its venue needs all of them.
   "0xe844701934d9c6085b292e428f41b911cc0b3872": METRIC,
   "0x30a88bf894d1b806125a23ebf23d715496fd7102": METRIC,
+  "0x810a649974f21bb6d3b2e781597edbdaabe82228": METRIC,
+  "0x38e6f145586043a030d02f1aa32eb55c65183a1d": METRIC,
 };
