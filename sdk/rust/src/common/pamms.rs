@@ -11,13 +11,15 @@ pub const METRIC: Address = H160(hex!("99Ab7c1C5eab47801F7937075998527a550fbA8a"
 pub const EL_ZORRO: Address = H160(hex!("CF211B4dD0D2be5C173Ea57Bcf938FC61d1d3bd3"));
 pub const STELAXIS: Address = H160(hex!("77047Af6CD8f7f84d96A020a2833d24916b75FDE"));
 pub const GOLIATH: Address = H160(hex!("4367985A63063fc970b009c6E599e9225181f551"));
+pub const KALIBER: Address = H160(hex!("b8D4E06E3038B07B4376ba3020EABCE69F673463"));
+pub const WILBRR: Address = H160(hex!("6E27bB694393840e253262361B79187d4899e9CF"));
 
 /// Curated propAMM name → venue address mapping, for the `venues` option of
 /// quotes and swaps.
 ///
 /// The Uniswap V3 fallback is intentionally absent: its address is router
 /// configuration, read it via `PropAmmRouter::fallback_swap_router`.
-pub const PAMMS: [(&str, Address); 9] = [
+pub const PAMMS: [(&str, Address); 11] = [
     ("fermi", FERMI),
     ("bebop", BEBOP),
     ("kipseli", KIPSELI),
@@ -27,6 +29,8 @@ pub const PAMMS: [(&str, Address); 9] = [
     ("elzorro", EL_ZORRO),
     ("stelaxis", STELAXIS),
     ("goliath", GOLIATH),
+    ("kaliber", KALIBER),
+    ("wilbrr", WILBRR),
 ];
 
 /// Titan publishes each maker's data under the maker's quote address, which for
@@ -34,19 +38,34 @@ pub const PAMMS: [(&str, Address); 9] = [
 /// quote addresses to the router venue; makers absent here publish under the
 /// venue address itself. Source: the stream-address table in Titan's takers
 /// docs.
-pub const QUOTE_ADDRESS_VENUES: [(Address, Address); 3] = [
+pub const QUOTE_ADDRESS_VENUES: [(Address, Address); 6] = [
     // Kipseli
     (
         H160(hex!("c9a956b5196dfe110debe8781857bc8b97d32091")),
         KIPSELI,
     ),
-    // Metric publishes under two quote addresses; its venue needs both.
+    // Kaliber: Titan publishes under a quote address whose entry does not
+    // list the router venue among its priced addresses either.
+    (
+        H160(hex!("32b569ac897a034f6ec292531e8ef81a9b4ed9ef")),
+        KALIBER,
+    ),
+    // Metric publishes under four quote addresses; its venue needs all of
+    // them.
     (
         H160(hex!("e844701934d9c6085b292e428f41b911cc0b3872")),
         METRIC,
     ),
     (
         H160(hex!("30a88bf894d1b806125a23ebf23d715496fd7102")),
+        METRIC,
+    ),
+    (
+        H160(hex!("810a649974f21bb6d3b2e781597edbdaabe82228")),
+        METRIC,
+    ),
+    (
+        H160(hex!("38e6f145586043a030d02f1aa32eb55c65183a1d")),
         METRIC,
     ),
 ];
@@ -180,7 +199,7 @@ mod tests {
     /// individual constants and carry no duplicates.
     #[test]
     fn pamms_is_consistent() {
-        assert_eq!(PAMMS.len(), 9);
+        assert_eq!(PAMMS.len(), 11);
         for (name, address) in PAMMS {
             assert_ne!(address, Address::zero(), "{name} is the zero address");
             assert_eq!(

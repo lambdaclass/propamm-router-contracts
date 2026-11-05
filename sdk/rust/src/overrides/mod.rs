@@ -663,24 +663,28 @@ mod tests {
 
     #[test]
     fn to_state_override_selects_every_entry_a_router_venue_needs() {
-        use crate::common::pamms::{KIPSELI, METRIC};
+        use crate::common::pamms::{KALIBER, KIPSELI, METRIC};
         let metric = format!("{METRIC:#x}");
-        let (metric_a, metric_b, kipseli) = (
+        let (metric_a, metric_b, kipseli, kaliber) = (
             "0xe844701934d9c6085b292e428f41b911cc0b3872",
             "0x30a88bf894d1b806125a23ebf23d715496fd7102",
             "0xc9a956b5196dfe110debe8781857bc8b97d32091",
+            "0x32b569ac897a034f6ec292531e8ef81a9b4ed9ef",
         );
-        let (c1, c2, c3) = (
+        let (c1, c2, c3, c4) = (
             "0x1111111111111111111111111111111111111111",
             "0x2222222222222222222222222222222222222222",
             "0x3333333333333333333333333333333333333333",
+            "0x4444444444444444444444444444444444444444",
         );
         let raw = serde_json::json!({ "venues": [
             // Metric lists its router venue among the priced addresses.
             v2_venue(metric_a, c1, &[metric_a, &metric], 1),
             v2_venue(metric_b, c2, &[metric_b, &metric], 2),
-            // Kipseli doesn't; its quote address is mapped to the venue instead.
+            // Kipseli and Kaliber don't; their quote addresses are mapped to the
+            // venue instead.
             v2_venue(kipseli, c3, &[kipseli], 3),
+            v2_venue(kaliber, c4, &[kaliber], 4),
         ]});
         let snapshot = parse_overrides_message(&raw).unwrap();
         let contracts = |pamm: Address| {
@@ -700,6 +704,7 @@ mod tests {
             vec![parse_address(c1).unwrap(), parse_address(c2).unwrap()]
         );
         assert_eq!(contracts(KIPSELI), vec![parse_address(c3).unwrap()]);
+        assert_eq!(contracts(KALIBER), vec![parse_address(c4).unwrap()]);
     }
 
     #[test]
