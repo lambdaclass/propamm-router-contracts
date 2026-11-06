@@ -26,7 +26,7 @@ pub enum Error {
     },
 
     /// A mined, successful transaction emitted no expected event (e.g. a swap
-    /// with no `Swapped` log — usually the wrong router address or ABI drift).
+    /// with no swap log — usually the wrong router address or ABI drift).
     #[error("transaction {hash:#x} emitted no {event} event")]
     MissingEvent { hash: H256, event: &'static str },
 

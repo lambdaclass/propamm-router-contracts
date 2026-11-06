@@ -428,8 +428,8 @@ contract PropAMMRouterFeeTest is Test {
 
     // Characterization: the fee-free swapViaSelectedVenuesV1 with no priceable
     // selected venue defaults to the Uniswap fallback (#9) instead of reverting,
-    // and still emits Swapped from the entrypoint (the _coreSwap refactor moved
-    // the emit out of _coreSwap). Guards the merge resolution of conflict B —
+    // and still emits its swap event from the entrypoint (the _coreSwap refactor
+    // moved the emit out of _coreSwap). Guards the merge resolution of conflict B —
     // both the routing change and the entrypoint-level emit.
     function test_swapViaSelectedVenues_noPriceableVenue_fallsBackToUniswap() public {
         _prepare(1_000e18, 990e18);
@@ -438,8 +438,8 @@ contract PropAMMRouterFeeTest is Test {
         venues[0] = address(0xDEAD); // non-whitelisted -> UnknownVenue, skipped; venue stays address(0)
 
         vm.expectEmit(true, true, true, true, address(router));
-        emit IPropAMMRouter.Swapped(
-            user, address(tokenIn), address(tokenOut), 1_000e18, 990e18, user, address(swapRouter)
+        emit IPropAMMRouter.SwappedViaSelectedVenues(
+            user, address(tokenIn), address(tokenOut), 1_000e18, 990e18, user, address(swapRouter), venues
         );
 
         vm.prank(user);

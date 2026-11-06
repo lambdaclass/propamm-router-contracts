@@ -50,6 +50,8 @@ export const propAmmRouterAbi = parseAbi([
 
   // Events
   "event Swapped(address indexed sender, address indexed tokenIn, address indexed tokenOut, uint256 amountIn, uint256 amountOut, address recipient, address marketMaker)",
+  "event SwappedViaVenue(address indexed sender, address indexed tokenIn, address indexed tokenOut, uint256 amountIn, uint256 amountOut, address recipient, address marketMaker, address venue)",
+  "event SwappedViaSelectedVenues(address indexed sender, address indexed tokenIn, address indexed tokenOut, uint256 amountIn, uint256 amountOut, address recipient, address marketMaker, address[] venues)",
   "event FrontendFeeCharged(address indexed feeRecipient, address indexed tokenOut, uint256 feeAmount, address indexed payer)",
   "event FallbackFeeUpdated(uint24 oldFee, uint24 newFee)",
   "event FallbackSwapRouterUpdated(address indexed oldRouter, address indexed newRouter)",

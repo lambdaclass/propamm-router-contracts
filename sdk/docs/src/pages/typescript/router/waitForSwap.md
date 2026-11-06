@@ -1,7 +1,8 @@
 # waitForSwap
 
 Wait until a swap transaction is mined and decode its outcome from the
-router's `Swapped` (and, when present, `FrontendFeeCharged`) events.
+router's swap event (`Swapped`, `SwappedViaVenue` or `SwappedViaSelectedVenues`,
+by entrypoint) and, when present, `FrontendFeeCharged`.
 
 ```ts
 waitForSwap(hash: Hash): Promise<SwapResult>
@@ -20,7 +21,7 @@ await router.waitForSwap(hash);
 
 The decoded swap outcome.
 
-Throws if the transaction reverted or emitted no `Swapped` event.
+Throws if the transaction reverted or emitted no swap event.
 
 ## Parameters
 

@@ -282,8 +282,10 @@ export class PropAmmRouter {
 
   /**
    * Wait until a swap transaction is mined and decode its outcome from the
-   * router's `Swapped` (and, when present, `FrontendFeeCharged`) events.
-   * Throws if the transaction reverted or emitted no `Swapped` event.
+   * router's swap event (`Swapped`, `SwappedViaVenue` or
+   * `SwappedViaSelectedVenues`, by entrypoint) and, when present,
+   * `FrontendFeeCharged`. Throws if the transaction reverted or emitted no
+   * swap event.
    */
   async waitForSwap(hash: Hash): Promise<SwapResult> {
     const receipt = await this.client.waitForTransaction(hash);
@@ -295,11 +297,11 @@ export class PropAmmRouter {
 
     const [swapped] = parseEventLogs({
       abi: propAmmRouterAbi,
-      eventName: "Swapped",
+      eventName: ["Swapped", "SwappedViaVenue", "SwappedViaSelectedVenues"],
       logs: routerLogs,
     });
     if (!swapped) {
-      throw new Error(`transaction ${hash} emitted no Swapped event from ${this.address}`);
+      throw new Error(`transaction ${hash} emitted no swap event from ${this.address}`);
     }
 
     const [feeCharged] = parseEventLogs({

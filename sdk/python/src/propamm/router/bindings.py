@@ -142,6 +142,9 @@ _QUOTE_FUNCS = {
     "selected": "quoteSelectedVenuesV1",
 }
 
+# The swap event each entrypoint emits; all share the leading seven fields.
+_SWAP_EVENTS = ("Swapped", "SwappedViaVenue", "SwappedViaSelectedVenues")
+
 # Swap function names (plain / frontend-fee) per venue-restriction mode.
 _SWAP_FUNCS = {
     "all": ("swapV1", "swapWithFeeV1"),
@@ -281,16 +284,25 @@ class PropAmmRouter:
     async def wait_for_swap(self, tx_hash: str) -> SwapResult:
         """Wait until a swap is mined and decode its outcome from the router's events.
 
-        Decodes ``Swapped`` (and, when present, ``FrontendFeeCharged``). Raises
-        if the transaction reverted or emitted no ``Swapped`` event.
+        Decodes the swap event the entrypoint emits (``Swapped``,
+        ``SwappedViaVenue`` or ``SwappedViaSelectedVenues``) and, when present,
+        ``FrontendFeeCharged``. Raises if the transaction reverted or emitted no
+        swap event.
         """
         receipt = await self.client.wait_for_transaction(tx_hash)
         if receipt["status"] != 1:
             raise TransactionRevertedError(tx_hash, receipt)
 
-        swapped = self._extract_event_from_receipt("Swapped", receipt)
+        swapped = next(
+            (
+                event
+                for name in _SWAP_EVENTS
+                if (event := self._extract_event_from_receipt(name, receipt)) is not None
+            ),
+            None,
+        )
         if swapped is None:
-            raise MissingEventError(tx_hash, "Swapped")
+            raise MissingEventError(tx_hash, "/".join(_SWAP_EVENTS))
 
         fee_event = self._extract_event_from_receipt("FrontendFeeCharged", receipt)
         if fee_event is not None:

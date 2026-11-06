@@ -352,8 +352,10 @@ impl PropAmmRouter {
     }
 
     /// Wait until a swap transaction is mined and decode its outcome from the
-    /// router's `Swapped` (and, when present, `FrontendFeeCharged`) events.
-    /// Fails if the transaction reverted or emitted no `Swapped` event.
+    /// router's swap event (`Swapped`, `SwappedViaVenue` or
+    /// `SwappedViaSelectedVenues`, by entrypoint) and, when present,
+    /// `FrontendFeeCharged`. Fails if the transaction reverted or emitted no
+    /// swap event.
     pub async fn wait_for_swap(&self, hash: H256) -> Result<SwapResult> {
         let receipt = self.client.wait_for_transaction(hash).await?;
         if !receipt.receipt.status {
@@ -363,7 +365,10 @@ impl PropAmmRouter {
             });
         }
 
-        let swapped_topic = abi::event_topic(abi::SWAPPED_EVENT);
+        let swap_topics: Vec<H256> = abi::SWAP_EVENTS
+            .iter()
+            .map(|signature| abi::event_topic(signature))
+            .collect();
         let fee_topic = abi::event_topic(abi::FRONTEND_FEE_CHARGED_EVENT);
 
         let mut swapped = None;
@@ -375,8 +380,10 @@ impl PropAmmRouter {
             let Some(topic0) = log.log.topics.first() else {
                 continue;
             };
-            if *topic0 == swapped_topic && swapped.is_none() {
-                // Swapped data fields: (amountIn, amountOut, recipient, marketMaker)
+            if swap_topics.contains(topic0) && swapped.is_none() {
+                // Leading data fields shared by the three swap events:
+                // (amountIn, amountOut, recipient, marketMaker). The routing
+                // fields that follow on the routed events are not needed here.
                 let values = abi::decode_values("uint256,uint256,address,address", &log.log.data)?;
                 swapped = Some((
                     abi::as_u256(&values[0])?,
@@ -404,7 +411,7 @@ impl PropAmmRouter {
         let (amount_in, amount_out, recipient, market_maker) =
             swapped.ok_or(Error::MissingEvent {
                 hash,
-                event: "Swapped",
+                event: "Swapped/SwappedViaVenue/SwappedViaSelectedVenues",
             })?;
 
         Ok(SwapResult {
