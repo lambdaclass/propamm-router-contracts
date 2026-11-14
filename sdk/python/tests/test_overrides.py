@@ -125,3 +125,65 @@ def test_parse_word_accepts_padded_and_unpadded_hex():
     slots = snapshot.per_pamm["0x0000000000000000000000000000000000000abc"][contract]
     assert slots[1] == 42
     assert slots[2] == 1
+
+
+def _v2_venue(quote_address, contract, priced, slot_value, slot=10, block=20):
+    return {
+        "maker": "M",
+        "quoteAddress": quote_address,
+        "pricedAddresses": priced,
+        "slot": slot,
+        "blockNumber": block,
+        "timestamp": 1792166394410832280,
+        "stateOverride": {contract: {"stateDiff": {_word(1): _word(slot_value)}}},
+    }
+
+
+def test_parse_v2_venues_reads_entries_and_block_context():
+    raw = {
+        "venues": [
+            _v2_venue("0x00000000000000000000000000000000000000aa", "0x" + "11" * 20, [], 7),
+            _v2_venue(
+                "0x00000000000000000000000000000000000000bb", "0x" + "22" * 20, [], 8, 11, 21
+            ),
+        ]
+    }
+    snapshot = parse_overrides_message(raw)
+    assert set(snapshot.per_pamm) == {
+        "0x00000000000000000000000000000000000000aa",
+        "0x00000000000000000000000000000000000000bb",
+    }
+    assert snapshot.slot == 11 and snapshot.block_number == 21
+    assert snapshot.timestamp_ns == 1792166394410832280
+
+
+def test_to_state_override_selects_every_entry_a_router_venue_needs():
+    from propamm.common.pamms import KALIBER, KIPSELI, METRIC
+
+    metric_a, metric_b = (
+        "0xe844701934d9c6085b292e428f41b911cc0b3872",
+        "0x30a88bf894d1b806125a23ebf23d715496fd7102",
+    )
+    kipseli = "0xc9a956b5196dfe110debe8781857bc8b97d32091"
+    kaliber = "0x32b569ac897a034f6ec292531e8ef81a9b4ed9ef"
+    raw = {
+        "venues": [
+            # Metric lists its router venue among the priced addresses.
+            _v2_venue(metric_a, "0x" + "11" * 20, [metric_a, METRIC], 1),
+            _v2_venue(metric_b, "0x" + "22" * 20, [metric_b, METRIC], 2),
+            # Kipseli and Kaliber don't; their quote addresses are mapped to the
+            # venue instead.
+            _v2_venue(kipseli, "0x" + "33" * 20, [kipseli], 3),
+            _v2_venue(kaliber, "0x" + "44" * 20, [kaliber], 4),
+        ]
+    }
+    snapshot = parse_overrides_message(raw)
+
+    def contracts(pamms):
+        return sorted(to_state_override(snapshot, pamms=pamms, bebop_default=False))
+
+    assert contracts([METRIC]) == sorted(
+        [to_checksum_address("0x" + "11" * 20), to_checksum_address("0x" + "22" * 20)]
+    )
+    assert contracts([KIPSELI]) == [to_checksum_address("0x" + "33" * 20)]
+    assert contracts([KALIBER]) == [to_checksum_address("0x" + "44" * 20)]

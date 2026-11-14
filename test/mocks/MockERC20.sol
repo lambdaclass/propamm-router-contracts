@@ -9,4 +9,11 @@ contract MockERC20 is ERC20 {
     function mint(address to, uint256 amount) external {
         _mint(to, amount);
     }
+
+    /// @dev Test-only. Models funds leaving a holder outright (e.g. a venue
+    /// that consumes in-flight balance while quoting) — no production token
+    /// path exposes a caller-triggerable burn.
+    function burn(address from, uint256 amount) external {
+        _burn(from, amount);
+    }
 }

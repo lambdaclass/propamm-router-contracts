@@ -7,6 +7,7 @@ calls ``swapV1``, and so on.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any
 
@@ -202,6 +203,48 @@ class PropAmmRouter:
         amount_out, venue = abi_decode(["uint256", "address"], raw)
         return Quote(amount_out=amount_out, venue=to_checksum_address(venue))
 
+    async def get_quotes(
+        self,
+        token_in: str,
+        token_out: str,
+        amount_in: int,
+        opts: QuoteOptions | None = None,
+    ) -> list[Quote]:
+        """Every venue that actually prices this pair, best output first.
+
+        Each venue is quoted on its own through ``quoteVenueV1``, which
+        propagates the venue's revert. Quoting them together would go through
+        ``quoteSelectedVenuesV1``, which falls back to Uniswap and would report
+        every venue as alive. Venues that revert or quote zero are dropped, so
+        the result doubles as the venue list for ``swapViaSelectedVenuesV1``.
+
+        ``opts.venues`` narrows the candidates; by default every whitelisted
+        venue is tried. All of them price against one snapshot, so the outputs
+        are comparable — resolving overrides per venue would mix blocks.
+        """
+        opts = opts or QuoteOptions()
+        venues = opts.venues or await self.get_whitelisted_venues()
+        snapshot = await self._resolve_snapshot(opts)
+
+        async def one(venue: str) -> Quote | None:
+            per_venue = QuoteOptions(
+                overrides=snapshot, bebop_default=opts.bebop_default, venues=[venue]
+            )
+            try:
+                return await self.quote(token_in, token_out, amount_in, per_venue)
+            # Only a revert means "this venue does not price the pair". Anything
+            # else (transport, node) must surface instead of silently shortening
+            # the list.
+            except RevertError:
+                return None
+
+        quotes = await asyncio.gather(*(one(venue) for venue in venues))
+        return sorted(
+            (quote for quote in quotes if quote is not None and quote.amount_out > 0),
+            key=lambda quote: quote.amount_out,
+            reverse=True,
+        )
+
     # ------ Swaps ------
     # ETH input: when `token_in` is `ETH_SENTINEL` the router expects
     # `msg.value == amount_in`; the bindings attach it automatically. ERC-20
@@ -330,6 +373,23 @@ class PropAmmRouter:
                 return event
         return None
 
+    async def _resolve_snapshot(self, opts: QuoteOptions) -> OverridesSnapshot | None:
+        """Resolve a quote's override options down to a single snapshot.
+
+        Split out of :meth:`_resolve_overrides` so a multi-venue caller can pull
+        one snapshot and price every venue against it.
+        """
+        chosen = opts.overrides
+        if chosen is None:
+            return None
+        if chosen is _ATTACHED:
+            return await self.overrides.get_overrides()
+        if isinstance(chosen, OverridesSource):
+            return await chosen.get_overrides()
+        if isinstance(chosen, OverridesSnapshot):
+            return chosen
+        return await self.overrides.get_overrides()
+
     async def _resolve_overrides(self, opts: QuoteOptions) -> dict[str, Any] | None:
         """Resolve a quote's override options into ``eth_call`` override kwargs.
 
@@ -341,18 +401,7 @@ class PropAmmRouter:
         emit time when no slot is present; venues validate ``block.timestamp``
         against the state they pushed, which is keyed to the slot.
         """
-        chosen = opts.overrides
-        if chosen is None:
-            return None
-        if chosen is _ATTACHED:
-            snapshot = await self.overrides.get_overrides()
-        elif isinstance(chosen, OverridesSource):
-            snapshot = await chosen.get_overrides()
-        elif isinstance(chosen, OverridesSnapshot):
-            snapshot = chosen
-        else:
-            snapshot = await self.overrides.get_overrides()
-
+        snapshot = await self._resolve_snapshot(opts)
         if snapshot is None:
             return None
         state = to_state_override(snapshot, bebop_default=opts.bebop_default)

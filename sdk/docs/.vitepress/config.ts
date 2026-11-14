@@ -71,6 +71,7 @@ export default defineConfig({
             collapsed: true,
             items: [
               { text: "quote", link: "/typescript/router/quote" },
+              { text: "getQuotes", link: "/typescript/router/getQuotes" },
               { text: "swap", link: "/typescript/router/swap" },
               { text: "waitForSwap", link: "/typescript/router/waitForSwap" },
               { text: "approve", link: "/typescript/router/approve" },
@@ -113,6 +114,7 @@ export default defineConfig({
             collapsed: true,
             items: [
               { text: "quote", link: "/rust/router/quote" },
+              { text: "get_quotes", link: "/rust/router/get_quotes" },
               { text: "swap", link: "/rust/router/swap" },
               { text: "wait_for_swap", link: "/rust/router/wait_for_swap" },
               { text: "approve", link: "/rust/router/approve" },
@@ -155,6 +157,7 @@ export default defineConfig({
             collapsed: true,
             items: [
               { text: "quote", link: "/python/router/quote" },
+              { text: "get_quotes", link: "/python/router/get_quotes" },
               { text: "swap", link: "/python/router/swap" },
               { text: "wait_for_swap", link: "/python/router/wait_for_swap" },
               { text: "approve", link: "/python/router/approve" },

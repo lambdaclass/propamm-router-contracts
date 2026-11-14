@@ -5,36 +5,45 @@
  * prices it has *already quoted*, grouped per pAMM: for each trading pair an
  * `orderBook` of rungs mapping an input amount to the output it would receive.
  * This lets a taker read prices across a range of trade sizes without running
- * an `eth_call` simulation per size. Rungs come in two flavours — `Simulated`
- * (derived from an EVM simulation of a synthesized taker tx) and `Interpolated`
- * (a linear spline between simulated rungs, for finer granularity).
+ * an `eth_call` simulation per size.
  *
  * Titan exposes this through a WebSocket stream and three JSON-RPC methods:
  *
- * - `titan_getPammPriceLevels` — the full per-pAMM snapshot (also streamed at
- *   `wss://.../ws/pamm_price_levels` as *complete* snapshots, not deltas).
+ * - `titan_getPammBooks` — the full snapshot (also streamed at
+ *   `wss://.../ws/pamm_price_levels_v2` as *complete* snapshots, not deltas).
  * - `titan_getPammQuote` — the best quote across all pAMMs for a size.
  * - `titan_getPammQuoteVenue` — the same, pinned to one venue.
  *
- * The snapshot payload (the JSON-RPC `result` or a WS frame) looks like:
+ * The v2 payload carries one book per maker and token pair, in human units:
  *
  * ```json
  * {
- *   "slot": 14581462,
- *   "blockNumber": 25345763,
- *   "timestamp": 1781801564588230787,
- *   "pamms": [{
- *     "pamm": "0x5979...",
- *     "pairs": [{
- *       "tokenIn": "0x2260...", "tokenOut": "0xa0b8...",
- *       "orderBook": [{ "amountIn": "0x989680", "amountOut": "0x174b67393", "variant": "Simulated" }]
- *     }]
+ *   "slot": 15436468, "block": 26197444, "ts": 1792061637434840374,
+ *   "books": [{
+ *     "maker": "Tempest", "quoteAddress": "0x0000...",
+ *     "token1Address": "0xc02a...", "token2Address": "0xdac1...",
+ *     "bids": [{ "price": 2365.0436, "cumVolume": 0.005 }],
+ *     "asks": [{ "price": 2365.526259, "cumVolume": 0.004227389132525372 }]
  *   }]
  * }
  * ```
+ *
+ * A bid rung sells `cumVolume` of token1 for `cumVolume * price` of token2; an
+ * ask rung buys `cumVolume` of token1 for `cumVolume * price` of token2. The
+ * parser turns each side into the `tokenIn → tokenOut` order book of base-unit
+ * amounts this module has always returned, which needs each token's decimals
+ * (see {@link TOKEN_DECIMALS}). Titan sends those numbers as floats, so a
+ * rebuilt amount can be a few base units off the exact simulated one. The book
+ * is filed under the router venue its quote address maps to
+ * ({@link QUOTE_ADDRESS_VENUES}).
+ *
+ * The v1 payload (`pamms` of hex `amountIn`/`amountOut` rungs) is still
+ * parsed, for sources pointed at the deprecated endpoints.
  */
 
-import { numberToHex, type Address } from "viem";
+import { maxUint256, numberToHex, type Address } from "viem";
+import { QUOTE_ADDRESS_VENUES } from "../common/pamms.js";
+import { TOKEN_DECIMALS } from "../common/tokens.js";
 import { WsSource } from "../ws-source.js";
 
 /** Whether a rung came from an EVM simulation or a spline interpolation. */
@@ -44,7 +53,8 @@ export type PriceVariant = "Simulated" | "Interpolated";
 export interface PriceLevel {
   amountIn: bigint;
   amountOut: bigint;
-  variant: PriceVariant;
+  /** Only the v1 payload says how a rung was produced. */
+  variant?: PriceVariant;
 }
 
 /** The order book a pAMM quotes for one `tokenIn`/`tokenOut` pair. */
@@ -96,14 +106,40 @@ export interface PriceLevelsSource {
  * Default price-levels endpoint. Served from regional hosts (`eu.`, `ap.`,
  * `us.`); override the URL to pick the nearest.
  */
-export const DEFAULT_PRICE_LEVELS_RPC_URL = "https://eu.data.titanbuilder.xyz";
+export const DEFAULT_PRICE_LEVELS_RPC_URL = "https://eu.data.titanbuilder.xyz/data";
 /**
  * Default price-levels stream endpoint. The stream is served from regional
  * hosts (`eu.`, `ap.`, `us.`); override the URL to pick the nearest.
  */
-export const DEFAULT_PRICE_LEVELS_WS_URL = "wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels";
+export const DEFAULT_PRICE_LEVELS_WS_URL = "wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels_v2";
 
-export interface PriceLevelsOptions {
+/** Decimals for tokens missing from {@link TOKEN_DECIMALS}. */
+export interface TokenDecimalsOptions {
+  /**
+   * Extra or overriding decimals, by token address. A v2 book quoting a token
+   * in neither table is skipped. A value outside 0–255 throws.
+   */
+  decimals?: Record<string, number>;
+}
+
+/** Whether `value` is a token's decimals as `decimals()` returns them: an integer 0–255. */
+function isTokenDecimals(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 255;
+}
+
+/** {@link TOKEN_DECIMALS} plus the caller's additions or overrides, keyed lowercase. */
+function decimalsTable(options: TokenDecimalsOptions): Record<string, number> {
+  const table: Record<string, number> = { ...TOKEN_DECIMALS };
+  for (const [token, decimals] of Object.entries(options.decimals ?? {})) {
+    if (!isTokenDecimals(decimals)) {
+      throw new Error(`decimals for ${token} must be an integer 0-255, got ${String(decimals)}`);
+    }
+    table[token.toLowerCase()] = decimals;
+  }
+  return table;
+}
+
+export interface PriceLevelsOptions extends TokenDecimalsOptions {
   /**
    * Source the price-level snapshot (`getPriceLevels`) is pulled from. Defaults
    * to a one-shot `PriceLevelsRpcSource`; pass a `PriceLevelsWsSource` for a
@@ -140,11 +176,12 @@ export class PriceLevels {
   private readonly rpc: PriceLevelsRpcSource;
 
   constructor(options: PriceLevelsOptions = {}) {
-    this.source = options.source ?? new PriceLevelsRpcSource({ url: options.rpcUrl });
+    const rpcOptions = { url: options.rpcUrl, decimals: options.decimals };
+    this.source = options.source ?? new PriceLevelsRpcSource(rpcOptions);
     this.rpc =
       this.source instanceof PriceLevelsRpcSource
         ? this.source
-        : new PriceLevelsRpcSource({ url: options.rpcUrl });
+        : new PriceLevelsRpcSource(rpcOptions);
   }
 
   /** Latest price-level snapshot from the configured source. */
@@ -177,15 +214,21 @@ export class PriceLevels {
 const PRICE_VARIANTS = new Set<string>(["Simulated", "Interpolated"]);
 
 /**
- * Parse a raw price-levels payload (a WS frame or the JSON-RPC `result`) into a
- * snapshot: hex amounts become bigints, addresses are lowercased, and pairs or
- * rungs that are malformed (missing fields, unknown variant) are dropped.
+ * Parse a raw price-levels payload (a WS frame or the JSON-RPC `result`, v2 or
+ * v1 shape) into a snapshot: amounts become base-unit bigints, addresses are
+ * lowercased, and malformed books, pairs or rungs are dropped. A v2 book
+ * quoting a token absent from `decimals` (default {@link TOKEN_DECIMALS}) is
+ * skipped.
  */
-export function parsePriceLevelsMessage(raw: unknown): PriceLevelsSnapshot {
+export function parsePriceLevelsMessage(
+  raw: unknown,
+  decimals: Readonly<Record<string, number>> = TOKEN_DECIMALS,
+): PriceLevelsSnapshot {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     throw new Error("price-levels message is not a JSON object");
   }
   const message = raw as Record<string, unknown>;
+  if (Array.isArray(message["books"])) return parseBooks(message, decimals);
 
   const rawPamms = Array.isArray(message["pamms"]) ? (message["pamms"] as unknown[]) : [];
   const pamms: PammPriceLevels[] = [];
@@ -203,6 +246,123 @@ export function parsePriceLevelsMessage(raw: unknown): PriceLevelsSnapshot {
     timestampNs: parseUintField(message["timestamp"]),
     pamms,
   };
+}
+
+function parseBooks(
+  message: Record<string, unknown>,
+  decimals: Readonly<Record<string, number>>,
+): PriceLevelsSnapshot {
+  const byPamm = new Map<Address, Map<string, PairPriceLevels>>();
+  for (const entry of message["books"] as unknown[]) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const book = entry as Record<string, unknown>;
+    const quoteAddress = book["quoteAddress"];
+    const token1 = book["token1Address"];
+    const token2 = book["token2Address"];
+    if (
+      typeof quoteAddress !== "string" ||
+      typeof token1 !== "string" ||
+      typeof token2 !== "string"
+    )
+      continue;
+    const t1 = token1.toLowerCase() as Address;
+    const t2 = token2.toLowerCase() as Address;
+    const d1 = decimals[t1];
+    const d2 = decimals[t2];
+    if (!isTokenDecimals(d1) || !isTokenDecimals(d2)) continue;
+
+    const qa = quoteAddress.toLowerCase();
+    const pamm = (QUOTE_ADDRESS_VENUES[qa]?.toLowerCase() ?? qa) as Address;
+    const pairs = byPamm.get(pamm) ?? new Map<string, PairPriceLevels>();
+    byPamm.set(pamm, pairs);
+
+    // Bids: sell cumVolume of token1, receive cumVolume*price of token2.
+    const bids = toLevels(parseRungs(book["bids"]), d1, d2);
+    // Asks: pay cumVolume*price of token2, receive cumVolume of token1.
+    const asks = toLevels(
+      parseRungs(book["asks"]).map(([volume, quote]) => [quote, volume]),
+      d2,
+      d1,
+    );
+    // Two quote addresses can map to one venue (Metric); the first book for a
+    // pair is kept.
+    if (bids.length > 0 && !pairs.has(`${t1}:${t2}`))
+      pairs.set(`${t1}:${t2}`, { tokenIn: t1, tokenOut: t2, orderBook: bids });
+    if (asks.length > 0 && !pairs.has(`${t2}:${t1}`))
+      pairs.set(`${t2}:${t1}`, { tokenIn: t2, tokenOut: t1, orderBook: asks });
+  }
+
+  return {
+    blockNumber: parseUintField(message["block"]),
+    slot: parseUintField(message["slot"]),
+    timestampNs: parseUintField(message["ts"]),
+    pamms: [...byPamm].map(([pamm, pairs]) => ({ pamm, pairs: [...pairs.values()] })),
+  };
+}
+
+/** A decimal as `digits / 10^scale`. */
+interface Decimal {
+  digits: bigint;
+  scale: number;
+}
+
+/** `[cumVolume, cumVolume * price]` per well-formed rung, as exact decimals. */
+function parseRungs(value: unknown): [Decimal, Decimal][] {
+  if (!Array.isArray(value)) return [];
+  const rungs: [Decimal, Decimal][] = [];
+  for (const entry of value) {
+    const record = entry as Record<string, unknown> | null;
+    const volume = toDecimal(record?.["cumVolume"]);
+    const price = toDecimal(record?.["price"]);
+    if (!volume || !price) continue;
+    rungs.push([
+      volume,
+      { digits: volume.digits * price.digits, scale: volume.scale + price.scale },
+    ]);
+  }
+  return rungs;
+}
+
+/**
+ * `[amountIn, amountOut]` rungs as base-unit levels, dropping any that overflow
+ * a uint256 or take no input (a zero `amountIn` reads as a free fill).
+ */
+function toLevels(
+  rungs: [Decimal, Decimal][],
+  decimalsIn: number,
+  decimalsOut: number,
+): PriceLevel[] {
+  const levels: PriceLevel[] = [];
+  for (const [amountIn, amountOut] of rungs) {
+    const baseIn = toBaseUnits(amountIn, decimalsIn);
+    const baseOut = toBaseUnits(amountOut, decimalsOut);
+    if (baseIn && baseOut !== undefined) levels.push({ amountIn: baseIn, amountOut: baseOut });
+  }
+  return levels;
+}
+
+/**
+ * A JSON number as an exact decimal: the shortest decimal that round-trips to
+ * the same double, which is what Titan printed.
+ */
+function toDecimal(value: unknown): Decimal | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return undefined;
+  const [mantissa, exponent = "0"] = value.toString().split("e");
+  const [whole, fraction = ""] = mantissa!.split(".");
+  return { digits: BigInt(whole! + fraction), scale: fraction.length - Number(exponent) };
+}
+
+/** Round `value * 10^decimals` to the nearest integer (half up), or `undefined` past a uint256. */
+function toBaseUnits(value: Decimal, decimals: number): bigint | undefined {
+  const shift = decimals - value.scale;
+  let units: bigint;
+  if (shift >= 0) {
+    units = value.digits * 10n ** BigInt(shift);
+  } else {
+    const divisor = 10n ** BigInt(-shift);
+    units = (value.digits + divisor / 2n) / divisor;
+  }
+  return units <= maxUint256 ? units : undefined;
 }
 
 function parsePamm(entry: unknown): PammPriceLevels | undefined {
@@ -323,7 +483,7 @@ function parseTitanQuote(raw: unknown): TitanQuote {
   };
 }
 
-export interface PriceLevelsRpcSourceOptions {
+export interface PriceLevelsRpcSourceOptions extends TokenDecimalsOptions {
   /** Titan JSON-RPC endpoint. */
   url?: string;
   /** Custom fetch implementation (defaults to the global `fetch`). */
@@ -339,15 +499,17 @@ export interface PriceLevelsRpcSourceOptions {
 export class PriceLevelsRpcSource implements PriceLevelsSource {
   private readonly url: string;
   private readonly fetchFn: typeof fetch;
+  private readonly decimals: Record<string, number>;
 
   constructor(options: PriceLevelsRpcSourceOptions = {}) {
     this.url = options.url ?? DEFAULT_PRICE_LEVELS_RPC_URL;
     this.fetchFn = options.fetch ?? fetch;
+    this.decimals = decimalsTable(options);
   }
 
-  /** Latest full snapshot via `titan_getPammPriceLevels`. */
+  /** Latest full snapshot via `titan_getPammBooks`. */
   async getPriceLevels(): Promise<PriceLevelsSnapshot> {
-    return parsePriceLevelsMessage(await this.rpc("titan_getPammPriceLevels", []));
+    return parsePriceLevelsMessage(await this.rpc("titan_getPammBooks", []), this.decimals);
   }
 
   /** Best quote across all pAMMs via `titan_getPammQuote`. */
@@ -392,7 +554,7 @@ export class PriceLevelsRpcSource implements PriceLevelsSource {
   }
 }
 
-export interface PriceLevelsWsSourceOptions {
+export interface PriceLevelsWsSourceOptions extends TokenDecimalsOptions {
   /** Titan stream endpoint. */
   url?: string;
   /** How long `getPriceLevels()` waits for the first frame (default 5000ms). */
@@ -414,12 +576,11 @@ export interface PriceLevelsWsSourceOptions {
  * no explicit teardown is needed; `close()` remains available for immediate,
  * permanent teardown.
  */
-export class PriceLevelsWsSource
-  extends WsSource<PriceLevelsSnapshot>
-  implements PriceLevelsSource
-{
+export class PriceLevelsWsSource extends WsSource<unknown> implements PriceLevelsSource {
   // Replaced outright on each frame: price-levels frames are complete snapshots.
-  private snapshot: PriceLevelsSnapshot = { pamms: [] };
+  // Kept raw and parsed per call, with this source's decimals.
+  private frame: unknown;
+  private readonly decimals: Record<string, number>;
 
   protected override get name() {
     return "price-levels";
@@ -427,17 +588,20 @@ export class PriceLevelsWsSource
 
   constructor(options: PriceLevelsWsSourceOptions = {}) {
     super(options.url ?? DEFAULT_PRICE_LEVELS_WS_URL, options);
+    this.decimals = decimalsTable(options);
   }
 
   protected override applyFrame(data: string): void {
-    this.snapshot = parsePriceLevelsMessage(JSON.parse(data));
+    const frame: unknown = JSON.parse(data);
+    parsePriceLevelsMessage(frame); // reject undecodable frames up front
+    this.frame = frame;
   }
 
-  protected override copySnapshot(): PriceLevelsSnapshot {
-    return { ...this.snapshot, pamms: [...this.snapshot.pamms] };
+  protected override copySnapshot(): unknown {
+    return this.frame;
   }
 
-  getPriceLevels(): Promise<PriceLevelsSnapshot> {
-    return this.getSnapshot();
+  async getPriceLevels(): Promise<PriceLevelsSnapshot> {
+    return parsePriceLevelsMessage(await this.getSnapshot(), this.decimals);
   }
 }

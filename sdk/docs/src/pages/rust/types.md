@@ -240,7 +240,7 @@ One rung of a pair's order book.
 pub struct PriceLevel {
     pub amount_in: U256,
     pub amount_out: U256,
-    pub variant: PriceVariant,
+    pub variant: Option<PriceVariant>,
 }
 
 pub enum PriceVariant {
@@ -250,8 +250,9 @@ pub enum PriceVariant {
 ```
 
 - `amount_in` / `amount_out` — amounts in atomic units.
-- `variant` — `Simulated` means the rung came from an EVM simulation;
-  `Interpolated` from a linear spline between simulated rungs.
+- `variant` — only `Some` when parsing the deprecated v1 payload: `Simulated`
+  means the rung came from an EVM simulation, `Interpolated` from a linear
+  spline between simulated rungs. The v2 feed doesn't say.
 
 ## TitanQuote
 

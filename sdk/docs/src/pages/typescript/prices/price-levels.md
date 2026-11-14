@@ -20,7 +20,7 @@ const snapshot = await prices.getPriceLevels();
 
 // live stream
 const prices = new PriceLevels({
-  source: new PriceLevelsWsSource({ url: "wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels" }),
+  source: new PriceLevelsWsSource({ url: "wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels_v2" }),
 });
 const snapshot = await prices.getPriceLevels();
 prices.close();
@@ -82,7 +82,7 @@ Source the snapshot is pulled from. Pass a
 ### rpcUrl (optional)
 
 - **Type:** `string`
-- **Default:** `https://eu.data.titanbuilder.xyz`
+- **Default:** `https://eu.data.titanbuilder.xyz/data`
 
 Titan JSON-RPC endpoint used by the quote helpers. Ignored when `source` is a
 [`PriceLevelsRpcSource`](/typescript/prices/rpc-source) (its URL is reused).
@@ -91,7 +91,17 @@ deployment so quotes go to the same host:
 
 ```ts
 const prices = new PriceLevels({
-  source: new PriceLevelsWsSource({ url: "wss://us.data.titanbuilder.xyz/ws/pamm_price_levels" }),
-  rpcUrl: "https://us.data.titanbuilder.xyz",
+  source: new PriceLevelsWsSource({ url: "wss://us.data.titanbuilder.xyz/ws/pamm_price_levels_v2" }),
+  rpcUrl: "https://us.data.titanbuilder.xyz/data",
 });
 ```
+
+### decimals (optional)
+
+- **Type:** `Record<string, number>`
+
+Decimals of tokens missing from `TOKEN_DECIMALS`, by token address (an entry
+also overrides the built-in value). Titan's v2 feed sends amounts in human
+units, so a book quoting a token without known decimals is skipped.
+Each value must be an integer from 0 to 255, or the constructor throws.
+Applies to the default source; a source you pass takes its own.

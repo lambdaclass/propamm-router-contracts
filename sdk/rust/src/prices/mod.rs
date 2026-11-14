@@ -4,51 +4,60 @@
 //! publishes prices it has *already quoted*, grouped per pAMM: for each trading
 //! pair an `order_book` of rungs mapping an input amount to the output it would
 //! receive. This lets a taker read prices across a range of trade sizes without
-//! running an `eth_call` simulation per size. Rungs come in two flavours —
-//! `Simulated` (derived from an EVM simulation of a synthesized taker tx) and
-//! `Interpolated` (a linear spline between simulated rungs, for finer
-//! granularity).
+//! running an `eth_call` simulation per size.
 //!
 //! Titan exposes this through a WebSocket stream and three JSON-RPC methods:
 //!
-//! - `titan_getPammPriceLevels` — the full per-pAMM snapshot (also streamed as
-//!   *complete* snapshots, not deltas).
+//! - `titan_getPammBooks` — the full snapshot (also streamed at
+//!   `wss://.../ws/pamm_price_levels_v2` as *complete* snapshots, not deltas).
 //! - `titan_getPammQuote` — the best quote across all pAMMs for a size.
 //! - `titan_getPammQuoteVenue` — the same, pinned to one venue.
 //!
-//! The snapshot payload (the JSON-RPC `result` or a WS frame) looks like:
+//! The v2 payload carries one book per maker and token pair, in human units:
 //!
 //! ```json
 //! {
-//!   "slot": 14581462,
-//!   "blockNumber": 25345763,
-//!   "timestamp": 1781801564588230787,
-//!   "pamms": [{
-//!     "pamm": "0x5979...",
-//!     "pairs": [{
-//!       "tokenIn": "0x2260...", "tokenOut": "0xa0b8...",
-//!       "orderBook": [{ "amountIn": "0x989680", "amountOut": "0x174b67393", "variant": "Simulated" }]
-//!     }]
+//!   "slot": 15436468, "block": 26197444, "ts": 1792061637434840374,
+//!   "books": [{
+//!     "maker": "Tempest", "quoteAddress": "0x0000...",
+//!     "token1Address": "0xc02a...", "token2Address": "0xdac1...",
+//!     "bids": [{ "price": 2365.0436, "cumVolume": 0.005 }],
+//!     "asks": [{ "price": 2365.526259, "cumVolume": 0.004227389132525372 }]
 //!   }]
 //! }
 //! ```
+//!
+//! A bid rung sells `cumVolume` of token1 for `cumVolume * price` of token2; an
+//! ask rung buys `cumVolume` of token1 for `cumVolume * price` of token2. The
+//! parser turns each side into the `token_in → token_out` order book of
+//! base-unit amounts this module has always returned, which needs each token's
+//! decimals (see [`crate::common::tokens::TOKEN_DECIMALS`]). Titan sends those
+//! numbers as floats, so a rebuilt amount can be a few base units off the exact
+//! simulated one. The book is filed under the router venue its quote address
+//! maps to ([`crate::common::pamms::QUOTE_ADDRESS_VENUES`]).
+//!
+//! The v1 payload (`pamms` of hex `amountIn`/`amountOut` rungs) is still
+//! parsed, for sources pointed at the deprecated endpoints.
 
-use std::{sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use ethrex_common::{Address, U256};
 use serde_json::Value;
 
 use crate::common::helpers::parse_address;
+use crate::common::pamms::venue_for_quote_address;
+use crate::common::tokens::TOKEN_DECIMALS;
 use crate::error::{Error, Result};
 use crate::ws::{WsConnection, WsHandler};
 
 /// Default price-levels endpoint. Served from regional hosts (`eu.`, `ap.`,
 /// `us.`); override the URL to pick the nearest.
-pub const DEFAULT_PRICE_LEVELS_RPC_URL: &str = "https://eu.data.titanbuilder.xyz";
+pub const DEFAULT_PRICE_LEVELS_RPC_URL: &str = "https://eu.data.titanbuilder.xyz/data";
 /// Default price-levels stream endpoint. The stream is served from regional
 /// hosts (`eu.`, `ap.`, `us.`); override the URL to pick the nearest.
-pub const DEFAULT_PRICE_LEVELS_WS_URL: &str = "wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels";
+pub const DEFAULT_PRICE_LEVELS_WS_URL: &str =
+    "wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels_v2";
 
 /// Whether a rung came from an EVM simulation or a spline interpolation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,7 +81,8 @@ impl PriceVariant {
 pub struct PriceLevel {
     pub amount_in: U256,
     pub amount_out: U256,
-    pub variant: PriceVariant,
+    /// Only the v1 payload says how a rung was produced.
+    pub variant: Option<PriceVariant>,
 }
 
 /// The order book a pAMM quotes for one `token_in`/`token_out` pair.
@@ -135,13 +145,27 @@ pub trait PriceLevelsSource: Send + Sync {
     }
 }
 
-/// Parse a raw price-levels payload (a WS frame or the JSON-RPC `result`) into a
-/// snapshot: hex amounts become `U256`s, and pAMMs/pairs/rungs that are
-/// malformed (missing fields, unknown variant) are dropped.
+/// Parse a raw price-levels payload (a WS frame or the JSON-RPC `result`, v2 or
+/// v1 shape) into a snapshot, with [`TOKEN_DECIMALS`] for the v2 conversion.
+/// See [`parse_price_levels_message_with`].
 pub fn parse_price_levels_message(raw: &Value) -> Result<PriceLevelsSnapshot> {
+    parse_price_levels_message_with(raw, &TOKEN_DECIMALS.into_iter().collect())
+}
+
+/// Parse a raw price-levels payload (a WS frame or the JSON-RPC `result`, v2 or
+/// v1 shape) into a snapshot: amounts become base-unit `U256`s, and malformed
+/// books/pairs/rungs are dropped. A v2 book quoting a token absent from
+/// `decimals` is skipped.
+pub fn parse_price_levels_message_with(
+    raw: &Value,
+    decimals: &HashMap<Address, u8>,
+) -> Result<PriceLevelsSnapshot> {
     let object = raw
         .as_object()
         .ok_or_else(|| Error::Prices("price-levels message is not a JSON object".into()))?;
+    if let Some(books) = object.get("books").and_then(Value::as_array) {
+        return Ok(parse_books(object, books, decimals));
+    }
 
     let pamms = object
         .get("pamms")
@@ -160,6 +184,166 @@ pub fn parse_price_levels_message(raw: &Value) -> Result<PriceLevelsSnapshot> {
         timestamp_ns: object.get("timestamp").and_then(Value::as_u64),
         pamms,
     })
+}
+
+fn parse_books(
+    object: &serde_json::Map<String, Value>,
+    books: &[Value],
+    decimals: &HashMap<Address, u8>,
+) -> PriceLevelsSnapshot {
+    let address = |book: &Value, key: &str| {
+        book.get(key)
+            .and_then(Value::as_str)
+            .and_then(|s| parse_address(s).ok())
+    };
+    let mut pamms: Vec<PammPriceLevels> = Vec::new();
+    for book in books {
+        let (Some(quote_address), Some(token1), Some(token2)) = (
+            address(book, "quoteAddress"),
+            address(book, "token1Address"),
+            address(book, "token2Address"),
+        ) else {
+            continue;
+        };
+        let (Some(&d1), Some(&d2)) = (decimals.get(&token1), decimals.get(&token2)) else {
+            continue;
+        };
+
+        // Bids: sell cumVolume of token1, receive cumVolume*price of token2.
+        let bids = levels(rungs(book.get("bids")), d1, d2);
+        // Asks: pay cumVolume*price of token2, receive cumVolume of token1.
+        let asks = levels(rungs(book.get("asks")).map(|(v, q)| (q, v)), d2, d1);
+
+        let pamm = venue_for_quote_address(quote_address);
+        let index = match pamms.iter().position(|p| p.pamm == pamm) {
+            Some(index) => index,
+            None => {
+                pamms.push(PammPriceLevels {
+                    pamm,
+                    pairs: Vec::new(),
+                });
+                pamms.len() - 1
+            }
+        };
+        let pairs = &mut pamms[index].pairs;
+        // Two quote addresses can map to one venue (Metric); the first book for
+        // a pair is kept.
+        for (token_in, token_out, order_book) in [(token1, token2, bids), (token2, token1, asks)] {
+            let present = pairs
+                .iter()
+                .any(|p| p.token_in == token_in && p.token_out == token_out);
+            if !order_book.is_empty() && !present {
+                pairs.push(PairPriceLevels {
+                    token_in,
+                    token_out,
+                    order_book,
+                });
+            }
+        }
+    }
+
+    PriceLevelsSnapshot {
+        block_number: object.get("block").and_then(parse_u64_field),
+        slot: object.get("slot").and_then(parse_u64_field),
+        timestamp_ns: object.get("ts").and_then(Value::as_u64),
+        pamms,
+    }
+}
+
+/// A decimal as `digits / 10^scale`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Decimal {
+    digits: U256,
+    scale: u32,
+}
+
+impl Decimal {
+    /// A JSON number as an exact decimal. `f64`'s `Display` prints the
+    /// shortest decimal that round-trips to the same double, which is what
+    /// Titan printed.
+    fn from_json(value: &Value) -> Option<Self> {
+        let number = value.as_f64().filter(|n| n.is_finite() && *n >= 0.0)?;
+        let text = number.to_string();
+        let (whole, fraction) = text.split_once('.').unwrap_or((&text, ""));
+        Some(Self {
+            digits: U256::from_dec_str(&format!("{whole}{fraction}")).ok()?,
+            scale: fraction.len() as u32,
+        })
+    }
+
+    /// The exact product, or `None` when its digits overflow a `U256`.
+    fn times(self, other: Self) -> Option<Self> {
+        Some(Self {
+            digits: self.digits.checked_mul(other.digits)?,
+            scale: self.scale + other.scale,
+        })
+    }
+
+    /// `self * 10^decimals`, rounded to the nearest integer (half up), or
+    /// `None` when it overflows a `U256`.
+    fn base_units(self, decimals: u8) -> Option<U256> {
+        let decimals = u32::from(decimals);
+        if decimals >= self.scale {
+            return self.digits.checked_mul(pow10(decimals - self.scale)?);
+        }
+        // A divisor past `U256::MAX` is over twice any `digits`: rounds to zero.
+        let Some(divisor) = pow10(self.scale - decimals) else {
+            return Some(U256::zero());
+        };
+        let (quotient, remainder) = (self.digits / divisor, self.digits % divisor);
+        // `remainder * 2 >= divisor`, without the overflow.
+        Some(if remainder >= divisor - remainder {
+            quotient + 1
+        } else {
+            quotient
+        })
+    }
+}
+
+/// `10^exponent`, or `None` past `U256::MAX`.
+fn pow10(exponent: u32) -> Option<U256> {
+    U256::from(10u8).checked_pow(U256::from(exponent))
+}
+
+/// `(amount_in, amount_out)` rungs as base-unit levels, dropping any that
+/// overflow a `U256` or take no input (a zero `amount_in` reads as a free fill).
+fn levels(
+    rungs: impl Iterator<Item = (Decimal, Decimal)>,
+    decimals_in: u8,
+    decimals_out: u8,
+) -> Vec<PriceLevel> {
+    rungs
+        .filter_map(|(amount_in, amount_out)| {
+            Some(PriceLevel {
+                amount_in: amount_in
+                    .base_units(decimals_in)
+                    .filter(|amount| !amount.is_zero())?,
+                amount_out: amount_out.base_units(decimals_out)?,
+                variant: None,
+            })
+        })
+        .collect()
+}
+
+/// `(cumVolume, cumVolume * price)` per well-formed rung whose product fits a
+/// `U256`.
+fn rungs(value: Option<&Value>) -> impl Iterator<Item = (Decimal, Decimal)> + '_ {
+    value
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|rung| {
+            let volume = rung.get("cumVolume").and_then(Decimal::from_json)?;
+            let price = rung.get("price").and_then(Decimal::from_json)?;
+            Some((volume, volume.times(price)?))
+        })
+}
+
+/// [`TOKEN_DECIMALS`] plus the caller's additions or overrides.
+fn decimals_table(extra: HashMap<Address, u8>) -> HashMap<Address, u8> {
+    let mut table: HashMap<Address, u8> = TOKEN_DECIMALS.into_iter().collect();
+    table.extend(extra);
+    table
 }
 
 fn parse_pamm(entry: &Value) -> Option<PammPriceLevels> {
@@ -215,7 +399,7 @@ fn parse_level(entry: &Value) -> Option<PriceLevel> {
     Some(PriceLevel {
         amount_in,
         amount_out,
-        variant,
+        variant: Some(variant),
     })
 }
 
@@ -315,6 +499,7 @@ fn extract_rpc_result(body: &Value) -> Result<Value> {
 pub struct PriceLevelsRpcSource {
     url: String,
     client: reqwest::Client,
+    decimals: Arc<HashMap<Address, u8>>,
 }
 
 impl Default for PriceLevelsRpcSource {
@@ -328,7 +513,15 @@ impl PriceLevelsRpcSource {
         Self {
             url: url.into(),
             client: reqwest::Client::new(),
+            decimals: Arc::new(decimals_table(HashMap::new())),
         }
+    }
+
+    /// Add to or override [`TOKEN_DECIMALS`]; a v2 book quoting a token in
+    /// neither is skipped.
+    pub fn with_decimals(mut self, decimals: HashMap<Address, u8>) -> Self {
+        self.decimals = Arc::new(decimals_table(decimals));
+        self
     }
 
     /// Best quote across all pAMMs via `titan_getPammQuote`.
@@ -396,9 +589,9 @@ impl PriceLevelsRpcSource {
 impl PriceLevelsSource for PriceLevelsRpcSource {
     async fn get_price_levels(&self) -> Result<Arc<PriceLevelsSnapshot>> {
         let result = self
-            .rpc("titan_getPammPriceLevels", serde_json::json!([]))
+            .rpc("titan_getPammBooks", serde_json::json!([]))
             .await?;
-        parse_price_levels_message(&result).map(Arc::new)
+        parse_price_levels_message_with(&result, &self.decimals).map(Arc::new)
     }
 
     fn as_rpc_source(&self) -> Option<PriceLevelsRpcSource> {
@@ -432,17 +625,20 @@ impl Default for PriceLevelsWsSourceConfig {
 struct PriceLevelsWsHandler;
 
 impl WsHandler for PriceLevelsWsHandler {
-    type Snapshot = PriceLevelsSnapshot;
+    // Kept raw and parsed per call: a handler has no access to its source's
+    // decimals.
+    type Snapshot = Value;
 
     fn apply_frame(snapshot: &mut Arc<Self::Snapshot>, text: &str) -> bool {
         let Ok(value) = serde_json::from_str::<Value>(text) else {
             return false;
         };
-        let Ok(frame) = parse_price_levels_message(&value) else {
+        // Reject undecodable frames up front.
+        if parse_price_levels_message(&value).is_err() {
             return false;
-        };
+        }
         // Each frame is a complete snapshot, so it replaces the cached one.
-        *snapshot = Arc::new(frame);
+        *snapshot = Arc::new(value);
         true
     }
 
@@ -463,6 +659,7 @@ impl WsHandler for PriceLevelsWsHandler {
 /// [`PriceLevelsSource::close`] tears down immediately and permanently.
 pub struct PriceLevelsWsSource {
     conn: WsConnection<PriceLevelsWsHandler>,
+    decimals: HashMap<Address, u8>,
 }
 
 impl Default for PriceLevelsWsSource {
@@ -475,14 +672,22 @@ impl PriceLevelsWsSource {
     pub fn new(config: PriceLevelsWsSourceConfig) -> Self {
         Self {
             conn: WsConnection::new(config.url, config.idle_timeout, config.first_frame_timeout),
+            decimals: decimals_table(HashMap::new()),
         }
+    }
+
+    /// As [`PriceLevelsRpcSource::with_decimals`].
+    pub fn with_decimals(mut self, decimals: HashMap<Address, u8>) -> Self {
+        self.decimals = decimals_table(decimals);
+        self
     }
 }
 
 #[async_trait]
 impl PriceLevelsSource for PriceLevelsWsSource {
     async fn get_price_levels(&self) -> Result<Arc<PriceLevelsSnapshot>> {
-        self.conn.get_snapshot().await
+        let frame = self.conn.get_snapshot().await?;
+        parse_price_levels_message_with(&frame, &self.decimals).map(Arc::new)
     }
 
     fn close(&self) {
@@ -623,8 +828,8 @@ mod tests {
         assert_eq!(pair.order_book.len(), 2);
         assert_eq!(pair.order_book[0].amount_in, U256::from(0x989680u64));
         assert_eq!(pair.order_book[0].amount_out, U256::from(0x1_74b6_7393u64));
-        assert_eq!(pair.order_book[0].variant, PriceVariant::Simulated);
-        assert_eq!(pair.order_book[1].variant, PriceVariant::Interpolated);
+        assert_eq!(pair.order_book[0].variant, Some(PriceVariant::Simulated));
+        assert_eq!(pair.order_book[1].variant, Some(PriceVariant::Interpolated));
     }
 
     #[test]
@@ -702,6 +907,139 @@ mod tests {
     fn extract_rpc_result_surfaces_a_real_error_object() {
         let body = serde_json::json!({ "error": { "code": -32000, "message": "boom" } });
         assert!(matches!(extract_rpc_result(&body), Err(Error::Prices(_))));
+    }
+
+    /// One real Tempest WETH/USDT book from the v2 stream, captured in the same
+    /// Titan snapshot (slot 15445198) as the v1 payload, whose exact rungs were
+    /// WETH -> USDT (5000000000000000, 12155777), (8118883695943608, 19738268)
+    /// and USDT -> WETH (10000000, 4112431530672673), (17040037, 7007598544262898).
+    fn v2_book(quote_address: &str) -> Value {
+        serde_json::json!({
+            "maker": "Tempest",
+            "quoteAddress": quote_address,
+            "token1Address": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+            "token2Address": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+            "bids": [
+                { "price": 2431.1554, "cumVolume": 0.005 },
+                { "price": 2431.155407468359, "cumVolume": 0.008118883695943609 },
+            ],
+            "asks": [
+                { "price": 2431.6514270000002, "cumVolume": 0.004112431530672673 },
+                { "price": 2431.6514270000002, "cumVolume": 0.007007598544262898 },
+            ],
+        })
+    }
+
+    fn rungs(pair: &PairPriceLevels) -> Vec<(u128, u128)> {
+        pair.order_book
+            .iter()
+            .map(|l| (l.amount_in.as_u128(), l.amount_out.as_u128()))
+            .collect()
+    }
+
+    #[test]
+    fn parse_v2_books_rebuilds_the_v1_base_unit_rungs() {
+        let raw = serde_json::json!({
+            "slot": 15445198, "block": 26206152, "ts": 1792166395085440933u64,
+            "books": [v2_book("0x00000003f1ec2379e79f58e12ec6c4f51ee92149")],
+        });
+        let snapshot = parse_price_levels_message(&raw).unwrap();
+        assert_eq!(snapshot.slot, Some(15_445_198));
+        assert_eq!(snapshot.block_number, Some(26_206_152));
+        assert_eq!(snapshot.timestamp_ns, Some(1_792_166_395_085_440_933));
+
+        let pairs = &snapshot.pamms[0].pairs;
+        // Bids sell token1 for token2; one amount lands 1 wei off v1 (Titan's float).
+        assert_eq!(
+            rungs(&pairs[0]),
+            vec![
+                (5_000_000_000_000_000, 12_155_777),
+                (8_118_883_695_943_609, 19_738_268)
+            ]
+        );
+        // Asks buy token1 with token2.
+        assert_eq!(
+            rungs(&pairs[1]),
+            vec![
+                (10_000_000, 4_112_431_530_672_673),
+                (17_040_037, 7_007_598_544_262_898)
+            ]
+        );
+        assert!(
+            pairs
+                .iter()
+                .flat_map(|p| &p.order_book)
+                .all(|l| l.variant.is_none())
+        );
+    }
+
+    #[test]
+    fn parse_v2_books_files_books_under_the_router_venue() {
+        use crate::common::pamms::{KALIBER, KIPSELI, METRIC};
+        let raw = serde_json::json!({ "books": [
+            v2_book("0xc9a956b5196dfe110debe8781857bc8b97d32091"),
+            v2_book("0x32b569ac897a034f6ec292531e8ef81a9b4ed9ef"),
+            v2_book("0xe844701934d9c6085b292e428f41b911cc0b3872"),
+            v2_book("0x30a88bf894d1b806125a23ebf23d715496fd7102"),
+            v2_book("0x810a649974f21bb6d3b2e781597edbdaabe82228"),
+            v2_book("0x38e6f145586043a030d02f1aa32eb55c65183a1d"),
+        ]});
+        let snapshot = parse_price_levels_message(&raw).unwrap();
+        // Metric's four quote addresses collapse into one venue, one book per pair.
+        let venues: Vec<_> = snapshot
+            .pamms
+            .iter()
+            .map(|p| (p.pamm, p.pairs.len()))
+            .collect();
+        assert_eq!(venues, vec![(KIPSELI, 2), (KALIBER, 2), (METRIC, 2)]);
+    }
+
+    #[test]
+    fn parse_v2_books_skips_unknown_tokens_and_empty_sides() {
+        let dai = "0x6b175474e89094c44da98b954eedeac495271d0f";
+        let mut unknown = v2_book("0x00000003f1ec2379e79f58e12ec6c4f51ee92149");
+        unknown["token1Address"] = dai.into();
+        let mut one_sided = v2_book("0x00000003f1ec2379e79f58e12ec6c4f51ee92149");
+        one_sided["token2Address"] = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48".into();
+        one_sided["bids"] = serde_json::json!([]);
+        let raw = serde_json::json!({ "books": [unknown.clone(), one_sided] });
+
+        let pairs = &parse_price_levels_message(&raw).unwrap().pamms[0].pairs;
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(
+            pairs[0].token_in,
+            parse_address("0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48").unwrap()
+        );
+
+        // A caller-supplied decimals table makes the unknown token's book parse.
+        let mut decimals: HashMap<Address, u8> = TOKEN_DECIMALS.into_iter().collect();
+        decimals.insert(parse_address(dai).unwrap(), 18);
+        let raw = serde_json::json!({ "books": [unknown] });
+        let snapshot = parse_price_levels_message_with(&raw, &decimals).unwrap();
+        assert_eq!(snapshot.pamms[0].pairs.len(), 2);
+    }
+
+    #[test]
+    fn parse_v2_books_drops_rungs_past_u256_or_without_input() {
+        let mut book = v2_book("0x00000003f1ec2379e79f58e12ec6c4f51ee92149");
+        book["bids"] = serde_json::json!([
+            // cumVolume * price overflows a U256.
+            { "price": 1e40, "cumVolume": 1e40 },
+            // Fits as a decimal, but not once scaled to 18 decimals.
+            { "price": 1.0, "cumVolume": 1e70 },
+            { "price": 2431.1554, "cumVolume": 0.005 },
+        ]);
+        book["asks"] = serde_json::json!([
+            // Its 10^scale divisor overflows, so the input rounds to zero base
+            // units: a free fill, dropped.
+            { "price": 1e-90, "cumVolume": 1.0 },
+            { "price": 2431.6514270000002, "cumVolume": 0.004112431530672673 },
+        ]);
+        let raw = serde_json::json!({ "books": [book] });
+
+        let pairs = &parse_price_levels_message(&raw).unwrap().pamms[0].pairs;
+        assert_eq!(rungs(&pairs[0]), vec![(5_000_000_000_000_000, 12_155_777)]);
+        assert_eq!(rungs(&pairs[1]), vec![(10_000_000, 4_112_431_530_672_673)]);
     }
 
     #[test]

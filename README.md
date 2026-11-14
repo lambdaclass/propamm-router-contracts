@@ -1,27 +1,32 @@
 # PropAMMRouter
 
-Single-hop router that quotes and executes swaps against a proprietary AMM (FermiSwap, Kipseli, Bebop, Tempest, TaurusFi, Metric, or El Zorro) or directly against Uniswap V3, and falls back to Uniswap V3 when the chosen proprietary venue cannot fill the swap.
+Single-hop router that quotes and executes swaps against a proprietary AMM (FermiSwap, Kipseli, Bebop, Tempest, TaurusFi, Metric, El Zorro, Stelaxis, Goliath, Kaliber, or Wilbrr) or directly against Uniswap V3, and falls back to Uniswap V3 when the chosen proprietary venue cannot fill the swap.
 
 ## Deployed Contracts
 
 The Prop AMM router contract is deployed on mainnet at `0x4ddf368080cd7946db5b459ad591c350158175e1`.
 
 The PropAMMs the router interacts with are deployed at:
-- Bebop: `0xB09AaA5614916d7AEb59C295C52c92ca82aDdD76`
+- Bebop: `0xB09AAA8933626d7E4C48D65dAd2D77021CFBCA9a`
 - Fermi: `0x5979458912f80b96d30d4220af8e2e4925a33320`
 - Kipseli: `0x71e790dd841c8a9061487cb3e78c288e75ce0b3d`
 - Tempest: `0x00000003f1ec2379e79F58E12EC6C4F51Ee92149`
-- TaurusFi: `0x217d58931A8549ca539426AA8152E33dAfc3d95A`
-- Metric: `0xE715Dc29d2c273D0FC5A03e5Cca9CcB0Abb1dCDB`
+- TaurusFi: `0x20861433D9119B866EEB398cb1ad46652A3cF953`
+- Metric: `0x99Ab7c1C5eab47801F7937075998527a550fbA8a`
 - El Zorro: `0xCF211B4dD0D2be5C173Ea57Bcf938FC61d1d3bd3`
+- Stelaxis: `0x77047Af6CD8f7f84d96A020a2833d24916b75FDE`
+- Goliath: `0x4367985A63063fc970b009c6E599e9225181f551`
+- Kaliber: `0xb8D4E06E3038B07B4376ba3020EABCE69F673463`
+- Wilbrr: `0x6E27bB694393840e253262361B79187d4899e9CF`
 
 ## Overview
 
-Venues are identified **by address**: the proprietary AMM routers (FermiSwap, Kipseli, Bebop, Tempest, TaurusFi, Metric, El Zorro) plus the Uniswap V3 fallback, denoted by the SwapRouter02 address wired in at deployment. The router exposes the following external functions (see `src/interfaces/IPropAMMRouter.sol` for the full NatSpec and the [rationale](https://github.com/lambdaclass/propamm-router-contracts/blob/main/docs/rationale.md) document with some design decisions):
+Venues are identified **by address**: the proprietary AMM routers (FermiSwap, Kipseli, Bebop, Tempest, TaurusFi, Metric, El Zorro, Stelaxis, Goliath, Kaliber, Wilbrr) plus the Uniswap V3 fallback, denoted by the SwapRouter02 address wired in at deployment. The router exposes the following external functions (see `src/interfaces/IPropAMMRouter.sol` for the full NatSpec and the [rationale](https://github.com/lambdaclass/propamm-router-contracts/blob/main/docs/rationale.md) document with some design decisions):
 
 - `swapV1(tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline)`: pulls `amountIn` of `tokenIn` from `msg.sender`, routes through the best-quoting venue, and falls back to Uniswap V3 if that venue reverts or under-delivers. Returns `(amountOut, executedVenue)`, where `executedVenue` is the proprietary venue that filled or the SwapRouter02 address when the fallback ran. Routes to Uniswap V3 if the best propAMM quote is below `amountOutMin`, and checks `amountOutMin` against the measured balance delta of `recipient` after execution (`InsufficientOutput`). Reverts when the contract is paused (see [Pausing the contract](#pausing-the-contract)); quote functions remain callable.
 - `swapViaVenueV1(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline)`: attempts the caller-specified `venue` first. A proprietary venue still falls back to Uniswap V3 if it fails to fill; naming the Uniswap V3 SwapRouter02 address routes directly to Uniswap V3 (it *is* the fallback, so there is nothing further to fall back to). Reverts `UnknownVenue` if `venue` is neither a whitelisted proprietary AMM nor the SwapRouter02 address.
 - `swapViaSelectedVenuesV1(venues, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline)`: like `swapV1`, but considers only the caller-supplied `venues` subset. An on-chain requote across them selects the best, which executes — with the Uniswap V3 fallback still applying as the transparent safety net if the chosen venue fails to fill. Routes to Uniswap V3 if none of the listed venues can be priced. Returns `(amountOut, executedVenue)`. List the SwapRouter02 address among `venues` to opt Uniswap V3 into the selection (it is not a selection candidate otherwise, only the execution-time safety net).
+- `swapSplitV1(tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline)`: takes exactly the same arguments as `swapV1`, but plans and executes a split of `amountIn` across multiple whitelisted propAMM venues, on-chain, in the same transaction. Returns only `amountOut` — a split has no single executing venue, so there is nothing to put in `swapV1`'s second return slot. See [Splitting a swap across venues](#splitting-a-swap-across-venues) below.
 - `quoteV1(tokenIn, tokenOut, amount)`: quotes every venue (the proprietary AMMs and the Uniswap V3 fallback) and returns the best `amountOut` along with the venue address that produced it. Reverts `NoQuotesAvailable` if every venue is skipped or reverts.
 - `quoteVenueV1(venue, tokenIn, tokenOut, amount)`: quotes a single venue by address. Reverts `UnknownVenue` for any address that is neither a proprietary AMM nor the SwapRouter02 fallback, and bubbles up any underlying venue revert.
 - `quoteSelectedVenuesV1(venues, tokenIn, tokenOut, amountIn)`: quotes only the caller-supplied `venues` subset and returns the best `(bestAmountOut, bestVenue)`. Venues that revert (including non-whitelisted addresses) are skipped; reverts `NoQuotesAvailable` if none of them can be priced.
@@ -45,13 +50,15 @@ As a consequence:
 
 ### Frontend fees
 
-Three implementation-only entrypoints take a per-call, basis-point fee from the swap
-**output token** and forward it to a caller-supplied recipient. They are **not** part of
-`IPropAMMRouter`; encode them against the deployed `PropAMMRouter`.
+Four entrypoints take a per-call, basis-point fee from the swap **output token** and
+forward it to a caller-supplied recipient. They are declared in `IPropAMMRouter` like
+every other entrypoint (each implemented with `@inheritdoc`); encode them against the
+deployed `PropAMMRouter`.
 
 - `swapWithFeeV1(tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline, fee)`
 - `swapViaVenueWithFeeV1(venue, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline, fee)`
 - `swapViaSelectedVenuesWithFeeV1(venues, tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline, fee)`
+- `swapSplitWithFeeV1(tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline, fee)` — `swapSplitV1` with a fee skimmed from the split's aggregate output; see [Fee basis](#fee-basis) below for how this interacts with the per-leg `Swapped` events.
 
 `fee` is a `FrontendFee { uint16 bps; address recipient }`:
 - `bps` is the fee in basis points, capped at `MAX_FEE_BPS` (100 = 1.00%).
@@ -59,9 +66,106 @@ Three implementation-only entrypoints take a per-call, basis-point fee from the 
 
 `amountOutMin` is the **net** amount the user must receive **after** the fee — the router
 grosses it up internally, so the user always nets at least `amountOutMin`. The returned
-`amountOut` and the `Swapped` event's `amountOut` are the **net** delivered to `recipient`.
-A `FrontendFeeCharged` event is emitted whenever a non-zero fee is taken. Quote functions
-are unchanged and return **gross** output; a frontend nets out by subtracting its own bps.
+`amountOut` and the `Swapped` event's `amountOut` are the **net** delivered to `recipient`
+for the single-venue variants (`swapSplitWithFeeV1`'s per-leg `Swapped` events are
+**gross** — see [Fee basis](#fee-basis)). A `FrontendFeeCharged` event is emitted whenever
+a non-zero fee is taken. Quote functions are unchanged and return **gross** output; a
+frontend nets out by subtracting its own bps.
+
+### Splitting a swap across venues
+
+`swapSplitV1(tokenIn, tokenOut, amountIn, amountOutMin, recipient, deadline)` plans and
+executes a split of one exact-input order across whitelisted propAMM venues, entirely
+on-chain, in the same transaction that runs it — no off-chain solver, no caller-supplied
+route. It takes **exactly the same arguments as `swapV1`** and returns only `amountOut`,
+because a split has no single executing venue — there is nothing to put in `swapV1`'s
+`executedVenue` slot. A caller that ignores `swapV1`'s second return value switches to
+`swapSplitV1` with a one-word change; a caller that destructures both return values
+adapts by dropping one line. `swapSplitWithFeeV1` is the fee-charging counterpart, taking
+the same `FrontendFee` as the other `*WithFeeV1` entrypoints (see
+[Frontend fees](#frontend-fees) above).
+
+The router probes every whitelisted venue for capacity, ranks what it finds against a
+Uniswap V3 reference quote, and places up to `MAX_LEGS = 5` propAMM legs. Any input that
+isn't placed on a propAMM leg — because a venue had no more capacity, or because none was
+whitelisted — is coalesced into one Uniswap V3 remainder leg. That remainder is exempt
+from the `MAX_LEGS` cap: it's the safety net every split falls back on, not a planning
+choice, so a split executes **at most 6 legs total** (5 propAMM + 1 coalesced Uniswap).
+
+`MAX_SPLIT_VENUES = 12` bounds how large the whitelist can grow before `swapSplitV1` /
+`swapSplitWithFeeV1` stop working: `isSplitAvailable()` returns `false` once the
+whitelist outgrows that bound, and past it the split entrypoints revert `TooManyVenues`
+rather than silently probing an arbitrary subset (`EnumerableSet` ordering shifts on
+removal, so "the first 12" would be nondeterministic across calls). Every other
+entrypoint (`swapV1`, `quoteV1`, ...) is unaffected by the whitelist size. **Listing a
+venue past `MAX_SPLIT_VENUES` with `addVenue` disables both split entrypoints** — check
+`isSplitAvailable()` first if you plan to keep splitting available.
+
+#### Competing on size: `IPropAMMFillable`
+
+By default the router discovers a venue's capacity with a blind two-point quote probe
+(at the full order size and at half of it), which only locates capacity within roughly 2x
+of the order size — a venue whose real depth is far below or far above what those two
+points see is priced poorly or missed entirely. A propAMM can do better by implementing
+`IPropAMMFillable` (advertised via ERC-165):
+
+```solidity
+function quoteFillable(address tokenIn, address tokenOut, uint256 amountIn)
+    external
+    returns (uint256 fillableAmountIn, uint256 amountOut);
+```
+
+Given an offered `amountIn`, the venue reports back how much of it it will actually take
+(`fillableAmountIn`) and what it pays for exactly that amount (`amountOut` — never the
+output for the full `amountIn`). The router enforces `fillableAmountIn <= amountIn` by
+**discarding** a venue that reports more, not by clamping it down to `amountIn`: clamping
+would keep the inflated `amountOut` against a smaller fill, inflating that venue's
+apparent rate by exactly the over-report and letting it sweep the ranking ahead of honest
+venues before its own leg fails. Implementing this interface — priced in a single call,
+independent of the router's probe size — is how a venue competes on orders far larger
+than its own inventory, something the blind two-point probe cannot discover on its own.
+
+#### The MEV caveat — read this before setting `amountOutMin`
+
+**A propAMM leg that fails at execution time has its input absorbed into the coalesced
+Uniswap remainder, and that remainder's only floor is the aggregate shortfall against
+`amountOutMin`.** That shortfall is **zero** whenever the legs that already succeeded
+clear `amountOutMin` on their own — which is the normal outcome of splitting into venues
+that quote better than Uniswap in the first place. So in the common case, the coalesced
+slice that absorbs a failed leg executes with **no minimum output at all**, and an
+attacker who sandwiches it can capture the full difference between what it actually
+delivers and `amountOutMin`.
+
+The user can never receive less than `amountOutMin` in total, so the loss from this is
+bounded by the user's own stated tolerance — but that means **`amountOutMin` is the only
+lever protecting a split, and it should be set tight.** This is a deliberate, accepted
+consequence of this design: there is no `fallbackMinOut` parameter (unlike the split
+design this superseded) to give the coalesced remainder its own floor. Do not treat this
+as a bug to be softened by loosening the aggregate check — the tradeoff is intentional,
+and the fix is a tight `amountOutMin` on the caller's side.
+
+#### Fee basis
+
+On `swapSplitWithFeeV1`, `amountOutMin` is the **net** amount the user must be left with
+**after** the fee (grossed up internally before planning, same as the other
+`*WithFeeV1` entrypoints), and the returned `amountOut` is the **net** amount delivered.
+The per-leg `Swapped` events, however, are **gross** — one is emitted per executed leg
+(including the coalesced Uniswap remainder), before the fee is skimmed. So the net amount
+the user actually keeps is:
+
+```
+net = SUM(Swapped.amountOut for this tx) − FrontendFeeCharged.feeAmount
+```
+
+not any single `Swapped.amountOut` on its own.
+
+#### Event semantics
+
+`swapSplitV1` and `swapSplitWithFeeV1` emit **one `Swapped` event per executed leg** —
+up to 6 of them for a single call (see above). This means `(txHash)` is no longer a
+unique key for "one swap" the way it is for the single-venue entrypoints: an indexer
+that assumed one `Swapped` per transaction must key on `(txHash, logIndex)` instead. The
+`Swapped` event's ABI is unchanged; only how many of them a single transaction can emit.
 
 ## Prerequisites
 
@@ -113,23 +217,29 @@ forge clean && forge script scripts/Deploy.s.sol \
 
 ### Quoting with Titan state overrides
 
-The proprietary AMMs maintain off-chain liquidity that is not reflected by mainnet state, so a plain `eth_call` to `PropAMMRouter.quoteV1` against the anvil fork only sees stale liquidity. To get accurate quotes, Titan exposes the JSON-RPC method `titan_getPammStateOverrides`, whose result is passed as the third parameter of `eth_call`.
-The Titan endpoint only serves `titan_getPammStateOverrides`. The `eth_call` itself is sent to the anvil fork.
+The proprietary AMMs maintain off-chain liquidity that is not reflected by mainnet state, so a plain `eth_call` to `PropAMMRouter.quoteV1` against the anvil fork only sees stale liquidity. To get accurate quotes, Titan exposes the JSON-RPC method `titan_getPammVenues` on `https://eu.data.titanbuilder.xyz/data`, whose state overrides are passed as the third parameter of `eth_call`, together with the block number and time they target as the fourth (block overrides).
+The Titan endpoint only serves the overrides. The `eth_call` itself is sent to the anvil fork.
 
-The response is keyed by proprietary AMM router address, with one entry per venue:
+The response carries one entry per maker quote address:
 
 ```json
 {
   "result": {
-    "blockNumber": "0x...",
-    "0x5979458912f80b96d30d4220af8e2e4925a33320": { "stateOverride": { ... } },
-    "0xb09aaa5614916d7aeb59c295c52c92ca82addd76": { "stateOverride": { ... } },
-    "0x71e790dd841c8a9061487cb3e78c288e75ce0b3d": { "stateOverride": { ... } }
+    "venues": [
+      {
+        "maker": "Metric",
+        "quoteAddress": "0xe844701934d9c6085b292e428f41b911cc0b3872",
+        "pricedAddresses": ["0xe844701934d9c6085b292e428f41b911cc0b3872", "0x99ab7c1c5eab47801f7937075998527a550fba8a", "..."],
+        "slot": 15445995,
+        "blockNumber": 26206948,
+        "stateOverride": { ... }
+      }
+    ]
   }
 }
 ```
 
-The keys are propAMM router addresses — above, FermiSwap, Bebop, and Kipseli respectively. A snapshot only carries the venues Titan has fresh state for, so the set of keys varies between calls. When calling `quoteVenueV1(venue, ...)`, pick the entry matching the venue address you want to quote. Kipseli additionally requires the router to hold `tokenIn`, since `simulateKipseliSwap` transfers it to Kipseli; we fund it with a `stateDiff` over the token contract's `_balances` slot for the router. The other venues ignore the balance override, so the same snippet works for every proprietary venue (only the venue address needs to change). For the Uniswap V3 fallback (naming the SwapRouter02 address) the Titan overrides aren't needed at all — QuoterV2 only reads on-chain pool state — so you can skip the `titan_getPammStateOverrides` call entirely and pass an empty state override (or omit the third `eth_call` parameter).
+A snapshot only carries the venues Titan has fresh state for, so the set of entries varies between calls. A maker's quote address is not always its router venue (Kipseli publishes under `0xc9a956b5…`, Metric under two addresses, and Metric's venue only quotes with both), so the example below merges every entry's `stateOverride` (a deep merge: two makers can write to the same contract), which serves any venue. `blockNumber` is the block Titan is building, and venues check `block.timestamp` against the state they published, so the call pins both: the time is the slot's, `1606824023 + 12 * slot`. Kipseli additionally requires the router to hold `tokenIn`, since `simulateKipseliSwap` transfers it to Kipseli; we fund it with a `stateDiff` over the token contract's `_balances` slot for the router. The other venues ignore the balance override, so the same snippet works for every proprietary venue (only the venue address needs to change). For the Uniswap V3 fallback (naming the SwapRouter02 address) the Titan overrides aren't needed at all — QuoterV2 only reads on-chain pool state — so you can skip the `titan_getPammVenues` call entirely and pass an empty state override (or omit the third and fourth `eth_call` parameters).
 
 **Example: quote 1 WETH for USDC against the deployed router on the anvil fork.**
 
@@ -148,15 +258,19 @@ VENUE_ADDR=0x71e790dd841c8a9061487cb3e78c288e75ce0b3d    # Kipseli
 # balanceOf[ROUTER] lives at keccak256(abi.encode(ROUTER, 3)).
 WETH_BAL_SLOT=$(cast index address $ROUTER 3)
 
-# 1. Fetch the venue's Titan overrides and fund the router with 10 WETH.
+# 1. Fetch Titan's overrides, merge every maker's entry, and fund the router with
+#    10 WETH; then pin the block number and time they target.
 #    (Skip this step for the Uniswap V3 fallback — QuoterV2 only needs on-chain state.)
-OVERRIDES=$(curl -s -X POST https://eu.data.titanbuilder.xyz \
+TITAN=$(curl -s -X POST https://eu.data.titanbuilder.xyz/data \
     -H "Content-Type: application/json" \
-    -d '{"jsonrpc":"2.0","id":1,"method":"titan_getPammStateOverrides","params":[]}' \
-    | jq -c --arg pamm "$VENUE_ADDR" --arg weth "$WETH" --arg slot "$WETH_BAL_SLOT" '
-          .result[$pamm].stateOverride
-        + { ($weth): { stateDiff: { ($slot): "0x0000000000000000000000000000000000000000000000008ac7230489e80000" } } }
-      ')
+    -d '{"jsonrpc":"2.0","id":1,"method":"titan_getPammVenues","params":[]}')
+OVERRIDES=$(echo "$TITAN" | jq -c --arg weth "$WETH" --arg slot "$WETH_BAL_SLOT" '
+      reduce .result.venues[].stateOverride as $o ({}; . * $o)
+    * { ($weth): { stateDiff: { ($slot): "0x0000000000000000000000000000000000000000000000008ac7230489e80000" } } }
+  ')
+NUMBER=$(echo "$TITAN" | jq '.result.venues | max_by(.slot) | .blockNumber')
+SLOT=$(echo "$TITAN" | jq '.result.venues | max_by(.slot) | .slot')
+BLOCK="{\"number\":\"$(cast to-hex $NUMBER)\",\"time\":\"$(cast to-hex $((1606824023 + 12 * SLOT)))\"}"
 
 # 2. eth_call PropAMMRouter.quoteVenueV1(venue, WETH, USDC, 1e18) with the overrides.
 #    The Uniswap V3 fallback always prices at the configured `fallbackFee` tier
@@ -164,7 +278,7 @@ OVERRIDES=$(curl -s -X POST https://eu.data.titanbuilder.xyz \
 DATA=$(cast calldata "quoteVenueV1(address,address,address,uint256)" $VENUE_ADDR $WETH $USDC 1000000000000000000)
 
 curl -s -X POST $RPC_URL -H "Content-Type: application/json" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"$ROUTER\",\"data\":\"$DATA\"},\"latest\",$OVERRIDES]}" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"$ROUTER\",\"data\":\"$DATA\"},\"latest\",$OVERRIDES,$BLOCK]}" \
     | jq -r .result \
     | xargs cast --abi-decode "f()(uint256)"
 ```
@@ -176,11 +290,15 @@ This prints `amountOut`, e.g. `2115659878` (≈ 2115.66 USDC for 1 WETH, with US
 | Uniswap V3 fallback (SwapRouter02) | `0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45` — skip the Titan call |
 | FermiSwap | `0x5979458912f80b96d30d4220af8e2e4925a33320` |
 | Kipseli | `0x71e790dd841c8a9061487cb3e78c288e75ce0b3d` |
-| Bebop | `0xB09AaA5614916d7AEb59C295C52c92ca82aDdD76` |
+| Bebop | `0xB09AAA8933626d7E4C48D65dAd2D77021CFBCA9a` |
 | Tempest | `0x00000003f1ec2379e79F58E12EC6C4F51Ee92149` |
-| TaurusFi | `0x217d58931A8549ca539426AA8152E33dAfc3d95A` |
-| Metric | `0xE715Dc29d2c273D0FC5A03e5Cca9CcB0Abb1dCDB` |
+| TaurusFi | `0x20861433D9119B866EEB398cb1ad46652A3cF953` |
+| Metric | `0x99Ab7c1C5eab47801F7937075998527a550fbA8a` |
 | El Zorro | `0xCF211B4dD0D2be5C173Ea57Bcf938FC61d1d3bd3` |
+| Stelaxis | `0x77047Af6CD8f7f84d96A020a2833d24916b75FDE` |
+| Goliath | `0x4367985A63063fc970b009c6E599e9225181f551` |
+| Kaliber | `0xb8D4E06E3038B07B4376ba3020EABCE69F673463` |
+| Wilbrr | `0x6E27bB694393840e253262361B79187d4899e9CF` |
 
 ### Pausing the contract
 

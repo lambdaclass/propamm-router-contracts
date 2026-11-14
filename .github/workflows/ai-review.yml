@@ -1,0 +1,84 @@
+name: AI Code Review
+
+# Six reviewers from lambdaclass/actions (its README lists their inputs), each posting its
+# review as a PR comment. They run when a PR is opened or marked ready for review (the reviewers
+# skip drafts and Dependabot PRs themselves), and again on a PR comment starting with /review from
+# someone with write access. Comment-triggered runs use this file as it is on main, so the command
+# works once it is merged.
+#
+# Secrets, on the repository or the organization: ANTHROPIC_API_KEY, OPENAI_API_KEY,
+# DEEPSEEK_API_KEY, GEMINI_API_KEY, XAI_API_KEY, KIMI_API_KEY. A reviewer with no key fails on
+# every run, so none of these jobs should be a required check.
+#
+# The review focus is .github/prompts/ai-review.md, read from the PR's base branch so that a PR
+# cannot rewrite the prompt that reviews it.
+
+on:
+  pull_request:
+    types: [opened, ready_for_review]
+  issue_comment:
+    types: [created]
+
+# No concurrency group, unlike ci.yml: a cancelled review posts a "did not complete" comment, so
+# cancel-in-progress would leave one on the PR for every superseded run.
+
+# A reusable workflow gets at most the token permissions its caller job grants, so each job grants
+# exactly what its reviewer declares rather than relying on the repository's default.
+#
+# Each reviewer also answers its own command (/claude, /codex, /deepseek, /gemini, /grok, /kimi);
+# the `if` on each job narrows comments to /review. The reviewer checks the commenter's write access
+# itself.
+jobs:
+  claude:
+    if: github.event_name == 'pull_request' || (github.event.issue.pull_request && startsWith(github.event.comment.body, '/review'))
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: lambdaclass/actions/.github/workflows/ai-review-claude.yml@v1
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+  codex:
+    if: github.event_name == 'pull_request' || (github.event.issue.pull_request && startsWith(github.event.comment.body, '/review'))
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: lambdaclass/actions/.github/workflows/ai-review-codex.yml@v1
+    secrets:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+  deepseek:
+    if: github.event_name == 'pull_request' || (github.event.issue.pull_request && startsWith(github.event.comment.body, '/review'))
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: lambdaclass/actions/.github/workflows/ai-review-deepseek.yml@v1
+    secrets:
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+
+  gemini:
+    if: github.event_name == 'pull_request' || (github.event.issue.pull_request && startsWith(github.event.comment.body, '/review'))
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: lambdaclass/actions/.github/workflows/ai-review-gemini.yml@v1
+    secrets:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+  grok:
+    if: github.event_name == 'pull_request' || (github.event.issue.pull_request && startsWith(github.event.comment.body, '/review'))
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: lambdaclass/actions/.github/workflows/ai-review-grok.yml@v1
+    secrets:
+      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+
+  kimi:
+    if: github.event_name == 'pull_request' || (github.event.issue.pull_request && startsWith(github.event.comment.body, '/review'))
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: lambdaclass/actions/.github/workflows/ai-review-kimi.yml@v1
+    secrets:
+      KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}

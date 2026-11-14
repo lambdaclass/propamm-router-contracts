@@ -62,9 +62,7 @@ console.log(
   `\n${venueName(pamm)} order book: ${tokenInfo(pair.tokenIn).symbol} -> ${tokenInfo(pair.tokenOut).symbol}`,
 );
 for (const level of pair.orderBook) {
-  console.log(
-    `  ${fmt(level.amountIn, pair.tokenIn)} -> ${fmt(level.amountOut, pair.tokenOut)}  [${level.variant}]`,
-  );
+  console.log(`  ${fmt(level.amountIn, pair.tokenIn)} -> ${fmt(level.amountOut, pair.tokenOut)}`);
 }
 
 // 2. Quote helpers, for that pair and a mid-ladder size. `getQuote` returns the

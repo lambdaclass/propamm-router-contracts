@@ -11,7 +11,7 @@ use propamm::prices::{PriceLevels, PriceLevelsWsSource, PriceLevelsWsSourceConfi
 use std::sync::Arc;
 
 let source = PriceLevelsWsSource::new(PriceLevelsWsSourceConfig {
-    url: "wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels".into(),
+    url: "wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels_v2".into(),
     ..Default::default()
 });
 let prices = PriceLevels::with_source(Arc::new(source));
@@ -34,6 +34,16 @@ impl Default for PriceLevelsWsSource
 ```
 
 Equivalent to `new(PriceLevelsWsSourceConfig::default())`.
+
+### PriceLevelsWsSource::with_decimals()
+
+```rust
+pub fn with_decimals(self, decimals: HashMap<Address, u8>) -> Self
+```
+
+Decimals of tokens missing from `TOKEN_DECIMALS`, by token address (an entry
+also overrides the built-in value). Titan's v2 feed sends amounts in human
+units, so a book quoting a token without known decimals is skipped.
 
 ## Methods
 
@@ -70,7 +80,7 @@ pub struct PriceLevelsWsSourceConfig {
 
 ### url
 
-- **Default:** `wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels`
+- **Default:** `wss://eu.data.titanbuilder.xyz/ws/pamm_price_levels_v2`
 
 Stream endpoint. The stream is served from regional hosts (`eu.`, `ap.`,
 `us.`); pick the nearest.

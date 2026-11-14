@@ -1,6 +1,6 @@
 # PriceLevelsRpcSource
 
-Fetch-on-demand source for pAMM price levels: one `titan_getPammPriceLevels`
+Fetch-on-demand source for pAMM price levels: one `titan_getPammBooks`
 call per `getPriceLevels`. Also exposes the quote helpers directly. Simplest
 for sporadic use.
 
@@ -15,7 +15,7 @@ import { PriceLevels, PriceLevelsRpcSource } from "propamm/prices";
 
 // custom endpoint — snapshot and quotes both use it
 const prices = new PriceLevels({
-  source: new PriceLevelsRpcSource({ url: "https://us.data.titanbuilder.xyz" }),
+  source: new PriceLevelsRpcSource({ url: "https://us.data.titanbuilder.xyz/data" }),
 });
 ```
 
@@ -51,7 +51,7 @@ getQuoteVenue(venue: Address, tokenIn: Address, tokenOut: Address, amountIn: big
 ### url (optional)
 
 - **Type:** `string`
-- **Default:** `https://eu.data.titanbuilder.xyz`
+- **Default:** `https://eu.data.titanbuilder.xyz/data`
 
 Titan JSON-RPC endpoint. Served from regional hosts (`eu.`, `ap.`, `us.`);
 pick the nearest.
@@ -61,3 +61,12 @@ pick the nearest.
 - **Type:** `typeof fetch`
 
 Custom fetch implementation.
+
+### decimals (optional)
+
+- **Type:** `Record<string, number>`
+
+Decimals of tokens missing from `TOKEN_DECIMALS`, by token address (an entry
+also overrides the built-in value). Titan's v2 feed sends amounts in human
+units, so a book quoting a token without known decimals is skipped.
+Each value must be an integer from 0 to 255, or the constructor throws.

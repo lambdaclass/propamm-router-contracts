@@ -28,6 +28,13 @@ pub const SWAP_VIA_SELECTED_VENUES: &str =
     "swapViaSelectedVenuesV1(address[],address,address,uint256,uint256,address,uint256)";
 pub const SWAP_VIA_SELECTED_VENUES_WITH_FEE: &str = "swapViaSelectedVenuesWithFeeV1(address[],address,address,uint256,uint256,address,uint256,(uint16,address))";
 
+// Split swaps. Same arguments as `swapV1` / `swapWithFeeV1`: the router plans
+// the split on-chain, so the caller names no venues and gets back only the
+// total `amountOut` (a split has no single executing venue to report).
+pub const SWAP_SPLIT: &str = "swapSplitV1(address,address,uint256,uint256,address,uint256)";
+pub const SWAP_SPLIT_WITH_FEE: &str =
+    "swapSplitWithFeeV1(address,address,uint256,uint256,address,uint256,(uint16,address))";
+
 // Quotes — nonpayable (not view) on-chain; call off-chain via simulation.
 pub const QUOTE: &str = "quoteV1(address,address,uint256)";
 pub const QUOTE_VENUE: &str = "quoteVenueV1(address,address,address,uint256)";
@@ -44,6 +51,14 @@ pub const GET_WHITELISTED_VENUES: &str = "getWhitelistedVenues()";
 pub const WHITELISTED_VENUE_COUNT: &str = "whitelistedVenueCount()";
 pub const WHITELISTED_VENUE_AT: &str = "whitelistedVenueAt(uint256)";
 pub const PAUSED: &str = "paused()";
+/// False once the whitelist outgrows `MAX_SPLIT_VENUES`, i.e. once the split
+/// entrypoints would revert `TooManyVenues`. Check before listing a venue.
+pub const IS_SPLIT_AVAILABLE: &str = "isSplitAvailable()";
+/// Maximum propAMM legs a planned split may place (the Uniswap remainder is
+/// exempt, so a split executes at most `MAX_LEGS + 1`).
+pub const MAX_LEGS: &str = "MAX_LEGS()";
+/// Largest whitelist the split entrypoints can plan over.
+pub const MAX_SPLIT_VENUES: &str = "MAX_SPLIT_VENUES()";
 pub const AUTHORITY: &str = "authority()";
 
 // Administration (access-controlled via the AccessManager authority).
@@ -84,6 +99,8 @@ pub const FUNCTIONS: &[&str] = &[
     SWAP_VIA_VENUE_WITH_FEE,
     SWAP_VIA_SELECTED_VENUES,
     SWAP_VIA_SELECTED_VENUES_WITH_FEE,
+    SWAP_SPLIT,
+    SWAP_SPLIT_WITH_FEE,
     QUOTE,
     QUOTE_VENUE,
     QUOTE_SELECTED_VENUES,
@@ -98,6 +115,9 @@ pub const FUNCTIONS: &[&str] = &[
     WHITELISTED_VENUE_AT,
     PAUSED,
     AUTHORITY,
+    IS_SPLIT_AVAILABLE,
+    MAX_LEGS,
+    MAX_SPLIT_VENUES,
     SET_FALLBACK_SWAP_ROUTER,
     SET_FALLBACK_QUOTER,
     SET_FALLBACK_FEE,
@@ -142,6 +162,12 @@ const ERROR_SIGNATURES: &[&str] = &[
     "IdenticalTokens()",
     "FeeBpsTooHigh(uint16,uint16)",
     "EnforcedPause()",
+    // Split-only (`swapSplitV1` / `swapSplitWithFeeV1`).
+    "ZeroAmount()",
+    "AmountTooLarge(uint256)",
+    "TooManyVenues(uint256)",
+    "QuoteBalanceInvariantViolated()",
+    "SplitAllocationMismatch(uint256,uint256)",
 ];
 
 /// keccak topic0 of an event signature.
@@ -370,6 +396,7 @@ mod tests {
     const OMITTED_FUNCTIONS: &[&str] = &[
         "_dispatchVenue(address,address,address,uint256,uint256,address,address,uint256,uint256)",
         "_quoteVenueUnchecked(address,address,address,uint256)",
+        "_quoteFillableUnchecked(address,address,address,uint256)",
         "initialize(address,address,address)",
         "proxiableUUID()",
         "upgradeToAndCall(address,bytes)",
