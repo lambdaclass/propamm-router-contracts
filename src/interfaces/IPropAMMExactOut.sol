@@ -49,8 +49,7 @@ interface IPropAMMExactOut is IPropAMM, IERC165 {
     ///    delivering `amountOut` would require more;
     ///  - MUST refund any unspent `tokenIn` (`amountInMax - amountIn`) to
     ///    `refundRecipient`.
-    /// SHALL revert if the pair is inactive. The `deadline` can safely be
-    /// ignored when coming from the Router, since it already does the check.
+    /// SHALL revert if the pair is inactive.
     /// @param tokenIn The address of the token being sold.
     /// @param tokenOut The address of the token being bought.
     /// @param amountOut The exact amount of `tokenOut` to deliver to `recipient`.
@@ -59,6 +58,12 @@ interface IPropAMMExactOut is IPropAMM, IERC165 {
     /// @param recipient The address that will receive `tokenOut`.
     /// @param refundRecipient The address to refund the unspent `tokenIn` to.
     /// @param deadline Unix timestamp after which the swap is no longer valid.
+    /// When the call comes from the Router it has already been enforced
+    /// against `block.timestamp`, so it can safely be ignored in that case.
+    /// On chains with sub-second blocks (e.g. BNB Chain, ~450ms per block) a
+    /// one-second timestamp spans several blocks, so a propAMM that needs
+    /// block-level freshness SHOULD enforce its own block-number based guard
+    /// rather than rely on `deadline`.
     /// @return amountIn The amount of `tokenIn` actually consumed by the swap.
     function swapExactOut(
         address tokenIn,
