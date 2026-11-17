@@ -2,6 +2,15 @@
 
 All notable changes to the Python SDK (`propamm`) are documented here.
 
+## [1.11.0] - 2026-11-17
+
+### Changed
+
+- **`FERMI` (and `PAMMS`'s `fermi` entry) now points at
+  `0xF6d5b2FefeC7B420d9990b95790ADFD3D4c4F977`**, Fermi's upgraded contract.
+  The previous address was `0x5979458912F80B96d30D4220af8E2e4925A33320`. Code
+  that hardcoded the old address must be updated.
+
 ## [1.10.0] - 2026-11-05
 
 ### Added

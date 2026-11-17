@@ -67,7 +67,7 @@ ROUTER_FNS = {
 }
 
 VENUE_NAMES = {
-    "0x5979458912f80b96d30d4220af8e2e4925a33320": "Fermi",
+    "0xf6d5b2fefec7b420d9990b95790adfd3d4c4f977": "Fermi",
     "0x71e790dd841c8a9061487cb3e78c288e75ce0b3d": "Kipseli",
     "0xb09aaa5614916d7aeb59c295c52c92ca82addd76": "Bebop",
     "0x00000003f1ec2379e79f58e12ec6c4f51ee92149": "Tempest",
