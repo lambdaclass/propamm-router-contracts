@@ -8,7 +8,7 @@ The Prop AMM router contract is deployed on mainnet at `0x4ddf368080cd7946db5b45
 
 The PropAMMs the router interacts with are deployed at:
 - Bebop: `0xB09AAA8933626d7E4C48D65dAd2D77021CFBCA9a`
-- Fermi: `0x5979458912f80b96d30d4220af8e2e4925a33320`
+- Fermi: `0xf6d5b2fefec7b420d9990b95790adfd3d4c4f977`
 - Kipseli: `0x71e790dd841c8a9061487cb3e78c288e75ce0b3d`
 - Tempest: `0x00000003f1ec2379e79F58E12EC6C4F51Ee92149`
 - TaurusFi: `0x20861433D9119B866EEB398cb1ad46652A3cF953`
@@ -288,7 +288,7 @@ This prints `amountOut`, e.g. `2115659878` (≈ 2115.66 USDC for 1 WETH, with US
 | Venue | `VENUE_ADDR` |
 |-------|--------------|
 | Uniswap V3 fallback (SwapRouter02) | `0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45` — skip the Titan call |
-| FermiSwap | `0x5979458912f80b96d30d4220af8e2e4925a33320` |
+| FermiSwap | `0xf6d5b2fefec7b420d9990b95790adfd3d4c4f977` |
 | Kipseli | `0x71e790dd841c8a9061487cb3e78c288e75ce0b3d` |
 | Bebop | `0xB09AAA8933626d7E4C48D65dAd2D77021CFBCA9a` |
 | Tempest | `0x00000003f1ec2379e79F58E12EC6C4F51Ee92149` |

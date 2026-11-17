@@ -19,7 +19,7 @@ from pathlib import Path
 NAMES = {
     "0x4ddf368080cd7946db5b459ad591c350158175e1": "PropAMMRouterProxy",
     "0x0ece81ca058e945f753fb6ff5ea09348760d1ac1": "PropAMMRouterImpl",
-    "0x5979458912f80b96d30d4220af8e2e4925a33320": "FermiSwapWrapper",
+    "0xf6d5b2fefec7b420d9990b95790adfd3d4c4f977": "FermiSwapWrapper",
     "0x71e790dd841c8a9061487cb3e78c288e75ce0b3d": "Kipseli",
     "0xb09aaa5614916d7aeb59c295c52c92ca82addd76": "Bebop",
     "0x00000003f1ec2379e79f58e12ec6c4f51ee92149": "Tempest",

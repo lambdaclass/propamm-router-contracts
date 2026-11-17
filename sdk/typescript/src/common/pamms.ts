@@ -1,7 +1,7 @@
 import type { Address } from "viem";
 
 // PropAMM venues listed on the router whitelist via `addVenue`.
-export const FERMI: Address = "0x5979458912F80B96d30D4220af8E2e4925A33320";
+export const FERMI: Address = "0xF6d5b2FefeC7B420d9990b95790ADFD3D4c4F977";
 export const BEBOP: Address = "0xB09AAA8933626d7E4C48D65dAd2D77021CFBCA9a";
 export const KIPSELI: Address = "0x71e790dd841c8A9061487cb3E78C288E75cE0B3d";
 export const TEMPEST: Address = "0x00000003f1ec2379e79F58E12EC6C4F51Ee92149";

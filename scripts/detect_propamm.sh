@@ -27,7 +27,7 @@
 #      fallback-revert means the selector isn't there.
 #
 # The interface IDs and selectors below are derived from, and validated against,
-# the live mainnet Fermi venue 0x5979458912F80B96d30D4220af8E2e4925A33320.
+# the live mainnet Fermi venue 0xF6d5b2FefeC7B420d9990b95790ADFD3D4c4F977.
 #
 # Usage:
 #   ./scripts/detect_propamm.sh <address> [rpc_url]
@@ -37,7 +37,7 @@
 # default; override with PROBE_TOKEN_IN / PROBE_TOKEN_OUT for other chains.
 #
 # Examples:
-#   ./scripts/detect_propamm.sh 0x5979458912F80B96d30D4220af8E2e4925A33320
+#   ./scripts/detect_propamm.sh 0xF6d5b2FefeC7B420d9990b95790ADFD3D4c4F977
 #   ETH_RPC_URL=https://my-node ./scripts/detect_propamm.sh 0x28d9CCEDf1B7ac9B3F090f4F0292837dE87c1D39
 #
 # Requires: cast (Foundry). No network downloads, no pip/npm.
