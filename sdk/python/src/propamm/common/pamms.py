@@ -5,7 +5,7 @@ from __future__ import annotations
 from eth_typing import ChecksumAddress
 from eth_utils import to_checksum_address
 
-FERMI: ChecksumAddress = to_checksum_address("0x5979458912F80B96d30D4220af8E2e4925A33320")
+FERMI: ChecksumAddress = to_checksum_address("0xF6d5b2FefeC7B420d9990b95790ADFD3D4c4F977")
 BEBOP: ChecksumAddress = to_checksum_address("0xB09AAA8933626d7E4C48D65dAd2D77021CFBCA9a")
 KIPSELI: ChecksumAddress = to_checksum_address("0x71e790dd841c8A9061487cb3E78C288E75cE0B3d")
 TEMPEST: ChecksumAddress = to_checksum_address("0x00000003f1ec2379e79F58E12EC6C4F51Ee92149")

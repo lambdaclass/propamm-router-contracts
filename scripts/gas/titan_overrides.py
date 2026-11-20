@@ -79,7 +79,7 @@ META_KEYS = frozenset({"slot", "blockNumber", "block_number", "timestamp"})
 #: `sdk/python/src/propamm/common/pamms.py`; Titan serves other pAMMs too, and
 #: those are carried through the snapshot but are not router venues.
 WHITELIST_VENUES: dict[str, str] = {
-    "fermi": "0x5979458912F80B96d30D4220af8E2e4925A33320",
+    "fermi": "0xF6d5b2FefeC7B420d9990b95790ADFD3D4c4F977",
     "bebop": "0xB09AAA8933626d7E4C48D65dAd2D77021CFBCA9a",
     "kipseli": "0x71e790dd841c8A9061487cb3E78C288E75cE0B3d",
     "tempest": "0x00000003f1ec2379e79F58E12EC6C4F51Ee92149",
