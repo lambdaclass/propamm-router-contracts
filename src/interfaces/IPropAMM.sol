@@ -73,8 +73,12 @@ interface IPropAMM {
     /// @param minAmountOut The minimum acceptable amount of `tokenOut`.
     /// @param recipient The address that will receive `tokenOut`.
     /// @param deadline Unix timestamp after which the swap is no longer valid.
-    /// This value can safely be ignored if coming from the Router, since it
-    /// already does the check.
+    /// The Router enforces it against `block.timestamp` before calling the
+    /// propAMM, so it can safely be ignored when coming from the Router.
+    /// On chains with sub-second blocks (e.g. BNB Chain, ~450ms per block) a
+    /// one-second timestamp spans several blocks, so a propAMM that needs
+    /// block-level freshness SHOULD enforce its own block-number based guard
+    /// rather than rely on `deadline`.
     /// @return amountOut The amount of `tokenOut` received by `recipient`.
     function swap(
         address tokenIn,
