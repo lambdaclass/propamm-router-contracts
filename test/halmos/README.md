@@ -10,7 +10,7 @@ input and every behaviour of the venues, within stated bounds.
 uv tool install halmos==0.3.3              # once; needs Python >= 3.11
 
 FOUNDRY_PROFILE=halmos halmos              # all checks, incl. the slow two-venue one
-FOUNDRY_PROFILE=halmos halmos --function check_noRegretCertificate_oneVenue
+FOUNDRY_PROFILE=halmos halmos --function check_noRegretCertificate_one   # what CI runs
 
 python3 test/halmos/no_regret_lemma.py     # the arithmetic half; needs z3-solver
 ```
@@ -61,19 +61,24 @@ chain of products that bit-vector solvers cannot close (Yices times out at
 
 The certificate is stated in the same terms on both sides; keep them in sync.
 
-**Bounds.** The Halmos half is **verified with one whitelisted venue**
-(3,123 paths, about 4 minutes locally), with arbitrary amounts up to
-`uint128` and arbitrary venue quotes and deliveries. The two-venue check
-(`check_noRegretCertificate_twoVenues`) exists but does **not** finish: it ran
-out a 2-hour limit with no result, so CI skips it. The lemma holds for any
-number of legs up to `MAX_LEGS`.
+**Bounds.** The Halmos half is **verified with one whitelisted venue**, on
+both of the router's pricing paths, with arbitrary amounts up to `uint128`
+and arbitrary venue quotes and deliveries:
+
+| Check | Pricing path | Result (local) |
+|---|---|---|
+| `check_noRegretCertificate_oneVenue` | blind two-point probe, incl. `_probeDownToFillable` (`mocks/SymVenue.sol`) | PASS, ~3,000 paths, ~4 min |
+| `check_noRegretCertificate_oneFillableVenue` | `IPropAMMFillable.quoteFillable` (`mocks/SymFillableVenue.sol`) | PASS, ~190 paths, ~17 s |
+| `check_noRegretCertificate_twoVenues` | blind probe, two venues | does **not** finish (2-hour limit, no result); not in CI |
+
+The lemma holds for any number of legs up to `MAX_LEGS`.
 
 **Mutation-tested.** The checks fail when the code is broken in the ways they
 are meant to catch:
 
 | Mutation | Caught by |
 |---|---|
-| `_waterfall` gate removed (every candidate placed) | Halmos certificate (C1) |
+| `_waterfall` gate removed (every candidate placed) | Halmos certificate (C1), on both pricing paths |
 | Refined reference quoted at twice the remainder (`s > amountIn`) | Halmos certificate (C1) |
 | Full-leg `proRataMin` one wei short | Halmos certificate (C1) |
 | Lemma without `s <= amountIn` | Z3 lemma A |

@@ -9,6 +9,7 @@ import {PropAMMRouter} from "../../src/PropAMMRouter.sol";
 import {MockERC20} from "../mocks/MockERC20.sol";
 import {SymUniswap} from "./mocks/SymUniswap.sol";
 import {SymVenue} from "./mocks/SymVenue.sol";
+import {SymFillableVenue} from "./mocks/SymFillableVenue.sol";
 
 /// @title No-regret property of `swapSplitV1`: the code half
 /// @notice The property: a split never delivers less than sending the whole
@@ -74,20 +75,26 @@ contract SplitNoRegretHalmos is Test, SymTest {
         router = PropAMMRouter(payable(address(new ERC1967Proxy(address(impl), initData))));
     }
 
+    /// @dev One venue priced through the blind two-point probe.
     function check_noRegretCertificate_oneVenue(uint256 amountIn) public {
-        _checkCertificate(1, amountIn);
+        _checkCertificate(1, false, amountIn);
+    }
+
+    /// @dev One venue priced through `IPropAMMFillable.quoteFillable`.
+    function check_noRegretCertificate_oneFillableVenue(uint256 amountIn) public {
+        _checkCertificate(1, true, amountIn);
     }
 
     /// @dev Does NOT close yet: killed by a 2-hour limit with no result
     /// (Yices, Halmos 0.3.3, Apple Silicon). Kept for a stronger solver or a
     /// longer budget; CI runs only the one-venue check.
     function check_noRegretCertificate_twoVenues(uint256 amountIn) public {
-        _checkCertificate(2, amountIn);
+        _checkCertificate(2, false, amountIn);
     }
 
-    function _checkCertificate(uint256 nVenues, uint256 a) internal {
+    function _checkCertificate(uint256 nVenues, bool fillable, uint256 a) internal {
         for (uint256 i = 0; i < nVenues; i++) {
-            venues.push(new SymVenue());
+            venues.push(fillable ? new SymFillableVenue() : new SymVenue());
             router.addVenue(address(venues[i]));
         }
 

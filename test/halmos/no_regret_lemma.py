@@ -31,7 +31,7 @@ The lemma is proven in three pieces so each solver query stays small:
 
 import sys
 
-from z3 import And, If, Implies, Int, Ints, Not, Solver, Sum, unsat
+from z3 import And, If, Implies, Int, Ints, Not, Solver, Sum, sat, unsat
 
 MAX_LEGS = 5
 
@@ -42,9 +42,8 @@ def leg_vars(i):
 
 def avg_rate_non_increasing(x, ux, y, uy):
     """THE assumption on Uniswap, between sizes x and y: the average rate
-    U(x)/x never improves with size. Exactly what the Halmos check assumes
-    over its sampled points, in both directions, so it is never stronger
-    here than there."""
+    U(x)/x never improves with size. Assumed HERE only: the Halmos half makes
+    no assumption about Uniswap's prices beyond (a) and (c)."""
     return And(Implies(x <= y, ux * y >= uy * x), Implies(y <= x, uy * x >= ux * y))
 
 
@@ -71,7 +70,7 @@ def prove(name, hypotheses, goal):
     result = solver.check()
     ok = result == unsat
     print(f"{'PASS' if ok else 'FAIL'}  {name}  ({result})")
-    if not ok and result != "unknown":
+    if result == sat:
         print("  counterexample:", solver.model())
     return ok
 
@@ -131,7 +130,7 @@ def Or01(x):
 
 
 def main():
-    ok = lemma_a() and lemma_b()
+    ok = all([lemma_a(), lemma_b()])  # run both, so every result prints
     for k in range(MAX_LEGS + 1):
         ok = lemma_c(k) and ok
     sys.exit(0 if ok else 1)

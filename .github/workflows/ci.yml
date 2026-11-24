@@ -42,9 +42,6 @@ jobs:
     name: Contracts (Halmos symbolic checks)
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    # Non-blocking until runtimes on hosted runners are known; flip to
-    # blocking once they are stable. See test/halmos/README.md.
-    continue-on-error: true
 
     steps:
       - uses: actions/checkout@v4
@@ -64,11 +61,23 @@ jobs:
       - name: No-regret lemma (Z3)
         run: "$(uv tool dir)/halmos/bin/python test/halmos/no_regret_lemma.py"
 
-      # One venue only: the two-venue check does not finish in 2 hours.
+      # One venue, on both pricing paths (blind probe and IPropAMMFillable):
+      # the two-venue check does not finish in 2 hours.
+      # Non-blocking until runtimes on hosted runners are known (the lemma
+      # step above IS blocking). Halmos exits 0 on a run that hit the loop
+      # bound, found only unknown counterexamples, or reverted on every path,
+      # none of which is a proof, so those warnings fail the step.
       - name: Halmos
+        continue-on-error: true
         env:
           FOUNDRY_PROFILE: halmos
-        run: halmos --function check_noRegretCertificate_oneVenue
+        run: |
+          set -o pipefail
+          halmos --function check_noRegretCertificate_one 2>&1 | tee halmos.log
+          if grep -E 'warnings#(loop-bound|counterexample-unknown|revert-all|internal-error)' halmos.log; then
+            echo "::error::Halmos run is not a complete proof (see warnings above)"
+            exit 1
+          fi
 
   sdk:
     name: SDK (typecheck / lint / format)

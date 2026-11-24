@@ -10,7 +10,7 @@ import {MockERC20} from "../../mocks/MockERC20.sol";
 /// symbolic value, unrelated to any other quote, so the venue's prices can be
 /// linear, saturating, inconsistent or absurd. Every swap delivers a fresh
 /// symbolic amount, whatever it quoted. A property proven against this mock
-/// holds for every venue.
+/// holds for every venue priced through the blind probe (see below).
 /// @dev Records what happened so a check can state facts about the run:
 ///   - every quote, as (size, value);
 ///   - every swap that SURVIVED, as (input received, output delivered). A swap
@@ -18,7 +18,8 @@ import {MockERC20} from "../../mocks/MockERC20.sol";
 ///     the router's `_dispatchVenue` frame, which erases its record too — so
 ///     the records are exactly the legs that executed.
 /// No `supportsInterface`: `ERC165Checker` sees a revert, so the router prices
-/// this venue through the blind two-point probe, not `IPropAMMFillable`.
+/// this venue through the blind two-point probe, not `IPropAMMFillable`. For
+/// the fillable path, see `SymFillableVenue`.
 contract SymVenue is IPropAMM, SymTest {
     uint256[] public quoteSizes;
     uint256[] public quoteOuts;
