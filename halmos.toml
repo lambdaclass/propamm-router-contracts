@@ -1,0 +1,17 @@
+# Halmos symbolic checks live in test/halmos/ as `check_*` functions, which
+# `forge test` ignores. Run with the `halmos` Foundry profile (see
+# foundry.toml for why it exists):
+#
+#   FOUNDRY_PROFILE=halmos halmos
+#
+[global]
+forge-build-out = "out-halmos"
+match-contract = "Halmos$"
+
+# Must cover the longest loop any path runs. The router's own loops stay
+# under 16 (`_probeDownToFillable` is MAX_SATURATION_STEPS = 8), but the
+# no-regret check's witness search nests a loop over a venue's quotes (up to
+# 2 + 8) inside one over Uniswap samples, which needs more. A loop that hits
+# this bound is reported as a warning and its longer paths are NOT checked:
+# a pass that prints that warning is not a proof.
+loop = 64

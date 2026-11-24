@@ -38,6 +38,38 @@ jobs:
       - name: Run tests
         run: forge test --no-match-path '*Fork*'
 
+  halmos:
+    name: Contracts (Halmos symbolic checks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # Non-blocking until runtimes on hosted runners are known; flip to
+    # blocking once they are stable. See test/halmos/README.md.
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install Halmos
+        run: uv tool install --python 3.12 halmos==0.3.3
+
+      # The arithmetic half of the no-regret proof. z3-solver comes with Halmos.
+      - name: No-regret lemma (Z3)
+        run: "$(uv tool dir)/halmos/bin/python test/halmos/no_regret_lemma.py"
+
+      # One venue only: the two-venue check does not finish in 2 hours.
+      - name: Halmos
+        env:
+          FOUNDRY_PROFILE: halmos
+        run: halmos --function check_noRegretCertificate_oneVenue
+
   sdk:
     name: SDK (typecheck / lint / format)
     runs-on: ubuntu-latest
