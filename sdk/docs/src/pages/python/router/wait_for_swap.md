@@ -1,7 +1,8 @@
 # wait_for_swap
 
 Wait until a swap transaction is mined and decode its outcome from the
-router's `Swapped` (and, when present, `FrontendFeeCharged`) events.
+router's swap event (`Swapped`, `SwappedViaVenue` or `SwappedViaSelectedVenues`,
+by entrypoint) and, when present, `FrontendFeeCharged`.
 
 ```python
 async def wait_for_swap(self, tx_hash: str) -> SwapResult
@@ -20,7 +21,7 @@ await router.wait_for_swap(tx_hash)
 
 The decoded swap outcome.
 
-Raises if the transaction reverted or emitted no `Swapped` event.
+Raises if the transaction reverted or emitted no swap event.
 
 ## Parameters
 

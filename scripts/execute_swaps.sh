@@ -290,8 +290,14 @@ BUILD_QUASAR=0
 BUILD_BNET=0
 BUILD_OTHER=0                           # other / unknown builder
 
-# `Swapped` event topic0, used to find the right log in each receipt.
-SWAPPED_SIG="Swapped(address,address,address,uint256,uint256,address,address)"
+# Swap event topic0, used to find the right log in each receipt. The pinned
+# and selected entrypoints each emit their own event; the leading data words
+# (amountIn, amountOut, recipient, marketMaker) are the same in both.
+if [[ $SELECTED_MODE -eq 1 ]]; then
+  SWAPPED_SIG="SwappedViaSelectedVenues(address,address,address,uint256,uint256,address,address,address[])"
+else
+  SWAPPED_SIG="SwappedViaVenue(address,address,address,uint256,uint256,address,address,address)"
+fi
 SWAPPED_TOPIC0=$(cast keccak "$SWAPPED_SIG")
 
 # `FrontendFeeCharged` event topic0, used to read the skimmed fee from receipts.
@@ -738,13 +744,13 @@ for (( i = 0; i < NUM_SWAPS; i++ )); do
   echo "   builder: $blabel   [${graffiti:-<no extraData tag>}]"
 
   if [[ "$data" == "-" || ${#data} -lt 42 ]]; then
-    echo "   warn   : no Swapped event found in receipt; cannot verify venue"
+    echo "   warn   : no swap event found in receipt; cannot verify venue"
     echo
     continue
   fi
 
   d="${data#0x}"
-  mm="0x${d: -40}"                       # marketMaker = last word, low 20 bytes
+  mm="0x${d:216:40}"                     # marketMaker = 4th word, low 20 bytes
   ao=$(hex2dec "0x${d:64:64}")           # amountOut = 2nd word; NET (post-fee) in withfee, full out in nofee
   ao_eth=$(cast from-wei "$ao" 2>/dev/null || echo "$ao")
   filler=$(venue_name "$mm")

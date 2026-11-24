@@ -85,7 +85,7 @@ Broadcasts `N` real swaps through the PropAMM router
 default. This is what *produces* the on-chain transactions the gas tools below read
 back. Before each swap it quotes the targeted venue on-chain (`quoteVenueV1`) and
 sets `AMOUNT_OUT_MIN` to the quote minus `SLIPPAGE_BPS` (default 0.50%); after each
-tx it decodes the `Swapped` event's `marketMaker` to report **which venue actually
+tx it decodes the swap event's `marketMaker` to report **which venue actually
 filled** (vs. silently falling back to Uniswap V3), the output received, the
 frontend-fee check, and which builder built the landing block.
 
