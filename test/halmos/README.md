@@ -9,8 +9,9 @@ input and every behaviour of the venues, within stated bounds.
 ```sh
 uv tool install halmos==0.3.3              # once; needs Python >= 3.11
 
-FOUNDRY_PROFILE=halmos halmos              # all checks, incl. the slow two-venue one
-FOUNDRY_PROFILE=halmos halmos --function check_noRegretCertificate_one   # what CI runs
+FOUNDRY_PROFILE=halmos halmos              # everything, incl. the slow checks (hours)
+FOUNDRY_PROFILE=halmos halmos --function 'check_(noRegretCertificate_one|custody_oneFillable)'   # what CI runs
+FOUNDRY_PROFILE=halmos halmos --function check_custody_oneVenue   # ~1 h, local only
 
 python3 test/halmos/no_regret_lemma.py     # the arithmetic half; needs z3-solver
 ```
@@ -83,3 +84,50 @@ are meant to catch:
 | Full-leg `proRataMin` one wei short | Halmos certificate (C1) |
 | Lemma without `s <= amountIn` | Z3 lemma A |
 | Lemma allowing more than one partial leg | Z3 lemma C |
+
+## Custody: nobody's tokens go missing
+
+**Property** (`SplitCustody.t.sol`). Venues here are hostile
+(`mocks/SymNastyVenue.sol`). On every quote and swap they try to pull either
+token out of the router, push arbitrary amounts of either token into it, keep
+or refund any part of a leg's input, and quote or deliver anything. The router
+also starts out holding arbitrary dust of both tokens. Every `swapSplitV1`
+that does not revert then ends with:
+
+| | |
+|---|---|
+| K1 | the user paid exactly `amountIn` (from a balance larger than it) |
+| K2 | the recipient received exactly the returned `amountOut`, and `amountOut >= amountOutMin` |
+| K3 | Σ executed venue-leg inputs + the Uniswap input `== amountIn` |
+| K4 | no venue pulled anything out of the router |
+| K5 | the router's balance of each token changed by exactly what venues pushed into it: it kept none of the user's tokens and lost none of its dust |
+| K6 | the router has no allowance left to any venue or to Uniswap |
+
+A call that reverts moves nothing (EVM atomicity), so it needs no check.
+Nothing is assumed about prices; `SymUniswap` pulls exactly its `amountIn`,
+like the real `SwapRouter02`.
+
+**Bounds.** One whitelisted venue. Amounts are capped (dust and user balance
+at `uint128`, venue gifts at `uint64`) only so that no mint can overflow a
+total supply, which would merely revert. Not covered: the ETH sentinel paths
+(WETH wrap/unwrap) and `swapSplitWithFeeV1`.
+
+| Check | Pricing path | Result (local) |
+|---|---|---|
+| `check_custody_oneFillableVenue` | `IPropAMMFillable.quoteFillable` | PASS, ~6,000 paths, ~6 min (in CI) |
+| `check_custody_oneVenue` | blind two-point probe | PASS, ~48,000 paths, ~1 h (local only) |
+
+**Mutation-tested** (against the fillable check):
+
+| Mutation | Caught |
+|---|---|
+| Router approves each venue for 1 wei before its swap | yes |
+| Router keeps 1 wei of the Uniswap leg's input | yes |
+| Final `delivered >= amountOutMin` check removed | yes |
+| Uniswap approved for `amountIn + 1` and the approval never reset | yes |
+| Uniswap approved for `amountIn + 1`, reset kept | no — the reset clears it, so this is not a bug |
+
+The R1 quote-phase balance check (`_planSplit`) is not exercised: a venue here
+can only take router funds through an allowance, and K4/K6 show none exists.
+R1 guards against a quote that lowers the router's balance by some other
+route, which this mock does not model.

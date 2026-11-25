@@ -61,8 +61,10 @@ jobs:
       - name: No-regret lemma (Z3)
         run: "$(uv tool dir)/halmos/bin/python test/halmos/no_regret_lemma.py"
 
-      # One venue, on both pricing paths (blind probe and IPropAMMFillable):
-      # the two-venue check does not finish in 2 hours.
+      # No-regret: one venue, on both pricing paths (blind probe and
+      # IPropAMMFillable); the two-venue check does not finish in 2 hours.
+      # Custody: the IPropAMMFillable check only; the blind-probe one takes
+      # about an hour and runs locally. See test/halmos/README.md.
       # Non-blocking until runtimes on hosted runners are known (the lemma
       # step above IS blocking). Halmos exits 0 on a run that hit the loop
       # bound, found only unknown counterexamples, or reverted on every path,
@@ -73,7 +75,7 @@ jobs:
           FOUNDRY_PROFILE: halmos
         run: |
           set -o pipefail
-          halmos --function check_noRegretCertificate_one 2>&1 | tee halmos.log
+          halmos --function 'check_(noRegretCertificate_one|custody_oneFillable)' 2>&1 | tee halmos.log
           if grep -E 'warnings#(loop-bound|counterexample-unknown|revert-all|internal-error)' halmos.log; then
             echo "::error::Halmos run is not a complete proof (see warnings above)"
             exit 1
