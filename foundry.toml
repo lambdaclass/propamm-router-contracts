@@ -20,6 +20,15 @@ remappings = [
     "@uniswap/v3-core/=lib/v3-core/",
     "@uniswap/v3-periphery/=lib/v3-periphery/",
     "@uniswap/swap-router-contracts/=lib/swap-router-contracts/",
+    "halmos-cheatcodes/=lib/halmos-cheatcodes/src/",
 ]
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
+
+# Halmos (symbolic) checks: `FOUNDRY_PROFILE=halmos halmos`. See test/halmos/.
+# Inherits everything above. `dynamic_test_linking` must be off: it compiles
+# `new Contract()` in tests into the `vm.deployCode` cheatcode, which Halmos
+# does not implement. A separate `out` keeps the two builds' caches apart.
+[profile.halmos]
+out = "out-halmos"
+dynamic_test_linking = false

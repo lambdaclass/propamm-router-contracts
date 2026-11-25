@@ -1,6 +1,7 @@
 # Foundry
 cache/
 out/
+out-halmos/
 broadcast/
 
 # Dotenv

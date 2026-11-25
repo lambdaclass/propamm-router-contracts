@@ -14,6 +14,9 @@
   "lib/forge-std": {
     "rev": "c90c02ffa470b46d92ffaab093baeb296300870b"
   },
+  "lib/halmos-cheatcodes": {
+    "rev": "6da4e692c357ba6d641a2e677a28298cac9f76ab"
+  },
   "lib/openzeppelin-contracts": {
     "rev": "cd05883078060e0cd8a7bd36636944570dbe1722"
   },
