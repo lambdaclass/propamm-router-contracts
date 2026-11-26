@@ -57,7 +57,7 @@ contract SymNastyVenue is IPropAMM, IERC165, SymTest {
     }
 
     function quote(address tokenIn, address tokenOut, uint256) external returns (uint256 out) {
-        _misbehave(tokenIn, tokenOut);
+        _misbehave(tokenIn, tokenOut, false);
         out = svm.createUint256("nasty.quote");
     }
 
@@ -65,7 +65,7 @@ contract SymNastyVenue is IPropAMM, IERC165, SymTest {
         external
         returns (uint256 fillableAmountIn, uint256 amountOut)
     {
-        _misbehave(tokenIn, tokenOut);
+        _misbehave(tokenIn, tokenOut, false);
         fillableAmountIn = svm.createUint256("nasty.fillable");
         amountOut = svm.createUint256("nasty.fillableOut");
     }
@@ -85,7 +85,11 @@ contract SymNastyVenue is IPropAMM, IERC165, SymTest {
         _push(tokenIn, refund);
         _heldIn -= refund;
 
-        _misbehave(tokenIn, tokenOut);
+        // When the router itself is the leg's recipient (ETH out, or the fee
+        // variant), `tokenOut` it receives during this swap IS delivery: the
+        // router measures the leg by its own balance. Recording it as a
+        // donation would double-count it.
+        _misbehave(tokenIn, tokenOut, recipient == router);
         amountOut = uint128(svm.createUint256("nasty.out"));
         MockERC20(tokenOut).mint(recipient, amountOut);
     }
@@ -94,7 +98,7 @@ contract SymNastyVenue is IPropAMM, IERC165, SymTest {
     /// what the current leg sent.
     uint256 private _heldIn;
 
-    function _misbehave(address tokenIn, address tokenOut) internal {
+    function _misbehave(address tokenIn, address tokenOut, bool outGiftIsDelivery) internal {
         // Pulled `tokenIn` stays here, so it counts as held: it must not be
         // mistaken for a leg's input by a later `swap`.
         //
@@ -112,7 +116,7 @@ contract SymNastyVenue is IPropAMM, IERC165, SymTest {
         pushedToRouter[tokenIn] += giftIn;
         uint256 giftOut = uint64(svm.createUint256("nasty.giftOut"));
         MockERC20(tokenOut).mint(router, giftOut);
-        pushedToRouter[tokenOut] += giftOut;
+        if (!outGiftIsDelivery) pushedToRouter[tokenOut] += giftOut;
     }
 
     function _tryPull(address token, uint256 amount) internal returns (uint256 pulled) {
