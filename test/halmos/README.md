@@ -11,7 +11,7 @@ uv tool install halmos==0.3.3              # once; needs Python >= 3.11
 
 FOUNDRY_PROFILE=halmos halmos              # everything, incl. the slow checks (hours)
 FOUNDRY_PROFILE=halmos halmos --function 'check_(noRegretCertificate_one|custody_oneFillable)'   # what CI runs
-FOUNDRY_PROFILE=halmos halmos --function check_custody_oneVenue   # ~1 h, local only
+FOUNDRY_PROFILE=halmos halmos --function 'check_custody_(oneVenue|eth|fee)'   # ~2 h, local only
 
 python3 test/halmos/no_regret_lemma.py     # the arithmetic half; needs z3-solver
 ```
@@ -87,45 +87,63 @@ are meant to catch:
 
 ## Custody: nobody's tokens go missing
 
-**Property** (`SplitCustody.t.sol`). Venues here are hostile
+**Property** (`SplitCustody.t.sol`), for `swapSplitV1` and
+`swapSplitWithFeeV1`, with ERC-20 or ETH on either side. Venues here are hostile
 (`mocks/SymNastyVenue.sol`). On every quote and swap they try to pull either
 token out of the router, push arbitrary amounts of either token into it, keep
 or refund any part of a leg's input, and quote or deliver anything. The router
-also starts out holding arbitrary dust of both tokens. Every `swapSplitV1`
+also starts out holding arbitrary dust of both tokens and of ETH. Every split
 that does not revert then ends with:
 
 | | |
 |---|---|
 | K1 | the user paid exactly `amountIn` (from a balance larger than it) |
-| K2 | the recipient received exactly the returned `amountOut`, and `amountOut >= amountOutMin` |
+| K2 | the recipient received exactly the returned `amountOut`, and `amountOut >= amountOutMin`; with a frontend fee, the fee recipient got exactly `gross * bps / 10_000` and the recipient the rest |
 | K3 | Σ executed venue-leg inputs + the Uniswap input `== amountIn` |
 | K4 | no venue pulled anything out of the router |
-| K5 | the router's balance of each token changed by exactly what venues pushed into it: it kept none of the user's tokens and lost none of its dust |
+| K5 | the router's balance of each token changed by exactly what venues pushed into it, and its ETH balance did not change: it kept none of the user's funds and lost none of its dust |
 | K6 | the router has no allowance left to any venue or to Uniswap |
 
 A call that reverts moves nothing (EVM atomicity), so it needs no check.
 Nothing is assumed about prices; `SymUniswap` pulls exactly its `amountIn`,
 like the real `SwapRouter02`.
 
-**Bounds.** One whitelisted venue. Amounts are capped (dust and user balance
-at `uint128`, venue gifts at `uint64`) only so that no mint can overflow a
-total supply, which would merely revert. Not covered: the ETH sentinel paths
-(WETH wrap/unwrap) and `swapSplitWithFeeV1`.
+**Bounds.** One whitelisted venue. Token amounts are capped (dust and user
+balance at `uint128`, venue gifts at `uint64`) only so that no mint can
+overflow a total supply, which would merely revert. ETH is capped harder,
+because Halmos errors on any ETH balance above 2^128: WETH's reserve is 2^127,
+router ETH dust < 2^64, and an ETH-paying user < 2^96 (so ETH-in orders are
+< 2^96 wei, about 7.9e10 ETH). WETH is `mocks/SymWETH.sol`, etched at the
+address the router hard-codes.
 
-| Check | Pricing path | Result (local) |
+The ETH and fee checks use the `IPropAMMFillable` venue only: the code they add
+(wrap, unwrap, fee skim) runs after pricing, so it does not depend on which
+pricing path chose the legs, and the blind probe costs ~10x more paths.
+
+| Check | Entrypoint, in -> out | Pricing path | Result (local) |
+|---|---|---|---|
+| `check_custody_oneFillableVenue` | `swapSplitV1`, ERC-20 -> ERC-20 | `quoteFillable` | PASS, ~6,000 paths, ~6 min (in CI) |
+| `check_custody_oneVenue` | `swapSplitV1`, ERC-20 -> ERC-20 | blind probe | PASS, ~48,000 paths, ~1 h |
+| `check_custody_ethIn` | `swapSplitV1`, ETH -> ERC-20 | `quoteFillable` | PASS, ~5,400 paths, ~5 min |
+| `check_custody_ethOut` | `swapSplitV1`, ERC-20 -> ETH | `quoteFillable` | PASS, ~9,100 paths, ~7 min |
+| `check_custody_fee` | `swapSplitWithFeeV1`, ERC-20 -> ERC-20 | `quoteFillable` | PASS, ~25,600 paths, ~27 min |
+| `check_custody_feeEthOut` | `swapSplitWithFeeV1`, ERC-20 -> ETH (fee paid in ETH) | `quoteFillable` | PASS, ~25,800 paths, ~22 min |
+
+Only the first runs in CI: GitHub's hosted runners take about 4x as long as a
+laptop, and the per-PR Halmos job already takes ~42 min of its 60.
+
+**Mutation-tested:**
+
+| Mutation | Check | Caught |
 |---|---|---|
-| `check_custody_oneFillableVenue` | `IPropAMMFillable.quoteFillable` | PASS, ~6,000 paths, ~6 min (in CI) |
-| `check_custody_oneVenue` | blind two-point probe | PASS, ~48,000 paths, ~1 h (local only) |
-
-**Mutation-tested** (against the fillable check):
-
-| Mutation | Caught |
-|---|---|
-| Router approves each venue for 1 wei before its swap | yes |
-| Router keeps 1 wei of the Uniswap leg's input | yes |
-| Final `delivered >= amountOutMin` check removed | yes |
-| Uniswap approved for `amountIn + 1` and the approval never reset | yes |
-| Uniswap approved for `amountIn + 1`, reset kept | no — the reset clears it, so this is not a bug |
+| Router approves each venue for 1 wei before its swap | `oneFillableVenue` | yes |
+| Router keeps 1 wei of the Uniswap leg's input | `oneFillableVenue` | yes |
+| Final `delivered >= amountOutMin` check removed | `oneFillableVenue` | yes |
+| Uniswap approved for `amountIn + 1` and the approval never reset | `oneFillableVenue` | yes |
+| Uniswap approved for `amountIn + 1`, reset kept | `oneFillableVenue` | no — the reset clears it, so this is not a bug |
+| Fee computed at `bps + 1` | `fee` | yes |
+| Recipient paid 1 wei less than the net | `fee` | yes |
+| Router unwraps 1 wei less ETH than delivered | `ethOut` | yes |
 
 The R1 quote-phase balance check (`_planSplit`) is not exercised: a venue here
 can only take router funds through an allowance, and K4/K6 show none exists.
