@@ -27,6 +27,17 @@ The lemma is proven in three pieces so each solver query stays small:
   A  full leg    (l == fill):  gate + avg-rate(s, a)  =>  d*a > ua*l
   B  partial leg (l <  fill):  gate + avg-rate(s, a)  =>  (d+1)*a > ua*l
   C  combine k legs, at most one partial, plus avg-rate(rem, a)  =>  Σd + urem >= ua
+
+Lemma D is separate: the floor-division facts behind `SplitPlanner.proRataMin`
+(`out * leg / fill`). Where the router calls it, out <= uint128.max and
+leg <= fill <= uint128.max, so `out * leg` < 2^256 never wraps and EVM `DIV`
+on it IS floor division. These facts time out in bit-vector solvers (see
+`SplitPlanner.t.sol`) but are immediate over the integers:
+
+  D  0 <= leg <= leg2 <= fill, fill > 0, out >= 0, r = floor(out*leg/fill):
+     r*fill <= out*leg  (never above the share),
+     out*leg < (r+1)*fill  (less than one wei below it),
+     r <= floor(out*leg2/fill)  (monotone in the leg)
 """
 
 import sys
@@ -129,8 +140,19 @@ def Or01(x):
     return And(x >= 0, x <= 1)
 
 
+def lemma_d():
+    out, fill, leg, leg2 = Ints("out fill leg leg2")
+    hyp = And(fill > 0, out >= 0, leg >= 0, leg <= leg2, leg2 <= fill)
+    # Z3's integer `/` is floor division for a positive divisor, matching
+    # EVM `DIV` on non-negative operands that do not overflow.
+    r = (out * leg) / fill
+    r2 = (out * leg2) / fill
+    goal = And(r * fill <= out * leg, out * leg < (r + 1) * fill, r <= r2)
+    return prove("D  proRataMin is the floor of the share, monotone", hyp, goal)
+
+
 def main():
-    ok = all([lemma_a(), lemma_b()])  # run both, so every result prints
+    ok = all([lemma_a(), lemma_b(), lemma_d()])  # run all, so every result prints
     for k in range(MAX_LEGS + 1):
         ok = lemma_c(k) and ok
     sys.exit(0 if ok else 1)

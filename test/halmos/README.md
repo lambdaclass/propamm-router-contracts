@@ -12,6 +12,7 @@ uv tool install halmos==0.3.3              # once; needs Python >= 3.11
 FOUNDRY_PROFILE=halmos halmos              # everything, incl. the slow checks (hours)
 FOUNDRY_PROFILE=halmos halmos --function 'check_(noRegretCertificate_one|custody_oneFillable)'   # what CI runs
 FOUNDRY_PROFILE=halmos halmos --function check_custody_oneVenue   # ~1 h, local only
+FOUNDRY_PROFILE=halmos halmos --contract SplitPlannerHalmos   # the planner, ~5 min
 
 python3 test/halmos/no_regret_lemma.py     # the arithmetic half; needs z3-solver
 ```
@@ -131,3 +132,76 @@ The R1 quote-phase balance check (`_planSplit`) is not exercised: a venue here
 can only take router funds through an allowance, and K4/K6 show none exists.
 R1 guards against a quote that lowers the router's balance by some other
 route, which this mock does not model.
+
+## Planner: the leg plan for many venues
+
+The router-level checks above run with one venue, because the whole router
+with two does not finish. The step where several venues interact is the
+planning: sort the candidates, then waterfall them into legs. That step is
+checked on its own (`SplitPlanner.t.sol`), on the router's real code
+(`mocks/PlannerHarness.sol` only exposes `_waterfall` and
+`SplitPlanner.sortByRateDesc`), with up to six arbitrary candidates.
+
+Candidates are what `_gatherCandidates` emits: distinct venues,
+`0 < fill <= amountIn`, `0 < out <= uint128.max`. Uniswap reference outputs
+are `<= uint128.max`, assumption (c) above.
+
+**`_waterfall`**, for any candidates in any order and any `amountIn`:
+
+| | |
+|---|---|
+| W1 | the legs spend exactly `amountIn` |
+| W2 | at most `MAX_LEGS` venue legs, then at most one Uniswap leg, last, with a positive input and `minOut == 0` |
+| W3 | venue leg i is candidate i (no candidate is skipped to place a later one), its input is in `(0, fill]`, and `minOut == proRataMin(out, fill, input)` |
+| W4 | only the last venue leg can be partial, and a partial leg leaves no Uniswap leg |
+| W5 | every venue leg beat a Uniswap reference quote taken at a size `s` in `[1, amountIn]`: `out * s > U(s) * fill` |
+
+W5 is certificate fact C1 of the no-regret proof, now for many legs.
+
+**`sortByRateDesc`** returns a permutation of its input (nothing lost,
+duplicated or altered), ordered by rate `out / fill`, highest first, with ties
+going to the larger fill. The test states this order itself instead of
+calling `SplitPlanner.betterThan`; reusing the comparator would accept a
+broken one.
+
+**`proRataMin`** is exact for a full leg (Halmos). It also rounds down, is
+less than one wei below the exact share, and is monotone in the leg size:
+lemma D in `no_regret_lemma.py`. Those three time out in the bit-vector
+solvers but close at once over the integers. The integer proof is exact
+here, because `out * leg < 2^256` wherever the router calls it, so EVM `DIV`
+is floor division.
+
+| Check | Candidates | Result (local) |
+|---|---|---|
+| `check_waterfall_shape_{1,2,3,6}` (W1–W4) | 1, 2, 3, 6 | PASS; 6 candidates: ~2,600 paths, ~1 min |
+| `check_waterfall_gate_{1,2}` (W5) | 1, 2 | PASS; 2 candidates: ~320 paths, ~80 s |
+| `check_sort_{2,3,4}` | 2, 3, 4 | PASS; 4 candidates: ~5,600 paths, ~80 s |
+| `check_proRataMin_fullLegIsQuote` | n/a | PASS |
+
+Six candidates is one more than `MAX_LEGS`, so the leg cap is reached. The
+W5 check stops at two candidates: with three, one query on products of
+symbolic prices runs past 10 minutes. Two already reach every state the gate
+can be in (the initial reference, a contested candidate that triggers the one
+refinement, a candidate placed after it). Whether leg i passed depends only on
+candidate i and the reference current at that moment. `gate_2` sets its own
+10-minute solver timeout with `@custom:halmos`; the default 60 s is too short
+for it.
+
+**Mutation-tested:**
+
+| Mutation | Caught by |
+|---|---|
+| `_waterfall` price gate removed | `gate_2` |
+| Re-check after refining the reference removed | `gate_2` |
+| Leg not clamped to the remaining input | `shape_2` |
+| Leg cap `legCount <= MAX_LEGS` (one too many) | `shape_6` |
+| A candidate that covers the rest takes only half of it and the loop goes on | `shape_2` |
+| `minOut` is the full quote even for a partial leg | `shape_2` |
+| Sort comparator reversed | `sort_3` |
+| Sort tie-break reversed | `sort_3` |
+| Sort loses an element (the key moved to the front is not written back) | `sort_3` |
+
+W3 compares `minOut` with the library's `proRataMin`, so a bug inside
+`proRataMin` itself would get past W3. Only the full-leg check runs on that
+code. Lemma D restates `out * leg / fill` by hand, and it stays valid only
+while that formula matches the library.

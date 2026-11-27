@@ -81,6 +81,42 @@ jobs:
             exit 1
           fi
 
+  # The split planner (sort, waterfall) with up to six candidates. Its own job
+  # so it runs in parallel with the router checks above instead of eating into
+  # their timeout: ~4 min locally, so roughly 15-20 min on a hosted runner.
+  halmos-planner:
+    name: Contracts (Halmos planner checks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install Halmos
+        run: uv tool install --python 3.12 halmos==0.3.3
+
+      # Non-blocking for the same reason as the router checks. A TIMEOUT is not
+      # a proof either, so it fails the step like the incomplete-run warnings.
+      - name: Halmos (planner)
+        continue-on-error: true
+        env:
+          FOUNDRY_PROFILE: halmos
+        run: |
+          set -o pipefail
+          halmos --contract SplitPlannerHalmos 2>&1 | tee halmos.log
+          if grep -E 'warnings#(loop-bound|counterexample-unknown|revert-all|internal-error)|\[TIMEOUT\]' halmos.log; then
+            echo "::error::Halmos run is not a complete proof (see above)"
+            exit 1
+          fi
+
   sdk:
     name: SDK (typecheck / lint / format)
     runs-on: ubuntu-latest
