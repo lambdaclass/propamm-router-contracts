@@ -13,6 +13,7 @@ FOUNDRY_PROFILE=halmos halmos              # everything, incl. the slow checks (
 FOUNDRY_PROFILE=halmos halmos --function 'check_(noRegretCertificate_one|custody_oneFillable)'   # what CI runs
 FOUNDRY_PROFILE=halmos halmos --function check_custody_oneVenue   # ~1 h, local only
 FOUNDRY_PROFILE=halmos halmos --contract SplitPlannerHalmos   # the planner, ~5 min
+FOUNDRY_PROFILE=halmos halmos --function 'check_execute_[123]\('   # execution, ~2 min (4: ~12 min, 5: ~2 h)
 
 python3 test/halmos/no_regret_lemma.py     # the arithmetic half; needs z3-solver
 ```
@@ -205,3 +206,58 @@ W3 compares `minOut` with the library's `proRataMin`, so a bug inside
 `proRataMin` itself would get past W3. Only the full-leg check runs on that
 code. Lemma D restates `out * leg / fill` by hand, and it stays valid only
 while that formula matches the library.
+
+## Execution: no-regret for many venues
+
+`SplitNoRegret` proves the no-regret certificate end to end with one venue
+only. The planner checks above show that the PLAN has the right shape for
+many venues. `SplitExecution.t.sol` closes the step between them: it
+**executes** such a plan, through the real `_executeLegs`, against several
+venues that each deliver an arbitrary amount, so any subset of legs can fail
+and fall back.
+
+Input is any plan of the shape `_waterfall` is proven to emit, with one venue
+leg per venue:
+- each leg is in `(0, fill]` with the pro-rata `minOut`;
+- only the last leg is partial;
+- any remainder is one Uniswap leg, and then the last venue leg is full.
+
+Every run that does not revert satisfies the certificate's execution facts:
+
+| | |
+|---|---|
+| C1 | every executed venue leg is exactly its planned leg (same input, `> 0`) and delivered at least `floor(out * l / fill)` |
+| C2 | at most one executed leg is partial |
+| C3 | the failed legs and the Uniswap leg run as ONE Uniswap swap on exactly `amountIn - Σ executed inputs`, and `amountOut == Σ deliveries + U(rem)` (or no Uniswap swap and `amountOut == Σ deliveries` when nothing remains) |
+
+The gate half of C1 (a Uniswap witness `out * s > U(s) * fill`) is a property
+of the plan, W5 above. An executed leg is exactly its planned leg, so its
+witness carries over. The checks leave the Uniswap samples out on purpose:
+every "is this size an earlier sample?" lookup forked the run, and the
+lemma needs nothing linking the witness to `U(rem)` beyond assumption (b).
+
+**Together:** the planner checks (the plan has this shape), this check (its
+execution yields the certificate) and the lemma (the certificate implies
+`amountOut >= U(amountIn)`) give no-regret for several venues. One step is
+still covered end to end with a single venue only: the glue in `_planSplit`
+that turns venue quotes into candidates (`_gatherCandidates`).
+
+| Check | Venues | Result (local) |
+|---|---|---|
+| `check_execute_{1,2,3}` | 1, 2, 3 | PASS; 3 venues: ~1,800 paths, ~95 s (in CI) |
+| `check_execute_4` | 4 | PASS, ~12,000 paths, ~12 min (local only) |
+| `check_execute_5` | 5 = `MAX_LEGS` | PASS, ~80,000 paths, ~2 h (local only, see below) |
+
+The 5-venue run explored every path. Under the default 60 s per query, 21
+queries timed out. Saved and re-run alone, all 21 were `unsat` (the slowest
+took ~4 min), so the check carries its own 10-minute query timeout
+(`@custom:halmos`).
+
+**Mutation-tested** (against `check_execute_2`):
+
+| Mutation | Caught |
+|---|---|
+| A failed leg's input is not sent to Uniswap | yes |
+| Per-leg `minOut` check removed from `_dispatchVenue` | yes |
+| Uniswap's output not added to `amountOut` | yes |
+| Uniswap swaps only half of the remainder | yes |

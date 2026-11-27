@@ -81,11 +81,12 @@ jobs:
             exit 1
           fi
 
-  # The split planner (sort, waterfall) with up to six candidates. Its own job
-  # so it runs in parallel with the router checks above instead of eating into
-  # their timeout: ~4 min locally, so roughly 15-20 min on a hosted runner.
+  # The split planner (sort, waterfall) with up to six candidates, and the
+  # execution of a plan with up to three venues. Its own job so it runs in
+  # parallel with the router checks above instead of eating into their
+  # timeout: ~6 min locally, so roughly 20-25 min on a hosted runner.
   halmos-planner:
-    name: Contracts (Halmos planner checks)
+    name: Contracts (Halmos planner and execution checks)
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -105,13 +106,13 @@ jobs:
 
       # Non-blocking for the same reason as the router checks. A TIMEOUT is not
       # a proof either, so it fails the step like the incomplete-run warnings.
-      - name: Halmos (planner)
+      - name: Halmos (planner and execution)
         continue-on-error: true
         env:
           FOUNDRY_PROFILE: halmos
         run: |
           set -o pipefail
-          halmos --contract SplitPlannerHalmos 2>&1 | tee halmos.log
+          halmos --function 'check_(sort_|waterfall_|proRataMin_|execute_[123]\()' 2>&1 | tee halmos.log
           if grep -E 'warnings#(loop-bound|counterexample-unknown|revert-all|internal-error)|\[TIMEOUT\]' halmos.log; then
             echo "::error::Halmos run is not a complete proof (see above)"
             exit 1
